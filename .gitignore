@@ -1,0 +1,11 @@
+# Regenerable CLI protocol cache used only for the Phase 0 investigation.
+.phase0-schema/
+spikes/phase0/*evidence.json
+.local/
+.superpowers/
+node_modules/
+dist/
+*.log
+.env
+.env.*
+auth.json
