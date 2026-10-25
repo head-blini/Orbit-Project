@@ -1,0 +1,15 @@
+.planning-studio { padding: 1.25rem; color: #e7edf7; background: #101827; border: 1px solid #344256; border-radius: .75rem; font: 1rem/1.5 system-ui, sans-serif; }
+.planning-studio h2, .planning-studio h3, .planning-studio h4, .planning-studio h5 { margin: .5rem 0; }
+.planning-studio p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.planning-toolbar { display: flex; flex-wrap: wrap; gap: .75rem; align-items: end; margin: 1rem 0; }
+.planning-studio label { display: flex; flex-direction: column; gap: .35rem; }
+.planning-studio button, .planning-studio select, .planning-studio textarea, .planning-studio input { font: inherit; color: inherit; background: #1b293c; border: 1px solid #73859c; border-radius: .3rem; padding: .5rem; max-width: 100%; }
+.planning-studio button { cursor: pointer; }
+.planning-studio button:disabled, .planning-studio select:disabled { opacity: .55; cursor: default; }
+.planning-studio :focus-visible { outline: 3px solid #79b8ff; outline-offset: 2px; }
+.planning-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1.5rem; }
+.planning-editor textarea { min-height: 26rem; resize: vertical; font-family: ui-monospace, monospace; }
+.planning-preview { padding: 1rem; background: #182438; border-radius: .4rem; }
+.planning-studio article { border-top: 1px solid #45556a; padding: .75rem 0; }
+.planning-studio li, .planning-studio small { white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 850px) { .planning-columns { grid-template-columns: 1fr; } }

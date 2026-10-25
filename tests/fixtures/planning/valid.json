@@ -1,0 +1,16 @@
+{
+  "schema_version": "1.0",
+  "title": "Search items",
+  "goal": "Users can find an item by its name.",
+  "requirements": [
+    {
+      "id": "REQ-01",
+      "description": "Provide a search field and show matching items.",
+      "acceptance_criteria": ["Entering a matching name shows the item.", "An unmatched name shows an empty result message."]
+    }
+  ],
+  "constraints": ["Keep the existing public API."],
+  "open_questions": ["Should search match partial names?"],
+  "decisions": [],
+  "source": { "kind": "in_app_manual", "provider_id": null, "external_url": null }
+}
