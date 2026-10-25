@@ -31,6 +31,9 @@ node scripts/verify-mcp-isolation.mjs
 # 코딩 모드의 MCP 격리 검사 (자격증명/추론 없음)
 node scripts/verify-mcp-isolation.mjs --coding
 
+# 기존 ChatGPT 인증 인식 확인 (추론·토큰 갱신 요청·인증정보 출력 없음)
+node scripts/verify-auth-environment.mjs
+
 # 실제 Codex 파일 수정 + Git Diff 검사 (새 임시 저장소, 기존 구독 사용량 발생)
 node scripts/verify-worktree.mjs
 ```
@@ -64,6 +67,8 @@ Remove-Item Env:ORBIT_ALLOWED_PROJECTS
 응답 완료는 코드 검증 성공을 뜻하지 않습니다. 이 버전에는 검증 실행기가 없으므로 모든 Run의 **검증 상태는 미검증(`not_run`)**입니다. 새 Run은 이전 Run의 검증 상태를 바꾸지 않습니다.
 
 ## 데이터와 보안 경계
+
+Codex 자식 프로세스에는 OS 실행·임시 디렉터리·기존 인증 위치 탐색·locale에 필요한 환경변수만 전달합니다. `HOME`, `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`, `CODEX_HOME` 등은 유지하고, API 키·클라우드/GitHub 토큰·알 수 없는 변수·`NODE_OPTIONS`·Git 설정·Orbit 서버 설정·프록시/endpoint/CA 재정의는 제외합니다. Windows 이름은 대소문자를 구분하지 않으며 충돌하는 별칭은 연결을 차단합니다. 인증 파일을 복사하거나 사용자 설정을 수정하지 않습니다. 사용자 지정 프록시/CA가 필요한 환경은 아직 검증하지 않았으며, 연결 실패 시 전체 환경 상속으로 우회하지 마세요. 이 제한은 파일 시스템 샌드박스를 대체하지 않습니다.
 
 - HTTP는 코드에서 **127.0.0.1에 고정 바인딩**합니다. 정확한 Host/Origin, HttpOnly SameSite=Strict 세션 쿠키, CSRF 토큰, JSON 크기 제한, CSP를 사용합니다. 인증은 외부 원격 사용자를 위한 로그인 기능이 아니며, 동일 OS 사용자에게서 서버를 격리하는 수단도 아닙니다.
 - 서버만 Codex App Server의 **stdio**를 소유합니다. 계정 응답은 ChatGPT 로그인 여부 확인에만 쓰며 이메일·토큰·인증 파일·원문 RPC·stderr를 브라우저나 앱 DB에 저장하지 않습니다.

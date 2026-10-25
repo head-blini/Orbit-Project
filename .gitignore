@@ -3,6 +3,7 @@
 spikes/phase0/*evidence.json
 .local/
 .superpowers/
+.worktrees/
 node_modules/
 dist/
 *.log

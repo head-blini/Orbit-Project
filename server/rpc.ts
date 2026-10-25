@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { EventEmitter } from 'node:events';
+import { buildChildEnv } from './child-env.ts';
 export interface RpcPort extends EventEmitter {request(method:string,params:unknown):Promise<any>;initialize():Promise<void>;close():Promise<unknown>}
 export function denyRequest(e:any):object {
   if(['item/commandExecution/requestApproval','item/fileChange/requestApproval'].includes(e.method))return {id:e.id,result:{decision:'decline'}};
@@ -13,7 +14,7 @@ export class Rpc extends EventEmitter implements RpcPort {
   private nextId=1;private buffer='';private ended=false;private closed:Promise<void>;
   constructor(command:string,args:string[],cwd:string,privateTimeout=20000){
     super();this.timeout=privateTimeout;
-    const env={...process.env};delete env.OPENAI_API_KEY;delete env.CODEX_API_KEY;
+    const env=buildChildEnv();
     this.child=spawn(command,args,{cwd,env,shell:false,windowsHide:true,stdio:['pipe','pipe','pipe']});
     this.closed=new Promise(resolve=>{
       const finish=()=>{if(this.ended)return;this.ended=true;for(const p of this.pending.values()){clearTimeout(p.timer);p.reject(new Error('TRANSPORT_CLOSED'));}this.pending.clear();this.emit('closed');resolve();};
