@@ -1,0 +1,9 @@
+{
+  "compilerOptions": {
+    "target": "ES2023", "module": "NodeNext", "moduleResolution": "NodeNext",
+    "strict": true, "noEmit": true, "allowImportingTsExtensions": true,
+    "jsx": "react-jsx", "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "esModuleInterop": true, "skipLibCheck": true, "erasableSyntaxOnly": true
+  },
+  "include": ["server/**/*.ts", "shared/**/*.ts", "web/**/*.tsx", "tests/**/*.ts"]
+}
