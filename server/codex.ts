@@ -17,4 +17,5 @@ export function findCodex():string {
 }
 export const restrictedArgs=['app-server','--listen','stdio://','-c','web_search="disabled"','-c','model_provider="openai"',
   ...['apps','plugins','hooks','browser_use','browser_use_external','computer_use','multi_agent','image_generation','shell_tool','shell_snapshot','view_image','code_mode','code_mode_host','skill_search','skill_mcp_dependency_install'].flatMap(f=>['--disable',f])];
-export function codexFactory(workspace:string){return ()=>new Rpc(findCodex(),restrictedArgs,workspace);}
+export function codexArgs(write=false){return write?restrictedArgs.flatMap((arg,i)=>arg==='--disable'&&restrictedArgs[i+1]==='code_mode_host'?['--enable']:[arg]):[...restrictedArgs];}
+export function codexFactory(workspace:string,write=false){return ()=>new Rpc(findCodex(),codexArgs(write),workspace);}

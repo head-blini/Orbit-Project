@@ -46,17 +46,29 @@ export function createHttpServer(controller:Controller,assets:string){
         const token=req.headers['x-csrf-token'];
         if(req.headers.origin!==origin||typeof token!=='string'||token.length!==64||!timingSafeEqual(Buffer.from(token),Buffer.from(session.csrf)))throw new AppError('CSRF_REJECTED',403);
         const data=await body(req);
+        if(url.pathname==='/api/projects'){
+          if(Object.keys(data).join(',')!=='path'||typeof data.path!=='string')throw new AppError('INVALID_FIELDS',400);
+          json(res,200,controller.registerProject(data.path));return;
+        }
+        if(url.pathname==='/api/workspaces'||url.pathname==='/api/workspaces/select'){
+          const key=url.pathname.endsWith('/select')?'workspaceId':'projectId';
+          if(Object.keys(data).join(',')!==key||typeof data[key]!=='string'||!/^[a-f0-9-]{36}$/.test(data[key] as string))throw new AppError('INVALID_FIELDS',400);
+          if(key==='projectId')json(res,200,controller.createWorktree(data[key] as string));
+          else{await controller.selectWorkspace(data[key] as string);json(res,200,controller.snapshot());}return;
+        }
         if(url.pathname==='/api/connect'){
           if(Object.keys(data).length)throw new AppError('INVALID_FIELDS',400);await controller.connect();json(res,200,controller.snapshot());return;
         }
         if(url.pathname==='/api/runs'){
-          if(Object.keys(data).sort().join(',')!=='prompt,requestId')throw new AppError('INVALID_FIELDS',400);
-          const run=await controller.submit(data as {requestId:string;prompt:string});json(res,200,run);return;
+          if(Object.keys(data).sort().join(',')!=='prompt,requestId,workspaceId'||(data.workspaceId!==null&&(typeof data.workspaceId!=='string'||!/^[a-f0-9-]{36}$/.test(data.workspaceId))))throw new AppError('INVALID_FIELDS',400);
+          const run=await controller.submit(data as {requestId:string;prompt:string;workspaceId:string|null});json(res,200,run);return;
         }
         const match=url.pathname.match(/^\/api\/runs\/([a-f0-9-]{36})\/interrupt$/);
         if(match){if(Object.keys(data).length)throw new AppError('INVALID_FIELDS',400);await controller.interrupt(match[1]);json(res,200,controller.snapshot());return;}
       }
       if(req.method==='GET'&&url.pathname==='/api/state'){json(res,200,controller.snapshot());return;}
+      const diff=url.pathname.match(/^\/api\/workspaces\/([a-f0-9-]{36})\/diff$/);
+      if(req.method==='GET'&&diff){json(res,200,controller.workspaceDiff(diff[1]));return;}
       if(req.method==='GET'&&url.pathname==='/api/events'){
         const value=req.headers['last-event-id']??url.searchParams.get('after')??'0';const after=Number(value);
         if(!Number.isSafeInteger(after)||after<0||after>controller.store.lastSeq())throw new AppError('INVALID_CURSOR',400);

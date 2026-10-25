@@ -7,6 +7,7 @@ import { Controller } from './controller.ts';
 import { codexFactory } from './codex.ts';
 import { createHttpServer } from './http.ts';
 import { acquireInstance } from './instance.ts';
+import { Projects } from './projects.ts';
 
 const dataDir=resolve('.local');mkdirSync(dataDir,{recursive:true});
 const port=Number(process.env.AICC_PORT??4317);
@@ -17,10 +18,13 @@ const store=new Store(join(dataDir,'control-center.sqlite'));
 let workspace=store.getMeta('workspace');
 if(!workspace){workspace=createWorkspace(tmpdir());store.setMeta('workspace',workspace);}
 try{assertWorkspace(workspace);}catch{store.close();throw new Error('The disposable workspace was removed or changed. See README recovery instructions.');}
-const controller=new Controller(store,workspace,codexFactory(workspace));
+const allowed:unknown=JSON.parse(process.env.ORBIT_ALLOWED_PROJECTS??'[]');
+if(!Array.isArray(allowed)||allowed.some(p=>typeof p!=='string'))throw new Error('ORBIT_ALLOWED_PROJECTS must be a JSON array of exact repository paths');
+const projects=new Projects(store,join(dataDir,'workspaces'),allowed);
+const controller=new Controller(store,workspace,(path,write)=>codexFactory(path,write)(),projects);
 const server=createHttpServer(controller,resolve('dist'));
 let stopping=false;
 async function stop(){if(stopping)return;stopping=true;server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));await controller.close();store.close();release();}
 server.on('error',()=>{console.error('Local server could not bind. Check AICC_PORT and whether another instance is running.');void controller.close().finally(()=>{store.close();release();process.exitCode=1;});});
 process.on('SIGINT',()=>{void stop();});process.on('SIGTERM',()=>{void stop();});
-server.listen(port,'127.0.0.1',()=>console.log(`AI Coding Control Center: http://127.0.0.1:${port} (read-only test workspace)`));
+server.listen(port,'127.0.0.1',()=>console.log(`Orbit: http://127.0.0.1:${port} (local worktree sessions)`));

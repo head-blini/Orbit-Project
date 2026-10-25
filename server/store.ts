@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import type { Run, AppEvent } from '../shared/types.ts';
+import type { Run, AppEvent, Project, Workspace } from '../shared/types.ts';
 import { terminal } from '../shared/types.ts';
 export class Store extends EventEmitter {
   db:DatabaseSync;
@@ -9,23 +9,29 @@ export class Store extends EventEmitter {
     super();this.db=new DatabaseSync(path);
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
       CREATE TABLE IF NOT EXISTS metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS projects(id TEXT PRIMARY KEY,body TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS workspaces(id TEXT PRIMARY KEY,body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY,request_id TEXT NOT NULL UNIQUE,digest TEXT NOT NULL,body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS events(seq INTEGER PRIMARY KEY AUTOINCREMENT,kind TEXT NOT NULL,at TEXT NOT NULL,run_id TEXT,data TEXT NOT NULL);`);
     for(const r of this.runs()) if(!terminal(r.execution)) this.updateRun(r.id,{execution:'lost'},'run.lost');
   }
   getMeta(key:string):string|null { return (this.db.prepare('SELECT value FROM metadata WHERE key=?').get(key) as {value:string}|undefined)?.value??null; }
   setMeta(key:string,value:string) { this.db.prepare('INSERT INTO metadata VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(key,value); }
-  getThread() {return this.getMeta('thread');}
-  setThread(id:string) {this.setMeta('thread',id);}
+  getThread(workspaceId?:string) {return this.getMeta(workspaceId?'thread:'+workspaceId:'thread');}
+  setThread(id:string,workspaceId?:string) {this.setMeta(workspaceId?'thread:'+workspaceId:'thread',id);}
+  projects():Project[] {return this.db.prepare('SELECT body FROM projects ORDER BY rowid').all().map(r=>JSON.parse(r.body as string));}
+  workspaces():Workspace[] {return this.db.prepare('SELECT body FROM workspaces ORDER BY rowid').all().map(r=>JSON.parse(r.body as string));}
+  saveProject(p:Project) {this.db.prepare('INSERT INTO projects VALUES(?,?)').run(p.id,JSON.stringify(p));this.append('project.registered',null,{projectId:p.id});}
+  saveWorkspace(w:Workspace) {this.db.prepare('INSERT INTO workspaces VALUES(?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body').run(w.id,JSON.stringify(w));this.append('workspace.'+w.status,null,{workspaceId:w.id,projectId:w.projectId});}
   runs():Run[] {return this.db.prepare('SELECT body FROM runs ORDER BY rowid').all().map(row=>JSON.parse(row.body as string));}
   getRun(id:string):Run|null {const row=this.db.prepare('SELECT body FROM runs WHERE id=?').get(id);return row?JSON.parse(row.body as string):null;}
   findRequest(id:string):{run:Run;digest:string}|null {
     const row=this.db.prepare('SELECT body,digest FROM runs WHERE request_id=?').get(id);
     return row?{run:JSON.parse(row.body as string),digest:row.digest as string}:null;
   }
-  createRun(requestId:string,digest:string,prompt:string):Run {
+  createRun(requestId:string,digest:string,prompt:string,workspaceId?:string):Run {
     const now=new Date().toISOString();
-    const r:Run={id:randomUUID(),requestId,turnId:null,prompt,response:'',execution:'starting',verification:'not_run',createdAt:now,updatedAt:now};
+    const r:Run={id:randomUUID(),requestId,turnId:null,prompt,response:'',execution:'starting',verification:'not_run',createdAt:now,updatedAt:now,...(workspaceId?{workspaceId}:{})};
     this.db.exec('BEGIN IMMEDIATE');
     let event:AppEvent;
     try {this.db.prepare('INSERT INTO runs VALUES(?,?,?,?)').run(r.id,requestId,digest,JSON.stringify(r));event=this.insert('run.created',r.id,{run:r});this.db.exec('COMMIT');}

@@ -9,3 +9,13 @@ dist/
 .env
 .env.*
 auth.json
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.db
+*.db-wal
+*.db-shm
+*.pem
+*.p12
+*.pfx
+coverage/

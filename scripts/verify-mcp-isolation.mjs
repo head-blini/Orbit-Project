@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { findCodex, restrictedArgs } from '../server/codex.ts';
+import { findCodex, codexArgs } from '../server/codex.ts';
 import { Rpc } from '../server/rpc.ts';
 import { createWorkspace } from '../server/workspace.ts';
 
@@ -20,16 +20,17 @@ process.stdin.on('end',()=>process.exit(0));`);
 writeFileSync(join(root,'config.toml'),`[mcp_servers.fixture]\ncommand=${JSON.stringify(process.execPath)}\nargs=[${JSON.stringify(probe)}]\nenabled=true\n`);
 // This environment belongs only to this verification process and its child.
 process.env.CODEX_HOME=root;
-const report={preflightDoesNotStartMcp:false,disabledStart:false,disabledResume:'not_tested_no_persisted_turn',positiveControl:false};
+const coding=process.argv.includes('--coding');
+const report={mode:coding?'coding':'read-only',preflightDoesNotStartMcp:false,disabledStart:false,disabledResume:'not_tested_no_persisted_turn',positiveControl:false};
 let rpc;
-const start=async()=>{rpc=new Rpc(binary,restrictedArgs,workspace);await rpc.initialize();return rpc;};
-const params={cwd:workspace,sandbox:'read-only',approvalPolicy:'untrusted',approvalsReviewer:'user'};
+const start=async()=>{rpc=new Rpc(binary,codexArgs(coding),workspace);await rpc.initialize();return rpc;};
+const params={cwd:workspace,sandbox:coding?'workspace-write':'read-only',approvalPolicy:coding?'on-request':'untrusted',approvalsReviewer:'user'};
 try{
   await start();
   const result=await rpc.request('config/read',{includeLayers:false,cwd:workspace});
   assert.ok(result.config.mcp_servers.fixture);
   assert.equal(existsSync(marker),false);report.preflightDoesNotStartMcp=true;
-  const config={mcp_servers:{fixture:{enabled:false}}};
+  const config={mcp_servers:{fixture:{enabled:false}},...(coding?{sandbox_workspace_write:{writable_roots:[],network_access:false,exclude_tmpdir_env_var:true,exclude_slash_tmp:true}}:{})};
   const first=await rpc.request('thread/start',{...params,config});
   const inventory=await rpc.request('mcpServerStatus/list',{threadId:first.thread.id,detail:'toolsAndAuthOnly'});
   assert.equal(inventory.data.length,1);assert.equal(inventory.data[0].runtimeStatus,'disabled');assert.deepEqual(inventory.data[0].tools,{});assert.equal(existsSync(marker),false);report.disabledStart=true;

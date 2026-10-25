@@ -9,13 +9,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 async function fixture(){
-  const store=new Store(':memory:');let submissions=0;
+  const store=new Store(':memory:');let submissions=0;const projectCalls:unknown[]=[];
   const controller={store,snapshot:()=>({provider:'disconnected',issue:null,threadId:null,workspace:'fixture',readOnly:true,runs:store.runs(),lastSeq:store.lastSeq()}),connect:async()=>{},submit:async(input:any)=>{submissions++;return {id:'r',...input};},interrupt:async()=>{}} as unknown as Controller;
+  Object.assign(controller,{registerProject:(path:string)=>{projectCalls.push(path);return {id:'project'};},createWorktree:(id:string)=>{projectCalls.push(id);return {id:'workspace'};},selectWorkspace:async(id:string)=>{projectCalls.push(id);},workspaceDiff:(id:string)=>({workspaceId:id,files:[]})});
   const assets=mkdtempSync(join(tmpdir(),'aicc-assets-'));writeFileSync(join(assets,'index.html'),'<!doctype html><title>Fixture</title>');
   const server=createHttpServer(controller,assets);await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));
   const origin=`http://127.0.0.1:${(server.address() as any).port}`;
   const response=await fetch(origin+'/api/session');const cookie=response.headers.get('set-cookie')!.split(';')[0];const {csrfToken}=await response.json() as any;
-  return {origin,cookie,csrfToken,store,count:()=>submissions,close:async()=>{server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));store.close();}};
+  return {origin,cookie,csrfToken,store,projectCalls,count:()=>submissions,close:async()=>{server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));store.close();}};
 }
 test('loopback API requires session and rejects cross-origin, forged Host and CSRF before mutation',async()=>{
   const f=await fixture();try{
@@ -28,6 +29,23 @@ test('loopback API requires session and rejects cross-origin, forged Host and CS
     assert.equal((await fetch(f.origin+'/api/connect',{...base,headers:{...base.headers,'X-CSRF-Token':f.csrfToken}})).status,200);
     assert.equal((await fetch(f.origin+'/api/runs',{...base,headers:{...base.headers,'X-CSRF-Token':f.csrfToken,Origin:'null'},body:'{"prompt":"x","requestId":"12345678"}'})).status,403);
     assert.equal(f.count(),0);
+  }finally{await f.close();}
+});
+
+test('project/workspace endpoints require CSRF, exact fields and identifiers, never browser sandbox overrides',async()=>{
+  const f=await fixture();try{
+    const headers={cookie:f.cookie,Origin:f.origin,'Content-Type':'application/json','X-CSRF-Token':f.csrfToken};
+    for(const [path,body] of [['/api/projects',{path:'C:/fixture',writeEnabled:true}],['/api/workspaces',{projectId:'bad',branch:'main'}],['/api/workspaces/select',{workspaceId:'--evil'}]] as const)assert.equal((await fetch(f.origin+path,{method:'POST',headers,body:JSON.stringify(body)})).status,400);
+    assert.equal((await fetch(f.origin+'/api/projects',{method:'POST',headers:{...headers,'X-CSRF-Token':''},body:JSON.stringify({path:'C:/fixture'})})).status,403);
+    assert.equal(f.projectCalls.length,0);
+    assert.equal((await fetch(f.origin+'/api/projects',{method:'POST',headers,body:JSON.stringify({path:'C:/fixture'})})).status,200);
+    const id='11111111-1111-4111-8111-111111111111';assert.equal((await fetch(f.origin+'/api/workspaces',{method:'POST',headers,body:JSON.stringify({projectId:id})})).status,200);
+    assert.equal((await fetch(f.origin+'/api/workspaces/select',{method:'POST',headers,body:JSON.stringify({workspaceId:id})})).status,200);
+    assert.equal((await fetch(f.origin+'/api/workspaces/'+id+'/diff',{headers:{cookie:f.cookie}})).status,200);
+    assert.equal((await fetch(f.origin+'/api/workspaces/'+id+'/diff')).status,401);
+    assert.equal(f.projectCalls.length,3);
+    assert.equal((await fetch(f.origin+'/api/runs',{method:'POST',headers,body:JSON.stringify({requestId:'request-context',prompt:'edit'})})).status,400);
+    const submitted=await fetch(f.origin+'/api/runs',{method:'POST',headers,body:JSON.stringify({requestId:'request-context',prompt:'edit',workspaceId:id})});assert.equal(submitted.status,200);assert.equal((await submitted.json() as any).workspaceId,id);
   }finally{await f.close();}
 });
 test('large SSE backlog drains in order without closing or crashing the server',async()=>{
