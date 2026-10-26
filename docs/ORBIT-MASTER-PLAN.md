@@ -33,7 +33,7 @@
 | G Model Hub | 5종 HTTP 호환 + 공식 AWS CLI 2 Bedrock text adapter·명시 진단/전송·중단·unknown usage/cost·복구; 7종 상태, mock/미설치 E2E | 실제 AWS/외부 실서비스 인증·호환 검증, 고급 라우팅/비용 집계 |
 | H Extensions | 공식 Codex 읽기 전용 metadata inventory·캐시·UI·fake RPC/HTTP 계약, Mac Chrome 2시나리오·독립 리뷰 | Windows 37단계 통합 재검증, profile/source·권한 preview/backup/restore·실제 native 조회 |
 | I Privacy/Security | loopback/session/Origin/CSRF/MCP·sandbox, 입력 검사·출력 redaction·source fingerprint | 프로젝트별 정책·fallback 재검사·감사 확장 |
-| J Usage | Codex 공식 계정 quota/token 조회·출처/시각·unknown 처리, live available 확인 | 작업별 token/time/retry·API 비용·다른 제공자 집계 |
+| J Usage | Codex 공식 계정 quota/token 조회·출처/시각·unknown 처리, live available 확인; 프로젝트별 canonical 실행·모델/제공자·실제 Check 집계, 작업별 관찰 토큰·측정 시간·명시 workflow 재시도·페이지 조회 | 실제 native 작업 토큰 검증, 다른 CLI의 관측·정확한 재시도, 실제 API 비용 연결 |
 | K Runner | 기존 Runner 명령 검증·중단·재시작 quarantine, native Git 후보/ff 반영·관찰 복구 연결 | 다중 worker 결과의 순차 통합 |
 | 추가 Capability/실행 모드 | 공식 Codex/Claude Registry·native 진단·6모드 설계·Race 동일증거/격리·예산 순수계약 | Solo 외 5 executor, 새 gate Controller 연결 |
 

@@ -1,0 +1,25 @@
+.project-analytics section{margin-top:24px}
+.project-analytics h3{font-size:14px;margin:0 0 10px}
+.project-analytics h4{font-size:12px;margin:14px 0 8px}
+.analytics-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:20px 0}
+.analytics-metrics article{display:flex;flex-direction:column;gap:9px;min-width:0;padding:16px;border:1px solid var(--line,#293742);border-radius:8px}
+.analytics-metrics article>span{font-size:12px;color:var(--muted,#9aafbc)}
+.analytics-metrics strong{font-size:24px;font-weight:600;overflow-wrap:anywhere}
+.project-analytics small{display:block;font-size:11px;color:var(--muted,#9aafbc);line-height:1.7}
+.analytics-counts{display:flex;flex-wrap:wrap;gap:6px 16px;list-style:none;margin:12px 0;padding:0;font-size:12px;color:var(--muted,#9aafbc)}
+.analytics-explanation{margin:20px 0;padding:14px;border:1px solid var(--line,#293742);border-radius:8px;font-size:12px;line-height:1.8}
+.analytics-explanation li+li{margin-top:6px}
+.project-analytics summary{cursor:pointer;font-size:12px}
+.project-analytics summary:focus-visible{outline:2px solid var(--accent,#88dbc4);outline-offset:3px}
+.analytics-table-scroll{overflow:auto;margin:12px 0}
+.project-analytics table{width:100%;border-collapse:collapse;font-size:12px;text-align:left}
+.project-analytics th,.project-analytics td{min-width:110px;max-width:280px;padding:12px 10px;border-bottom:1px solid var(--line,#293742);vertical-align:top;overflow-wrap:anywhere;line-height:1.7}
+.project-analytics thead th{font-size:11px;color:var(--muted,#9aafbc);font-weight:500}
+.project-analytics tbody th{font-weight:500}
+.analytics-record-details[open]{min-width:250px}
+.analytics-record-details dl{margin:12px 0}
+.analytics-record-details dl>div{margin-bottom:9px}
+.analytics-record-details dt{font-size:11px;color:var(--muted,#9aafbc)}
+.analytics-record-details dd{margin:2px 0 0;overflow-wrap:anywhere}
+@media(max-width:1000px){.analytics-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:500px){.analytics-metrics{grid-template-columns:1fr}}

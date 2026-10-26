@@ -11,7 +11,7 @@ export const pages = [
   {id:'providers', label:'모델 제공자', name:'Model Providers', icon:'provider', group:'manage', description:'Codex와 설정된 HTTP 모델 목적지의 지원 범위·전송 조건을 확인하세요.'},
   {id:'extensions', label:'확장 기능', name:'Extensions', icon:'extension', group:'manage', description:'MCP · Skills · Plugins'},
   {id:'security', label:'개인정보 및 보안', name:'Privacy & Security', icon:'shield', group:'manage', description:'현재 적용된 반출 제한과 실행 보호 정책을 확인하세요.'},
-  {id:'usage', label:'사용량 및 분석', name:'Usage & Analytics', icon:'chart', group:'manage', description:'Codex 계정의 공식 사용량·한도와 확인할 수 없는 비용을 구분합니다.'},
+  {id:'usage', label:'사용량 및 분석', name:'Usage & Analytics', icon:'chart', group:'manage', description:'프로젝트 실행·토큰 관측·검증 기록과 Codex 계정 전체 사용량을 구분해 확인하세요.'},
   {id:'settings', label:'설정', name:'Settings', icon:'settings', group:'manage', description:'현재 인터페이스 설정을 확인하세요.'},
 ] as const;
 export type PageId = typeof pages[number]['id'];

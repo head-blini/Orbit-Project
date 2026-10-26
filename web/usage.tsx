@@ -27,7 +27,7 @@ export function UsagePanel({state,online,post}:{state:Snapshot|null;online:boole
       {!usage.buckets?.length?<p>사용량 한도와 초기화 시각: unknown. 연결 후 조회해도 공급자가 반환하지 않는 값은 추정하지 않습니다.</p>:<ul className="capability-list">{usage.buckets.map(bucket=><li key={bucket.id}><b>{bucket.id}</b>{(['primary','secondary'] as const).map(kind=><div key={kind}><p>{kind==='primary'?'주 한도':'추가 한도'}: {bucket[kind]?<>사용 {number(bucket[kind]!.usedPercent)}% · 잔여 {number(bucket[kind]!.remainingPercent)}%</>:'unknown'}</p>{bucket[kind]&&<p>기간 {number(bucket[kind]!.windowDurationMins)}분 · 초기화 {bucket[kind]!.resetsAt?new Date(bucket[kind]!.resetsAt!).toLocaleString('ko-KR'):'unknown'}</p>}</div>)}</li>)}</ul>}
       <dl className="policy-list"><div><dt>계정 누적 토큰</dt><dd>{number(usage.summary?.lifetimeTokens??null)}</dd></div><div><dt>최대 일일 토큰</dt><dd>{number(usage.summary?.peakDailyTokens??null)}</dd></div><div><dt>최장 실행</dt><dd>{usage.summary?.longestRunningTurnSec===null||usage.summary?.longestRunningTurnSec===undefined?'unknown':number(usage.summary.longestRunningTurnSec)+'초'}</dd></div></dl>
       {usage.daily&&<details><summary>공식 일별 토큰 기록 ({usage.daily.length})</summary><ul>{usage.daily.map(day=><li key={day.date}>{day.date} · {number(day.tokens)} tokens</li>)}</ul></details>}
-      <p className="subtle">Codex 작업별 토큰·실제 청구·제공자 간 집계는 아직 미연결입니다. HTTP 요청별 공급자 토큰 응답은 Model Hub에서 확인하며 quota나 토큰 수치로 API 비용을 계산하지 않습니다.</p>
+      <p className="subtle">프로젝트 통계의 작업별 관찰값과 이 계정 전체 조회값은 범위가 다릅니다. 한도나 토큰 수치로 API 비용을 계산하지 않습니다.</p>
     </>}
   </section>;
 }

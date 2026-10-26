@@ -3,9 +3,11 @@ import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import type { Run, AppEvent, Project, Workspace } from '../shared/types.ts';
 import { terminal } from '../shared/types.ts';
+import type {RunMetrics} from '../shared/analytics.ts';
 export class Store extends EventEmitter {
   db:DatabaseSync;
   private pendingEvents:AppEvent[]|null=null;
+  private volatileMetrics=new Map<string,RunMetrics>();
   constructor(path:string) {
     super();this.db=new DatabaseSync(path);
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
@@ -13,8 +15,15 @@ export class Store extends EventEmitter {
       CREATE TABLE IF NOT EXISTS projects(id TEXT PRIMARY KEY,body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS workspaces(id TEXT PRIMARY KEY,body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY,request_id TEXT NOT NULL UNIQUE,digest TEXT NOT NULL,body TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS run_metrics(run_id TEXT PRIMARY KEY,body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS events(seq INTEGER PRIMARY KEY AUTOINCREMENT,kind TEXT NOT NULL,at TEXT NOT NULL,run_id TEXT,data TEXT NOT NULL);`);
-    for(const r of this.runs()) if(!terminal(r.execution)) this.updateRun(r.id,{execution:'lost'},'run.lost');
+    for(const r of this.runs()) if(!terminal(r.execution)||r.execution==='lost') {
+      if(!terminal(r.execution))this.updateRun(r.id,{execution:'lost'},'run.lost');
+      const metrics=this.getRunMetrics(r.id);
+      if(metrics&&(metrics.tokens!==null||metrics.tokenStatus!=='incomplete'||metrics.tokenIssue!=='CONNECTION_LOST'||metrics.durationMs!==null||metrics.finishedAt!==null)){
+        try{this.saveRunMetrics({...metrics,tokens:null,tokenStatus:'incomplete',tokenIssue:'CONNECTION_LOST',durationMs:null,finishedAt:null});}catch{/* The volatile metrics quarantine remains readable; execution recovery already succeeded. */}
+      }
+    }
   }
   getMeta(key:string):string|null { return (this.db.prepare('SELECT value FROM metadata WHERE key=?').get(key) as {value:string}|undefined)?.value??null; }
   setMeta(key:string,value:string) { this.db.prepare('INSERT INTO metadata VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(key,value); }
@@ -26,6 +35,14 @@ export class Store extends EventEmitter {
   saveWorkspace(w:Workspace) {this.db.prepare('INSERT INTO workspaces VALUES(?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body').run(w.id,JSON.stringify(w));this.append('workspace.'+w.status,null,{workspaceId:w.id,projectId:w.projectId});}
   runs():Run[] {return this.db.prepare('SELECT body FROM runs ORDER BY rowid').all().map(row=>JSON.parse(row.body as string));}
   getRun(id:string):Run|null {const row=this.db.prepare('SELECT body FROM runs WHERE id=?').get(id);return row?JSON.parse(row.body as string):null;}
+  runMetricsOverlay(id:string):RunMetrics|null {const value=this.volatileMetrics.get(id);return value?structuredClone(value):null;}
+  getRunMetrics(id:string):RunMetrics|null {const pending=this.runMetricsOverlay(id);if(pending)return pending;const row=this.db.prepare('SELECT body FROM run_metrics WHERE run_id=?').get(id);return row?JSON.parse(String(row.body)):null;}
+  /** Telemetry has its own timestamps and may arrive after execution completes. */
+  saveRunMetrics(metrics:RunMetrics){
+    if(!this.getRun(metrics.runId))throw new Error('RUN_NOT_FOUND');
+    try{this.db.prepare('INSERT INTO run_metrics VALUES(?,?) ON CONFLICT(run_id) DO UPDATE SET body=excluded.body').run(metrics.runId,JSON.stringify(metrics));this.volatileMetrics.delete(metrics.runId);}
+    catch(error){this.volatileMetrics.set(metrics.runId,{...structuredClone(metrics),tokens:null,tokenStatus:'incomplete',tokenIssue:'STORAGE_UNAVAILABLE'});throw error;}
+  }
   findRequest(id:string):{run:Run;digest:string}|null {
     const row=this.db.prepare('SELECT body,digest FROM runs WHERE request_id=?').get(id);
     return row?{run:JSON.parse(row.body as string),digest:row.digest as string}:null;

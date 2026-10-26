@@ -16,6 +16,7 @@ import { acceptSnapshot } from './studio-client.ts';
 import { CapabilityPanel } from './capabilities.tsx';
 import { ExecutionModes } from './execution-modes.tsx';
 import { UsagePanel } from './usage.tsx';
+import { ProjectAnalyticsPanel } from './project-analytics.tsx';
 import { ExtensionsPanel } from './extensions.tsx';
 import { ModelHubPanel } from './model-hub.tsx';
 import { WorkflowsPanel } from './workflows.tsx';
@@ -122,7 +123,7 @@ export function App(){
       {page==='providers'&&<><section className="surface"><div className="section-heading"><div><h2>Codex</h2><p>공식 CLI · 기존 ChatGPT 로그인 사용</p></div><span className="badge">{state?providerLabels[state.provider]:'상태 확인 중'}</span></div><button onClick={()=>navigate('agents')}>에이전트 센터에서 연결 관리 →</button></section><ModelHubPanel projectId={projectId} online={online} nativeBusy={busy||!!active||!!state?.verificationBusy||!!state?.mergeBusy||!!state?.workflowBusy||!!state?.planningBusy||!!state?.reviewBusy||!!state?.extensionBusy||state?.provider==='connecting'} post={post}/><CapabilityPanel online={online} status={state?.provider} post={post}/><fieldset className="studio-page" disabled={!online}><MockProviders connections={state?.connections} post={post}/></fieldset></>}
       {page==='extensions'&&<><ExtensionsPanel workspaceId={state?.selectedWorkspaceId??null} matches={matches} online={online} status={state?.provider} busy={locked} post={post}/><CapabilityPanel online={online} status={state?.provider} post={post} extensionsOnly/><section className="notice"><b>확장 설치·프로필 변경은 미연결입니다</b><p>출처·버전·실행 권한 검토와 격리 실험을 마친 뒤에만 도입합니다. 현재 실행 정책은 유지됩니다.</p></section></>}
       {page==='security'&&<PrivacySecurity state={state}/>}
-      {page==='usage'&&<UsagePanel state={state} online={online} post={post}/>}
+      {page==='usage'&&<><ProjectAnalyticsPanel projectId={projectId} online={online}/><UsagePanel state={state} online={online} post={post}/></>}
       {page==='automation'&&<WorkflowsPanel projectId={projectId} workspaceId={matches?state?.selectedWorkspaceId??null:null} online={online} busy={busy||!!active||!!state?.verificationBusy||!!state?.modelHubBusy||!!state?.mergeBusy||!!state?.planningBusy||!!state?.reviewBusy||!!state?.extensionBusy||state?.provider==='connecting'} post={post}/>}
       {page==='settings'&&<UnavailablePage page={page}/>}
     </main></div>

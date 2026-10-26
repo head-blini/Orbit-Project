@@ -223,6 +223,12 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
       }
       if(req.method==='GET'&&url.pathname==='/api/capabilities'){json(res,200,buildCapabilityRegistry(controller.snapshot().provider,nativeProbe.get()));return;}
       if(req.method==='GET'&&url.pathname==='/api/usage'){json(res,200,controller.usageSnapshot());return;}
+      const analyticsRoute=url.pathname.match(/^\/api\/projects\/([a-f0-9-]{36})\/analytics$/);
+      if(req.method==='GET'&&analyticsRoute){
+        const keys=[...url.searchParams.keys()],limit=url.searchParams.get('limit'),cursor=url.searchParams.get('cursor');
+        if(new Set(keys).size!==keys.length||keys.some(key=>!['limit','cursor'].includes(key))||limit!==null&&!/^[1-9][0-9]?$/.test(limit)||cursor!==null&&!cursor)throw new AppError('INVALID_FIELDS',400);
+        json(res,200,controller.projectAnalytics(analyticsRoute[1],{...(limit===null?{}:{limit:Number(limit)}),...(cursor===null?{}:{cursor})}));return;
+      }
       if(req.method==='GET'&&url.pathname==='/api/extensions'){
         if(url.search)throw new AppError('INVALID_FIELDS',400);json(res,200,controller.extensionSnapshot());return;
       }

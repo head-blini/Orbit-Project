@@ -281,3 +281,23 @@
 - fake RPC created2/turn2/interrupt1/closed2, 실제 AI/nativeCLI/외부요청0, Task0/Run0. primary/workspace HEAD·index·source digest/text 동일. 시작 시 proposal save는 draft였고 이후 테스트의 명시 승인만 approved로 변경했다. 브라우저 warn/error0, 소유 host exit0·loopback 포트 종료·tab 종료·cleanupComplete true/errors0. screenshot 실제 JPEG signature·SHA256 기록.
 - ignored browser host 첫 실행은 read-only Projects로 source fingerprint를 요청해 WRITES_DISABLED로 종료했다. 제품 권한을 바꾸지 않고 fixture 전용 증거 객체를 분리했다. 다음 비대화형 host는 stdin EOF로 즉시 정상 종료해, PTY 소유 host에서 위 시나리오를 진행했다. 이 예비 실행을 브라우저 성공으로 집계하지 않았다.
 - 현재 Mac dedicated 검증이며 전체37단계 자동/Windows E2E 및 실제 Codex 모델 기획은 미검증이다. 전체 플랫폼 Goal은 미완료로 유지한다.
+
+- Task20 검증 변경은 로컬 커밋 `a4518fc`로 보존했으며 원격 push는 하지 않았다.
+
+## Task21 프로젝트 사용량·실행 통계 (2026-10-26)
+
+- 기존 SQLite의 Run, Model Hub 요청, native 기획·리뷰, workflow와 실제 Check를 프로젝트 소유권에 따라 집계했다. 이벤트·receipt·기획 저장은 추가 실행으로 세지 않는다. `GET /api/projects/:projectId/analytics`는 인증된 읽기 전용이며 파일 fingerprint·모델·계정 조회를 실행하지 않는다. 기본25/최대50개 keyset 페이지와 전체 집계·측정 커버리지를 분리한다.
+- Codex 수집은 기존 연결의 passive `thread/tokenUsage/updated`를 사용한다. 설치된 stable schema와 공식 OpenAI 소스에서 `last`는 최근 증가분, `total`은 thread 누적 관찰값임을 확인했다. 초기 기준값은 추정하지 않으며 첫 작업은 unknown이다. 같은 연결의 유효한 이전 관찰이 있으면 누적 차이를 표시하고, 재전송·누락·역전·foreign turn·늦은 이전 작업 변경·합성/비정상 counter는 보수적으로 처리한다. 실제 청구량이나 완전한 최종 합계라고 주장하지 않는다.
+- 실제 `turn/start` 응답의 thread/turn 소유권, 최대128개 projected pre-ack 사실과 최근128개 종료 기록을 사용한다. 모델은 기존 handshake에서 확인하고 변경 시 귀속을 미확인으로 둔다. 늦은 사용량은 별도 `run_metrics`에 기록하며 Run 종료 상태·응답·종료 시각을 변경하지 않는다. 로컬 monotonic 시간은 작업 경과 시간이며 lost/legacy는 unknown이다. 재시도 알림은 관찰 횟수이고, 정확한 재시도는 workflow의 검증된 연결만0/1로 센다.
+- 저장 실패 시 metrics 전용 메모리 불완전 상태를 노출하고 성공적인 후속 저장에서 해제한다. metrics-only 실패로 코딩 완료나 Store 재시작을 막지 않는다. 재시작 lost Run은 stale 측정값을 사용할 수 없다. 전체 저장 실패 중 발생한 메모리 상태는 재시작을 넘어 보존할 수 없으므로, 오래된 저장 관찰의 시각과 부분적 측정 범위를 유지한다.
+- 공개 projection은 ID·고정 상태·숫자·시각·안전한 모델 식별자만 포함한다. prompt/response/proposal/command output/path/endpoint/native thread ID는 제외한다. 모델에 들어온 URL·Windows 경로·IP·credential/개인정보 패턴도 미확인으로 처리한다. 계정 전체 구독 사용량과 API 토큰 관찰은 구분하며 비용은 unknown이다. 실행 완료와 과거 Check 통과·현재 소스 승인도 구분한다.
+- RED→GREEN: 집계9, HTTP1, Controller/복구5, native telemetry18, UI11 신규 회귀. 독립 리뷰에서 모델 이름 경로 노출, lost recovery 분리 쓰기, pre-ack 종료 시간, metrics 저장 실패, 늦은 비정상 이전 관찰의 후속 작업 귀속을 찾아 보완했다. 최종 독립 리뷰 추가 지적 없음.
+- 최초 전체 검사는 동료 작업자의 RED 회귀 추가 시점과 겹쳐 `641total/638pass/2fail/1skip`(late loss timing, pre-ack retry unknown)였으며 빌드로 진행하지 않았다. 동결 후 `.local/verification/project-analytics-frozen-verify.log`: **644total / 643pass / 1 Windows-only skip / 0fail**, type0·build0·exit0,23.9초. 최종 안내 문구 반영 후 전체 재검사와 Chrome 증거는 아래에 이어 기록한다.
+- 집계는 전체 canonical 기록을 읽으므로 보존 이력과 모델 그룹 수에 따라 비용이 증가한다. 페이지 결과는 bounded지만 Run/Check 보존량 자체에 새 임의 제한을 두지 않았다. 실제 native 모델 토큰 이벤트·외부 제공자 실서비스·전체37단계/Windows 최종 gate는 미검증이다.
+
+### Task21 최종 로컬 검증
+
+- 최종 안내 문구 포함 `.local/verification/project-analytics-final-verify.log`: **644total / 643pass / 1 Windows-only skip / 0fail**, type0·build0·exit0,23.9초. 핵심 신규44개 회귀와 기존600개를 함께 실행했다.
+- 전용 Chrome CUA 증거 `.local/ui-e2e/mac-task21-0Z2678/result.json`, `screenshots/01-project-summary.jpg`, `02-project-isolation.jpg`, `03-paged-history.jpg`, `04-restored-summary.jpg`: Atlas35개/관찰416, 25→35개 페이지·합계 불변, Boreal1개/777의 프로젝트 격리, 명시 새로고침25개 복귀, 새 서버 프로세스/같은DB/reload 후35개·416·측정 시간·과거 Check2개·workflow 재시도2 보존을 확인했다. provider disconnected 상태에서도 조회 가능하고 계정 refresh는 disabled다.
+- 원본 fixture 두 저장소 HEAD/README 동일, fake native2turn/계정조회0/실제 AI·CLI·외부요청0, console warning/error0. 실제JPEG4개 크기/SHA256 기록. 소유 서버2개 exit0·loopback65134 종료 확인, Chrome423251661 종료, 양쪽 cleanupComplete true. 자동 승인 심사가 일시적으로 사용량 한도를 보고하여 evidence용 stdin 명령1회가 실행되지 않았으나 이후 동일 tool의 종료/재시작 검증이 성공했다. 우회 실행하지 않았다.
+- 전용 Mac 시나리오이며 전체 통합/Windows E2E를 대신하지 않는다. 이 수직기능 완료는 전체 A–K 플랫폼 Goal 완료가 아니다.

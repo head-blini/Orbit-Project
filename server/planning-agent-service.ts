@@ -42,6 +42,8 @@ export class PlanningAgentService {
     for(const record of this.records())if(record.execution==='running')this.save({...record,execution:'lost',proposal:null,outputDigest:null,processStopped:false,recoveredAt:null,finishedAt:new Date().toISOString(),durationMs:null,issue:'PLANNING_INTERRUPTED_BY_RESTART'});
   }
   get active(){return this.pending!==null;}
+  /** Narrow read-only projection of the persistence-failure quarantine. */
+  analyticsOverlay(id:string){const value=this.unpersisted.get(id);return value?{execution:value.execution,finishedAt:value.finishedAt,durationMs:value.durationMs}:null;}
   private records():PlanningSuggestion[]{return this.store.db.prepare('SELECT body FROM planning_suggestions ORDER BY rowid DESC').all().map(row=>{const record:PlanningSuggestion=JSON.parse(String(row.body));return structuredClone(this.unpersisted.get(record.id)??record);});}
   record(id:string):PlanningSuggestion {if(!uuid(id))throw new AppError('INVALID_FIELDS',400);const pending=this.unpersisted.get(id);if(pending)return structuredClone(pending);const row=this.store.db.prepare('SELECT body FROM planning_suggestions WHERE id=?').get(id);if(!row)throw new AppError('PLANNING_SUGGESTION_NOT_FOUND',404);return JSON.parse(String(row.body));}
   private save(record:PlanningSuggestion){

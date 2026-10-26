@@ -19,7 +19,7 @@ const codexDefinitions:Definition[]=[
   define('plugins','Plugins','conditional',['plugin/list; plugin/read; plugin/install'],[appServer,'https://developers.openai.com/plugins/concepts/plugins'],'현재 --disable plugins. 해당 App Server API는 공식 문서상 개발 중이며 production client 호출을 권하지 않습니다. 검토·격리 실험 전 설치하지 않습니다.'),
   define('subagents','서브에이전트','supported',['native multi_agent tools'],['https://learn.chatgpt.com/docs/agent-configuration/subagents'],'현재 --disable multi_agent. 내장 분배를 우선 재사용하되 별도 worktree·권한·예산 검증을 먼저 연결해야 합니다.'),
   define('goal','Goal','supported',['thread/goal/set; thread/goal/get; thread/goal/clear'],[appServer,'https://developers.openai.com/cookbook/examples/codex/using_goals_in_codex'],'현재 --disable goals. 공식 지속 목표·tokenBudget 재사용에는 승인·자동 후속 turn·예산·중단·복구의 연결과 검증이 먼저 필요합니다.'),
-  define('usage','사용량·상한','conditional',['account/rateLimits/read; account/usage/read'],[appServer],'Usage 화면에서 명시적으로 공식 계정 사용량을 조회합니다. 계정 전체 quota·토큰과 API 비용은 별개이며 누락된 값은 unknown입니다.'),
+  define('usage','사용량·상한','conditional',['account/rateLimits/read; account/usage/read; thread/tokenUsage/updated'],[appServer],'Usage 화면의 프로젝트 통계는 저장된 실행·검증과 작업별 토큰 관찰값을 표시합니다. 공식 계정 사용량은 별도로 명시 조회하며, 누락된 값과 실제 API 비용은 unknown입니다.'),
 ];
 const claudeDefinitions:Definition[]=[
   define('session','세션 실행','supported',['claude -p; JSON/stream-json; Agent SDK query'],[claude+'headless',claude+'cli-reference'],'선택형 어댑터 미연결. 설치·로그인·배포 인증 허용을 가정하지 않습니다.'),

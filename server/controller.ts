@@ -22,6 +22,8 @@ import { ReviewService } from './review-service.ts';
 import { PlanningAgentService } from './planning-agent-service.ts';
 import { collectExtensions,unknownExtensions } from './extensions.ts';
 import type { ExtensionInventory } from '../shared/extensions.ts';
+import {projectAnalytics} from './project-analytics.ts';
+import {RunTelemetry} from './run-telemetry.ts';
 export { AppError } from './errors.ts';
 export class Controller {
   store:Store;workspace:string;private factory:(workspace:string,write:boolean)=>RpcPort;private rpc:RpcPort|null=null;
@@ -38,8 +40,10 @@ export class Controller {
   private usage:CodexUsage=unknownUsage();private usagePending:Promise<CodexUsage>|null=null;
   private extensionCache:ExtensionInventory|null=null;private extensionPending:Promise<ExtensionInventory>|null=null;
   private knownMcpNames:readonly string[]|null=null;
+  private telemetry:RunTelemetry;
   constructor(store:Store,workspace:string,factory:(workspace:string,write:boolean)=>RpcPort,projects?:Projects,verificationConfig:VerificationConfiguration[]=[],modelHubConfig:readonly ModelHubConfiguration[]=[]){
     this.store=store;this.workspace=workspace;this.factory=factory;this.projects=projects;
+    this.telemetry=new RunTelemetry(metrics=>this.store.saveRunMetrics(metrics));
     const selected=projects?.workspaces().find(w=>w.id===store.getMeta('selectedWorkspace'));if(selected){this.workspaceId=selected.id;this.workspace=selected.path;}
     this.modelHub=new ModelHubService(store,modelHubConfig);
     this.verification=new VerificationService(store,projects,verificationConfig,()=>!!this.extensionPending||!!this.active()||!!this.connecting||this.switching||this.modelHub.active||!!this.workflows?.active||!!this.reviews?.active||!!this.planningSuggestions?.active);
@@ -91,6 +95,7 @@ export class Controller {
     return this.merges.recover(input);
   }
   usageSnapshot():CodexUsage{return structuredClone(this.provider==='ready'?this.usage:unknownUsage());}
+  projectAnalytics(projectId:string,options:{limit?:number;cursor?:string}={}){return projectAnalytics(this.store,projectId,options,id=>this.planningSuggestions.analyticsOverlay(id));}
   extensionSnapshot():ExtensionInventory {
     return structuredClone(this.provider==='ready'&&this.extensionCache?.workspaceId===(this.workspaceId??null)?this.extensionCache:unknownExtensions(this.workspaceId??null));
   }
@@ -165,7 +170,7 @@ export class Controller {
     this.status('connecting');const generation=++this.generation;
     try{
       this.validate();const rpc=this.factory(this.workspace,!!this.workspaceId);this.rpc=rpc;
-      rpc.on('closed',()=>{if(generation!==this.generation)return;this.rpc=null;this.loseActive();this.status('disconnected','TRANSPORT_CLOSED');});
+      rpc.on('closed',()=>{if(generation!==this.generation)return;this.rpc=null;this.loseActive();this.telemetry.disconnect();this.status('disconnected','TRANSPORT_CLOSED');});
       rpc.on('notification',(e:any)=>{if(generation===this.generation)this.onEvent(e);});
       rpc.on('approval',(e:any)=>{if(generation===this.generation)this.store.append('approval.denied',this.active()?.id??null,{kind:e.method,decision:'deny'});});
       await rpc.initialize();const a=await rpc.request('account/read',{refreshToken:false});
@@ -197,6 +202,7 @@ export class Controller {
         !entry.tools||typeof entry.tools!=='object'||Array.isArray(entry.tools)||Object.keys(entry.tools).length!==0
       ))throw new Error('MCP_ISOLATION_REQUIRED');
       if(this.rpc!==rpc)throw new Error('TRANSPORT_CLOSED');
+      this.telemetry.connect(t.thread.id,t.model,t.modelProvider);
       this.knownMcpNames=Object.freeze(Object.keys(config.mcp_servers));this.launchValidated=true;this.store.setThread(t.thread.id,this.workspaceId);this.status('ready');this.store.append(id?'session.resumed':'session.created',null,{threadId:t.thread.id,workspaceId:this.workspaceId??null});
     }catch(e){
       const code=e instanceof Error?e.message:'';
@@ -232,11 +238,15 @@ export class Controller {
       policyValidated:this.launchValidated,mcpIsolated:this.launchValidated});
     if(!launch.allowed)throw new AppError(launch.code);
     const run=this.store.createRun(input.requestId,digest,safeText(input.prompt),this.workspaceId,task);const rpc=this.rpc;
+    this.telemetry.begin(run.id);
     this.output.clear();this.deadline=setTimeout(()=>{void this.failTransport('RUN_TIMEOUT');},120000);
     try{
       const result=await rpc.request('turn/start',{threadId:this.thread(),cwd:this.workspace,input:[{type:'text',text:input.prompt}],sandboxPolicy:this.sandbox(),approvalPolicy:this.approvalPolicy(),approvalsReviewer:'user'});
       if(typeof result.turn?.id!=='string')throw new Error('INVALID_TURN');
+      this.telemetry.acknowledge(run.id,result.turn.id);
       this.store.updateRun(run.id,{turnId:result.turn.id,execution:this.store.getRun(run.id)?.execution==='interrupting'?'interrupting':'running'},'run.accepted');
+      const accepted=this.store.getRun(run.id)!;
+      if(terminal(accepted.execution))this.telemetry.finish(run.id,accepted.execution==='lost'||accepted.turnId!==result.turn.id);
       return this.store.getRun(run.id)!;
     }catch{
       const current=this.store.getRun(run.id)!;
@@ -258,6 +268,7 @@ export class Controller {
     }
   }
   private onEvent(e:any){
+    this.telemetry.event(e);
     const p=e.params;if(!p||p.threadId!==this.thread())return;
     const r=this.active();if(!r)return;const turnId=p.turn?.id??p.turnId;
     if(r.turnId&&turnId&&r.turnId!==turnId)return;
@@ -272,7 +283,8 @@ export class Controller {
     }
     if(e.method==='turn/completed'){
       const execution:Execution=['completed','interrupted','failed'].includes(p.turn?.status)?p.turn.status:'failed';
-      this.store.updateRun(r.id,{execution,response:this.safeOutput(true)},'run.'+execution);this.clearDeadline();
+      this.store.updateRun(r.id,{execution,response:this.safeOutput(true),...(typeof turnId==='string'?{turnId}:{})},'run.'+execution);this.clearDeadline();
+      this.telemetry.finish(r.id);
     }
     if(e.method==='item/completed'&&p.item?.type==='fileChange')this.store.append('workspace.changed',r.id,{workspaceId:this.workspaceId??null,status:['completed','failed','declined'].includes(p.item.status)?p.item.status:'unknown'});
     if(e.method==='error')this.store.append('provider.error',r.id,{retrying:p.willRetry===true});
@@ -283,7 +295,7 @@ export class Controller {
     return safeTextItems([...this.output.values()],final);
   }
   private clearDeadline(){if(this.deadline)clearTimeout(this.deadline);this.deadline=null;}
-  private loseActive(){this.clearDeadline();const r=this.active();if(r)this.store.updateRun(r.id,{execution:'lost'},'run.lost');}
-  private async failTransport(issue:string){this.loseActive();const rpc=this.rpc;this.rpc=null;++this.generation;this.status('error',issue);if(rpc)await rpc.close();}
-  async close(){await this.planningSuggestions.close();await this.reviews.close();await this.workflows.close();await this.modelHub.close();await this.verification.close();this.loseActive();const rpc=this.rpc;this.rpc=null;++this.generation;if(rpc)await rpc.close();this.provider='disconnected';this.launchValidated=false;this.clearExtensions();}
+  private loseActive(){this.clearDeadline();const r=this.active();if(r){this.store.updateRun(r.id,{execution:'lost'},'run.lost');this.telemetry.finish(r.id,true);}}
+  private async failTransport(issue:string){this.loseActive();this.telemetry.disconnect();const rpc=this.rpc;this.rpc=null;++this.generation;this.status('error',issue);if(rpc)await rpc.close();}
+  async close(){await this.planningSuggestions.close();await this.reviews.close();await this.workflows.close();await this.modelHub.close();await this.verification.close();this.loseActive();this.telemetry.disconnect();const rpc=this.rpc;this.rpc=null;++this.generation;if(rpc)await rpc.close();this.provider='disconnected';this.launchValidated=false;this.clearExtensions();}
 }
