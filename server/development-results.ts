@@ -15,7 +15,7 @@ const unavailable=():NonNullable<DevelopmentResultView['verification']>=>({avail
 function projectCheck(check:CheckRecord):Omit<CheckRecord,'requestId'|'output'>{
   return {id:check.id,runId:check.runId,projectId:check.projectId,workspaceId:check.workspaceId,commandId:check.commandId,configDigest:check.configDigest,
     baseSha:check.baseSha,sourceDigest:check.sourceDigest,finishedDigest:check.finishedDigest,createdAt:check.createdAt,completedAt:check.completedAt,
-    execution:check.execution,verdict:check.verdict,exitCode:check.exitCode,durationMs:check.durationMs,recoveredAt:check.recoveredAt};
+    execution:check.execution,verdict:check.verdict,exitCode:check.exitCode,durationMs:check.durationMs,recoveredAt:check.recoveredAt,...(check.acceptanceDigest?{acceptanceDigest:check.acceptanceDigest}:{})};
 }
 /** Historical association only: reading an old result must not call Studio.execution(). */
 function link(store:Store,projectId:string,run:Run):Pick<DevelopmentResultView,'task'|'planning'|'linkIssue'>{

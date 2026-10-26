@@ -7,8 +7,9 @@ import type { Projects } from './projects.ts';
 import { AppError } from './errors.ts';
 import { containsCredential } from './privacy.ts';
 import { validateVerificationCommand,runVerification,type VerificationCommand } from './verification.ts';
+import {AcceptanceService,protectedFilePaths} from './acceptance.ts';
 
-export interface VerificationConfiguration extends VerificationCommand {projectPath:string}
+export interface VerificationConfiguration extends VerificationCommand {projectPath:string;protectedFiles?:string[]}
 type StartInput={requestId:string;runId:string;workspaceId:string;commandId:string;expectedSourceDigest:string;expectedConfigDigest:string};
 type ApprovalInput={requestId:string;runId:string;workspaceId:string;expectedSourceDigest:string;expectedCheckSetDigest:string};
 const digest=(value:unknown)=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
@@ -24,7 +25,7 @@ const scope='Git 추적 파일과 무시되지 않은 파일의 실행 전후 �
 export function verificationCommandPreviews(configuration:readonly VerificationConfiguration[],projectPath:string):VerificationCommandPreview[]{
   return configuration.filter(command=>pathKey(command.projectPath)===pathKey(projectPath)).map(({projectPath:_,...command})=>{
     if(credentialArguments(command.args))throw new AppError('INVALID_VERIFICATION_CONFIGURATION',503);
-    return {...command,args:[...command.args],configDigest:hash({policy:'orbit-local-check-v1',projectPath:pathKey(projectPath),...command})};
+    return {...command,args:[...command.args],...(command.protectedFiles?{protectedFiles:[...command.protectedFiles]}:{}),configDigest:hash({policy:'orbit-local-check-v1',projectPath:pathKey(projectPath),...command})};
   });
 }
 function exact(value:object,keys:string[]){
@@ -37,23 +38,26 @@ export function readVerificationConfiguration(raw:string|undefined):Verification
     const values:unknown=JSON.parse(raw);if(!Array.isArray(values)||values.length>32)throw new Error();
     const seen=new Set<string>();
     return Object.freeze(values.map(value=>{
-      exact(value,['projectPath','id','label','executable','args','timeoutMs']);
+      exact(value,['projectPath','id','label','executable','args','timeoutMs',...(value&&Object.hasOwn(value,'protectedFiles')?['protectedFiles']:[])]);
       if(typeof value.projectPath!=='string'||value.projectPath.length>2000||!isAbsolute(value.projectPath)||containsCredential(value.projectPath)||/[\x00-\x1f]/.test(value.projectPath))throw new Error();
-      const {projectPath,...input}=value,command=validateVerificationCommand(input);
+      const {projectPath,protectedFiles,...input}=value,command=validateVerificationCommand(input);
+      const files=protectedFiles===undefined?undefined:protectedFilePaths(protectedFiles);
       if(containsCredential(command.executable)||credentialArguments(command.args))throw new Error();
       const key=pathKey(projectPath)+'\0'+command.id;if(seen.has(key))throw new Error();seen.add(key);
-      return Object.freeze({...command,projectPath:resolve(projectPath)});
+      return Object.freeze({...command,projectPath:resolve(projectPath),...(files?{protectedFiles:Object.freeze(files) as unknown as string[]}: {})});
     })) as unknown as VerificationConfiguration[];
   }catch{throw new Error('INVALID_VERIFICATION_CONFIGURATION');}
 }
 
 /** Host-approved commands only. This service does not add a process sandbox. */
 export class VerificationService {
+  readonly acceptance:AcceptanceService;
   private pending:{id:string;workspaceId:string;abort:AbortController;promise:Promise<void>}|null=null;
   private config:VerificationConfiguration[];
   constructor(privateStore:Store,projects:Projects|undefined,configuration:VerificationConfiguration[]=[],agentBusy:()=>boolean=()=>false){
     this.store=privateStore;this.projects=projects;this.agentBusy=agentBusy;
     this.config=readVerificationConfiguration(JSON.stringify(configuration));
+    this.acceptance=new AcceptanceService(this.store,projects,path=>this.commands(path));
     this.store.db.exec('CREATE TABLE IF NOT EXISTS verification_checks(id TEXT PRIMARY KEY,request_id TEXT NOT NULL UNIQUE,body TEXT NOT NULL); CREATE TABLE IF NOT EXISTS verification_approvals(id TEXT PRIMARY KEY,request_id TEXT NOT NULL UNIQUE,body TEXT NOT NULL);');
     for(const check of this.checks())if(check.execution==='running')this.save({...check,execution:'lost',verdict:'not_run',output:'VERIFICATION_INTERRUPTED_BY_RESTART',completedAt:new Date().toISOString()},'verification.lost');
   }
@@ -80,16 +84,17 @@ export class VerificationService {
     if(workspaceId&&this.checks().some(check=>check.workspaceId===workspaceId&&check.execution==='lost'&&!check.recoveredAt))throw new AppError('VERIFICATION_RECOVERY_REQUIRED',409);
   }
   view(workspaceId:string,runId:string|null):VerificationView{
-    const {project}=this.context(workspaceId,runId),commands=this.commands(project.path);
+    const {project,workspace,run}=this.context(workspaceId,runId),commands=this.commands(project.path);
+    const acceptance=runId?this.acceptance.status(workspaceId,runId):undefined;
     const all=this.checks().filter(check=>check.workspaceId===workspaceId),checks=all.filter(check=>check.runId===runId);
     const quarantined=all.some(check=>check.execution==='lost'&&!check.recoveredAt);
     let sourceDigest:string|null=null,sourceIssue:string|null=null;
     if(commands.length)try{sourceDigest=this.fingerprint(workspaceId);}catch{sourceIssue='FINGERPRINT_UNAVAILABLE';}
     const latest=commands.map(command=>checks.find(check=>check.commandId===command.id));
-    const canApprove=!!runId&&!!sourceDigest&&commands.length>0&&!quarantined&&!this.pending&&!this.agentBusy()&&latest.every((check,index)=>check&&check.execution==='completed'&&check.verdict==='passed'&&check.exitCode===0&&check.configDigest===commands[index].configDigest&&check.sourceDigest===sourceDigest&&check.finishedDigest===sourceDigest);
+    const canApprove=!!runId&&run?.execution!=='lost'&&!!sourceDigest&&commands.length>0&&!quarantined&&!this.pending&&!this.agentBusy()&&(!acceptance||['unbound','current'].includes(acceptance.state))&&latest.every((check,index)=>check&&check.execution==='completed'&&check.verdict==='passed'&&check.exitCode===0&&check.baseSha===workspace.baseSha&&check.configDigest===commands[index].configDigest&&check.sourceDigest===sourceDigest&&check.finishedDigest===sourceDigest&&check.acceptanceDigest===run?.acceptanceDigest);
     const checkSetDigest=canApprove?hash({sourceDigest,checks:latest.map(check=>({id:check!.id,configDigest:check!.configDigest}))}):null;
     const approval=this.approvals().find(item=>item.workspaceId===workspaceId&&item.runId===runId)??null;
-    return {workspaceId,runId,commands,sourceDigest,sourceIssue,checks:checks.slice(0,100),quarantined,checkSetDigest,canApprove,approval,approvalCurrent:!!approval&&canApprove&&approval.sourceDigest===sourceDigest&&approval.checkSetDigest===checkSetDigest,scope};
+    return {workspaceId,runId,commands,sourceDigest,sourceIssue,checks:checks.slice(0,100),quarantined,checkSetDigest,canApprove,approval,approvalCurrent:!!approval&&canApprove&&approval.sourceDigest===sourceDigest&&approval.checkSetDigest===checkSetDigest,scope,...(acceptance?{acceptance}:{})};
   }
   start(input:StartInput):CheckRecord{
     exact(input,['requestId','runId','workspaceId','commandId','expectedSourceDigest','expectedConfigDigest']);
@@ -100,16 +105,19 @@ export class VerificationService {
       return prior;
     }
     if(this.agentBusy())throw new AppError('RUN_ACTIVE',409);this.ensureAvailable(input.workspaceId);
-    const {workspace,project}=this.context(input.workspaceId,input.runId),command=this.commands(project.path).find(command=>command.id===input.commandId);
+    const {workspace,project,run}=this.context(input.workspaceId,input.runId),command=this.commands(project.path).find(command=>command.id===input.commandId);
+    if(run?.execution==='lost')throw new AppError('VERIFICATION_RECOVERY_REQUIRED',409);
+    this.assertAcceptance(workspace.id,input.runId);
     if(!command)throw new AppError('VERIFICATION_COMMAND_NOT_FOUND',404);
     if(command.configDigest!==input.expectedConfigDigest||this.fingerprint(workspace.id)!==input.expectedSourceDigest)throw new AppError('VERIFICATION_PREVIEW_STALE',409);
-    const {configDigest,...preview}=command,validated=validateVerificationCommand(preview);
-    const check:CheckRecord={id:randomUUID(),requestId:input.requestId,runId:input.runId,projectId:workspace.projectId,workspaceId:workspace.id,commandId:command.id,configDigest,baseSha:workspace.baseSha,sourceDigest:input.expectedSourceDigest,finishedDigest:null,createdAt:new Date().toISOString(),completedAt:null,execution:'running',verdict:'not_run',exitCode:null,durationMs:null,output:'',recoveredAt:null};
+    const {configDigest,protectedFiles:_,...preview}=command,validated=validateVerificationCommand(preview);
+    const check:CheckRecord={id:randomUUID(),requestId:input.requestId,runId:input.runId,projectId:workspace.projectId,workspaceId:workspace.id,commandId:command.id,configDigest,baseSha:workspace.baseSha,sourceDigest:input.expectedSourceDigest,finishedDigest:null,createdAt:new Date().toISOString(),completedAt:null,execution:'running',verdict:'not_run',exitCode:null,durationMs:null,output:'',recoveredAt:null,...(run?.acceptanceDigest?{acceptanceDigest:run.acceptanceDigest}:{})};
     this.save(check,'verification.started');
     const abort=new AbortController();
     const promise=Promise.resolve().then(async()=>{
       try{
         const result=await runVerification(validated,{workspaceId:workspace.id,cwd:workspace.path,baseSha:workspace.baseSha,fingerprint:()=>{
+          this.assertAcceptance(workspace.id,input.runId);
           const current=this.fingerprint(workspace.id);
           if(current!==check.sourceDigest)throw new Error('VERIFICATION_PREVIEW_STALE');
           return current;
@@ -121,6 +129,10 @@ export class VerificationService {
     }).finally(()=>{if(this.pending?.id===check.id)this.pending=null;});
     this.pending={id:check.id,workspaceId:workspace.id,abort,promise};
     return check;
+  }
+  private assertAcceptance(workspaceId:string,runId:string){
+    const status=this.acceptance.status(workspaceId,runId);
+    if(status.state!=='unbound'&&status.state!=='current')throw new AppError('ACCEPTANCE_BASELINE_CHANGED',409);
   }
   interrupt(workspaceId:string,checkId:string){
     const check=this.checks().find(check=>check.id===checkId&&check.workspaceId===workspaceId);if(!check)throw new AppError('CHECK_NOT_FOUND',404);

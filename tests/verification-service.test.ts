@@ -12,6 +12,8 @@ function fixture(script="console.log('checked')",persist?:string){
   const directory=mkdtempSync(join(tmpdir(),'orbit-checks-')),store=new Store(persist??':memory:');
   const file=join(directory,'check.mjs');writeFileSync(file,script);
   const workspace={id:'workspace-1',projectId:'project-1',path:directory,baseSha:'a'.repeat(40),branch:'orbit/fixture',createdAt:'',status:'ready' as const};
+  if(!store.projects().length)store.saveProject({id:'project-1',name:'Fixture',path:directory,createdAt:'',writeEnabled:true});
+  store.saveWorkspace(workspace);
   let source='b'.repeat(64),busy=false;
   const projects={writable:()=>workspace,list:()=>[{id:'project-1',path:directory}],fingerprint:()=>source} as unknown as Projects;
   const config=readVerificationConfiguration(JSON.stringify([{projectPath:directory,id:'check',label:'Fixture check',executable:process.execPath,args:[file],timeoutMs:5000}]));
@@ -22,6 +24,18 @@ function fixture(script="console.log('checked')",persist?:string){
   return {directory,store,service,run,workspace,input,projects,config,file,setSource:(value:string)=>{source=value;},setBusy:(value:boolean)=>{busy=value;}};
 }
 async function settled(service:VerificationService){await service.settle();}
+
+test('host protected files are bounded, canonical, credential-safe and part of the command configuration',()=>{
+  const f=fixture();try{
+    const configured=readVerificationConfiguration(JSON.stringify([{...f.config[0],protectedFiles:['tests/check.mjs','package.json']}]));
+    assert.deepEqual(configured[0].protectedFiles,['package.json','tests/check.mjs']);assert.ok(Object.isFrozen(configured[0].protectedFiles));
+    const service=new VerificationService(f.store,f.projects,configured);
+    assert.notEqual(service.view(f.workspace.id,f.run.id).commands[0].configDigest,f.service.view(f.workspace.id,f.run.id).commands[0].configDigest);
+    for(const protectedFiles of [[],['../escape'],['/absolute'],['.env'],['.git/config'],['check.mjs','check.mjs'],['auth.json'],['a\\b'],Array.from({length:129},(_,i)=>`test-${i}.js`)]){
+      assert.throws(()=>readVerificationConfiguration(JSON.stringify([{...f.config[0],protectedFiles}])),'Invalid protected file list');
+    }
+  }finally{f.store.close();}
+});
 
 test('verification is explicit, records real exit evidence and approval becomes stale after source changes',async()=>{
   const f=fixture();try{

@@ -12,6 +12,7 @@ import { Projects } from './projects.ts';
 import { evaluateLaunch,outboundDenial,providerConnections } from './providers/policy.ts';
 import { Studio } from './studio.ts';
 import { VerificationService,type VerificationConfiguration } from './verification-service.ts';
+import type {TaskVerificationPreview} from '../shared/acceptance.ts';
 import { collectCodexUsage,unknownUsage } from './usage.ts';
 import type { CodexUsage } from '../shared/usage.ts';
 import { SourceGraphService } from './source-graph-service.ts';
@@ -252,17 +253,23 @@ export class Controller {
       this.status(issue==='CODEX_NOT_INSTALLED'?'not_installed':issue==='CHATGPT_LOGIN_REQUIRED'?'auth_required':'error',issue);throw new AppError(issue,503);
     }
   }
-  async submitTask(projectId:string,taskId:string,input:{requestId:string;workspaceId:string}):Promise<Run>{
+  taskVerificationPreview(projectId:string,taskId:string,workspaceId:string){
+    if(workspaceId!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);
+    return this.verification.acceptance.preview(projectId,workspaceId,taskId);
+  }
+  async submitTask(projectId:string,taskId:string,input:{requestId:string;workspaceId:string;expectedAcceptanceDigest?:string}):Promise<Run>{
     if(typeof input.requestId!=='string'||!/^[a-zA-Z0-9-]{8,80}$/.test(input.requestId))throw new AppError('INVALID_REQUEST_ID',400);
     const workspace=this.projects?.workspaces().find(workspace=>workspace.id===input.workspaceId);
     if(!workspace||workspace.id!==this.workspaceId||workspace.projectId!==projectId)throw new AppError('WORKSPACE_MISMATCH');
     const prior=this.store.findRequest(input.requestId);
-    if(prior){if(prior.run.taskId!==taskId||prior.run.workspaceId!==workspace.id)throw new AppError('IDEMPOTENCY_CONFLICT');return prior.run;}
+    if(prior){if(prior.run.taskId!==taskId||prior.run.workspaceId!==workspace.id||prior.run.acceptanceDigest!==input.expectedAcceptanceDigest)throw new AppError('IDEMPOTENCY_CONFLICT');return prior.run;}
     const {prompt,...task}=new Studio(this.store).execution(projectId,taskId);
-    return this.start({...input,prompt},task);
+    const acceptance=this.taskVerificationPreview(projectId,taskId,workspace.id);
+    if(acceptance?.digest!==input.expectedAcceptanceDigest)throw new AppError('ACCEPTANCE_PREVIEW_STALE',409);
+    return this.start({...input,prompt},task,acceptance??undefined);
   }
   async submit(input:{requestId:string;prompt:string;workspaceId?:string|null}):Promise<Run>{return this.start(input);}
-  private async start(input:{requestId:string;prompt:string;workspaceId?:string|null},task?:Pick<Run,'taskId'|'planningVersionId'|'requirementLabels'>):Promise<Run>{
+  private async start(input:{requestId:string;prompt:string;workspaceId?:string|null},task?:Pick<Run,'taskId'|'planningVersionId'|'requirementLabels'>,acceptance?:TaskVerificationPreview):Promise<Run>{
     if(typeof input?.requestId!=='string'||!/^[a-zA-Z0-9-]{8,80}$/.test(input.requestId)||typeof input.prompt!=='string'||!input.prompt.trim()||input.prompt.length>4000)throw new AppError('INVALID_PROMPT',400);
     if(containsCredential(input.prompt))throw new AppError('CREDENTIAL_LIKE_INPUT',400);
     const denial=outboundDenial(input.prompt);
@@ -279,7 +286,7 @@ export class Controller {
       policyValidated:this.launchValidated,mcpIsolated:this.launchValidated});
     if(!launch.allowed)throw new AppError(launch.code);
     const sessionId=this.thread();if(!sessionId)throw new AppError('NOT_CONNECTED');
-    const run=this.store.createRun(input.requestId,digest,safeText(input.prompt),this.workspaceId,task,{runtimeId:'codex',ownerIncarnation:this.ownerIncarnation,generation:this.generation,nativeSessionId:sessionId});const rpc=this.rpc;
+    const run=this.store.createRun(input.requestId,digest,safeText(input.prompt),this.workspaceId,task,{runtimeId:'codex',ownerIncarnation:this.ownerIncarnation,generation:this.generation,nativeSessionId:sessionId},acceptance);const rpc=this.rpc;
     this.telemetry.begin(run.id);
     this.output.clear();this.deadline=setTimeout(()=>{void this.failTransport('RUN_TIMEOUT');},120000);
     try{

@@ -7,6 +7,7 @@ import type {RunMetrics} from '../shared/analytics.ts';
 import type {SoloOperationIdentity} from '../shared/solo-operation.ts';
 import {migrateSoloOperations,readSoloOperation,insertSoloOperation,updateSoloOperation} from './solo-operation-journal.ts';
 import type {NativeProcessObservation} from '../shared/native-process.ts';
+import type {TaskVerificationPreview} from '../shared/acceptance.ts';
 import {migrateNativeConnections,readNativeConnection,beginNativeConnection,bindNativeSession,observeNativeProcess,closeNativeTransport,finishNativeConnectionJournal,unresolvedNativeConnections} from './native-connection-journal.ts';
 export class Store extends EventEmitter {
   db:DatabaseSync;
@@ -20,6 +21,7 @@ export class Store extends EventEmitter {
       CREATE TABLE IF NOT EXISTS workspaces(id TEXT PRIMARY KEY,body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY,request_id TEXT NOT NULL UNIQUE,digest TEXT NOT NULL,body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS run_metrics(run_id TEXT PRIMARY KEY,body TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS run_acceptance_baselines(run_id TEXT PRIMARY KEY,digest TEXT NOT NULL,body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS events(seq INTEGER PRIMARY KEY AUTOINCREMENT,kind TEXT NOT NULL,at TEXT NOT NULL,run_id TEXT,data TEXT NOT NULL);`);
     try{migrateSoloOperations(this.db);migrateNativeConnections(this.db);}catch(error){this.db.close();throw error;}
     for(const r of this.runs()) if(!terminal(r.execution)||r.execution==='lost') {
@@ -68,12 +70,12 @@ export class Store extends EventEmitter {
     const row=this.db.prepare('SELECT body,digest FROM runs WHERE request_id=?').get(id);
     return row?{run:JSON.parse(row.body as string),digest:row.digest as string}:null;
   }
-  createRun(requestId:string,digest:string,prompt:string,workspaceId?:string,task?:Pick<Run,'taskId'|'planningVersionId'|'requirementLabels'>,identity?:SoloOperationIdentity):Run {
+  createRun(requestId:string,digest:string,prompt:string,workspaceId?:string,task?:Pick<Run,'taskId'|'planningVersionId'|'requirementLabels'>,identity?:SoloOperationIdentity,acceptance?:TaskVerificationPreview):Run {
     const now=new Date().toISOString();
-    const r:Run={id:randomUUID(),requestId,turnId:null,prompt,response:'',execution:'starting',verification:'not_run',createdAt:now,updatedAt:now,...(workspaceId?{workspaceId}:{}),...task};
+    const r:Run={id:randomUUID(),requestId,turnId:null,prompt,response:'',execution:'starting',verification:'not_run',createdAt:now,updatedAt:now,...(workspaceId?{workspaceId}:{}),...task,...(acceptance?{acceptanceDigest:acceptance.digest}:{})};
     this.db.exec('BEGIN IMMEDIATE');
     let event:AppEvent;
-    try {this.db.prepare('INSERT INTO runs VALUES(?,?,?,?)').run(r.id,requestId,digest,JSON.stringify(r));if(identity!==undefined)insertSoloOperation(this.db,r,identity);event=this.insert('run.created',r.id,{run:r});this.db.exec('COMMIT');}
+    try {this.db.prepare('INSERT INTO runs VALUES(?,?,?,?)').run(r.id,requestId,digest,JSON.stringify(r));if(acceptance)this.db.prepare('INSERT INTO run_acceptance_baselines VALUES(?,?,?)').run(r.id,acceptance.digest,JSON.stringify(acceptance));if(identity!==undefined)insertSoloOperation(this.db,r,identity);event=this.insert('run.created',r.id,{run:r});this.db.exec('COMMIT');}
     catch(e){this.db.exec('ROLLBACK');throw e;}
     this.emit('event',event);return r;
   }

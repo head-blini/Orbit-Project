@@ -1,5 +1,21 @@
 # Orbit 전체 구현·검증 증거
 
+## Task32 — 실행 전 검증 기준 고정과 변경 차단 (2026-10-27)
+
+- 시작 HEAD `e053d8d`, branch `codex/orbit-mac-handoff-2026-10-26`, clean 단일 worktree, Darwin arm64/Node24.22.1. 목표 파일 전체를 다시 읽었다. 이전 구간은 Task31 구현·검증·커밋으로 progress이며 전체 A–K/실제 AI 시나리오 A–E는 여전히 미완료다.
+- `shared/acceptance.ts`, `server/acceptance.ts`: 기존 Studio 승인 Task 검증과 Projects의 hardened Git-visible snapshot을 재사용한다. 인수조건·기획 버전/hash·workspace/base·호스트 명령 configDigest·선택 파일 path/Git mode/SHA-256을 고정한다. 파일 원문은 baseline에 저장하지 않는다. 전체 소스 digest를 고정하지 않아 일반 구현 변경은 가능하다. 보호 파일은 명령별 최대128개, 상대 정확 경로만 허용하고 민감 경로·링크·누락·ignored 파일은 차단한다. preview도 저장 validator를 통과해 생성/조회 계약을 일치시킨다.
+- 기존 `ORBIT_VERIFICATION_COMMANDS`에 선택형 `protectedFiles`를 추가했다. 프로젝트 명령에 모두 지정하거나 전부 생략하며 일부 지정은 거부한다. 브라우저에 임의 명령 설정 권한을 추가하지 않았다. 기존 환경변수 없는/legacy 실행은 계속 사용할 수 있지만 인수조건 보존 증거로 승격하지 않는다. README에 설정과 한계를 기록했다.
+- Controller/HTTP의 인증된 Task verification-preview GET 및 기존 run POST의 선택형 expectedAcceptanceDigest: 서버가 동일한 승인 기준인지 다시 계산하고 CAS한다. Run의 acceptanceDigest와 `run_acceptance_baselines` 행을 기존 Run/operation/event 트랜잭션에 함께 저장한 뒤 native turn/start를 호출한다. 저장 실패는 Run도 롤백하며 native dispatch0이다. 재시도는 기존 Run을 돌려주고 digest가 다르면409다. 기존 baseline을 수정하거나 새 테스트로 자동 덮어쓰는 API는 없다.
+- VerificationService의 Check 실행 직전·직후 기준 검사와 승인 gate를 연결했다. 선택 테스트/runner·기획·명령이 바뀌거나 기준이 손상/누락되면 실행/승인을 차단한다. 구현 파일 변경 후 정상 Node exit0은 허용했고, 검사가 자신의 테스트를 약화한 exit0은 stale로 기록했다. Check.acceptanceDigest가 Run과 다르거나 누락되면 현재 승인 불가다. lost Run과 base 불일치도 직접 거부한다. Workflow runner에는 선택 파일 메타데이터를 실행 인자로 전달하지 않도록 분리했으며 기존 회귀를 통과했다.
+- UI: Task 실행 전 기준/인수조건/보호 파일 확인 및 취소→명시적 기준 고정 후 실행. 기준 없음은 기존 2필드 요청을 유지한다. Development에 current/changed/unavailable/unbound와 고정 기준·Check 연결을 표시한다. 취소·지연 응답·중복 클릭·offline/project/session/workspace 변경은 오래된 확인 동작을 폐기한다. 확인은 검증 명령 자동 실행 권한이 아니다.
+- RED/GREEN: acceptance module 부재10 RED→추가 경계 포함12/12. Task 통합 새2건은 protectedFiles 미지원으로 RED→추가 저장실패/검사중변경 포함Task7/7. 첫 통합34건 중28pass/6fail은 legacy verification mock의 Store workspace 누락이었으며 실제 project/workspace fixture를 등록해8/8 통과했다. 서비스 상태 검사를 완화하지 않았다. UI 즉시 POST·changed 승인 활성 RED, React render 전 offline/workspace 동작의 오래된 확인 콜백 RED를 동기 intent 폐기로 수정해9/9, 영향 UI 회귀27/27.
+- 독립 whole-change 읽기 전용 리뷰: 기준 저장·CAS·legacy·동일 기준 Check gate·재시도·UI 경합 검토. 최종 미해결 P1/P2 없음, acceptance+UI20/20 독립 실행. 제안한 Check digest 누락/불일치 회귀도 실제 passing Check로 추가해 최종 suite에서 통과했다.
+- 첫 전체 `.local/verification/task-acceptance-full-first.log`:943total/942pass/1skip/0fail·type/build0. 최종 `.local/verification/task-acceptance-final.log`: **948total/947pass/0fail/1 Windows-only skip, type0/build0/exit0**,31.48초. `git diff --check` 통과.
+- Chrome CUA `.local/ui-e2e/task-acceptance-20261027`: 제품 Controller/HTTP/Studio/Projects/VerificationService, 임시 Git/SQLite, 합성 native 응답1건과 실제 Node24 Check1건. preview 시 Run/baseline/Check0, 취소 후 명시 확인 시 각각Run1/baseline1/Check0, 구현 HTML 변경 후 원래 테스트 exit0 및 수동 승인, assertion 삭제 후 실행/승인 비활성·과거 승인 stale를 확인했다. 같은 DB로 재시작 후 Run/기준/Check JSON 전체 동일, synthetic dispatch0, 새 Check0. 원본 repository clean, main 포트 ECONNREFUSED, 탭 닫음, 정상 검증 구간 console warn/error0.
+- 증거: server.mjs/state.json/browser-checks.json/result.json, JPEG4개, shutdown-54385.json와 shutdown-76836.json. 실제 Run `ca7d7f7f-916f-4c0c-be84-720d59cc41a1`, Check `a38a4db9-457a-47f6-a45c-3e8ad82d0d0a`, baseline `f7d493a67c96ab45016b4042e3822678d3d880f2f9b6d6514835afae1e207f47`. 초기 fixture bootstrap은 shell PATH 범위 때문에 기본 Node로 시작했으나 Run0 상태에서 종료하고 Node24로 재시작한 뒤 모든 브라우저 실행/검사를 수행했다. 사용자 DB·인증·개인 설정에 접근하지 않았고 실제AI0/외부API0이다.
+- 사용 가능: 호스트가 검토한 보호 파일 설정 → 승인 Task의 기준 확인·실행 → 동일 기준의 명시적 실제 검사 → 현재 결과 검토. 미완료: 완전한 test coverage/수용 판정, 선택 파일 밖·ignored 의존성·외부 바이너리·실행 중 변경 후 원복·동일 OS 사용자 DB 공격에 대한 보장, runtime qualification·공통 소유권/복구 production 연결, 자동 수정·원클릭 전체 흐름·초보자 명령 설정·실제AI/Windows 최종 시나리오. hash 일치를 전체 요구사항 통과로 표시하지 않는다.
+- 다음은 기존 승인 Task→실제 Codex 코딩→고정 검사→정적 미리보기의 임시 저장소 시나리오를 수행하고 발견된 결함을 수정한다. native 정책 gate를 우회하지 않는다. 이 branch의 최신 local commit과 `docs/superpowers/plans/2026-10-27-task-acceptance-baseline.md`에서 재개한다. 원격 push/배포/새 의존성·과금·권한 변경 없음.
+
 ## Task31 — 기획·실행·검증·미리보기 결과 탐색 (2026-10-27)
 
 - 시작 HEAD `46ff568`, branch `codex/orbit-mac-handoff-2026-10-26`, clean 단일 worktree, macOS Darwin arm64/Node24.22.1. 목표 파일 전체와 기존 계획·실제 연결 지점을 재확인했다. 이전 구간은 Task30 구현·검증·커밋으로 progress다. 전체 A–K와 실제 AI 시나리오 A–E는 계속 미완료다.

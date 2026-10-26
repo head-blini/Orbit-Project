@@ -102,7 +102,7 @@ export class WorkflowService {
         this.guard(record.workspaceId);const workspace=this.projects!.writable(record.workspaceId),step=preview.steps[index];
         if(workspace.baseSha!==record.baseSha||this.projects!.fingerprint(workspace.id)!==record.sourceDigest){status='stale';break;}
         record={...record,steps:record.steps.map((s,i)=>i===index?{...s,status:'running',startedAt:new Date().toISOString()}:s)};this.saveRun(record);
-        const {configDigest:_,...command}=step.command;
+        const {configDigest:_,protectedFiles:__,...command}=step.command;
         const result=await runVerification(command,{workspaceId:workspace.id,cwd:workspace.path,baseSha:workspace.baseSha,signal,fingerprint:()=>{const value=this.projects!.fingerprint(workspace.id);if(value!==record.sourceDigest)throw new Error('WORKFLOW_SOURCE_CHANGED');return value;}});
         record={...record,steps:record.steps.map((s,i)=>i===index?{...s,status:result.status,finishedAt:new Date().toISOString(),exitCode:result.exitCode,durationMs:result.durationMs,output:result.output.slice(0,8000),truncated:result.output.length>8000,sourceDigest:result.sourceDigest,finishedDigest:result.finishedDigest}:s)};this.saveRun(record);
         if(result.status!=='passed'){status=result.status;break;}

@@ -3,6 +3,7 @@ export type ProviderStatus = 'disconnected'|'connecting'|'ready'|'auth_required'
 export interface Run {
   workspaceId?:string;
   taskId?:string; planningVersionId?:string; requirementLabels?:string[];
+  acceptanceDigest?:string;
   id:string; requestId:string; turnId:string|null; prompt:string; response:string;
   execution:Execution; verification:'not_run'|'recorded'; createdAt:string; updatedAt:string;
 }

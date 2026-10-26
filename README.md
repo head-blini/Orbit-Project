@@ -139,12 +139,17 @@ $env:ORBIT_VERIFICATION_COMMANDS = ConvertTo-Json -Depth 5 -Compress -InputObjec
     executable = (Get-Command node.exe).Source
     args = @('--test', 'tests/example.test.mjs')
     timeoutMs = 300000
+    protectedFiles = @('tests/example.test.mjs', 'package.json')
   }
 )
 npm.cmd start
 ```
 
 완료된 AI Run이 있는 worktree의 **개발 → 실제 명령 검증 및 승인**에서 명령·인자·제한 시간을 확인하고 실행합니다. 브라우저에서 명령·cwd·환경을 바꿀 수 없습니다. 비밀값을 인자에 넣지 마세요. 알려진 credential 옵션과 패턴은 거절하지만 임의 비밀값을 모두 감지하는 기능은 아닙니다.
+
+`protectedFiles`는 선택 사항이며, 해당 명령이 사용하는 테스트·runner·설정·manifest 중 실행 전에 고정할 파일을 지정합니다. 프로젝트 상대 경로만 허용하며 각 파일은 선택 worktree에 Git-visible 일반 파일로 존재해야 합니다. 이 기능을 사용하려면 프로젝트의 모든 검증 명령에 목록을 지정하세요. 기획의 Task 실행 버튼에서 인수조건·명령 설정·보호 파일 해시를 검토한 뒤 **기준 고정 후 Task 실행**을 누르면 AI 실행 기록과 함께 저장됩니다. 이 승인은 검증 명령을 자동 실행하지 않습니다.
+
+일반 구현 파일은 수정할 수 있지만 고정한 파일·기획·명령 설정이 바뀌면 해당 Run의 검증 실행과 결과 승인을 차단합니다. 기존 Run의 기준을 새 파일로 덮어쓰지 않습니다. 의도적인 테스트 변경은 별도로 검토하고 새 Task 실행의 기준으로 승인하세요. 목록을 지정하지 않은 실행과 기존 이력은 일반 명령 검증으로 유지되며, 원래 테스트의 보존이나 인수조건 충족 증거로 승격되지 않습니다. 선택한 파일의 해시 일치가 테스트의 완전성·품질이나 모든 요구사항 충족을 증명하지는 않습니다.
 
 명령은 **Codex sandbox 밖의 OS 사용자 권한**으로 실행됩니다. 환경변수의 토큰은 상속하지 않지만 HOME 등 인증 탐색 위치는 유지하며, 파일·네트워크를 별도 격리하지 않습니다. 신뢰한 로컬 검증 코드만 등록하세요.
 

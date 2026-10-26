@@ -24,13 +24,13 @@ class Fake extends EventEmitter {
   }
 }
 const input={format:'markdown',source:'manual',text:'# Safe implementation\n## Goal\nPreserve the original repository\n## Requirements\n### REQ-1\nUpdate the isolated source\n#### Acceptance criteria\n- Existing checks continue to pass\n## Constraints\n- Never change the original repository\n## Open questions\n'};
-async function fixture(){
+async function fixture(protectedSuite=false){
   const dir=mkdtempSync(join(tmpdir(),'orbit-task-run-')),root=join(dir,'project');mkdirSync(root);
   const git=(...args:string[])=>execFileSync('git',args,{cwd:root,stdio:'pipe',windowsHide:true});
-  git('init','-q','-b','main');writeFileSync(join(root,'source.ts'),'export const original = true;\n');git('add','.');git('-c','user.name=Test','-c','user.email=test@example.invalid','commit','-qm','initial');
+  git('init','-q','-b','main');writeFileSync(join(root,'source.ts'),'export const original = true;\n');writeFileSync(join(root,'check.mjs'),"console.log('actual protected check');\n");git('add','.');git('-c','user.name=Test','-c','user.email=test@example.invalid','commit','-qm','initial');
   const db=join(dir,'test.sqlite'),store=new Store(db),projects=new Projects(store,join(dir,'managed'),[root]);
   const project=projects.register(root),workspace=projects.create(project.id),rpc=new Fake();
-  const controller=new Controller(store,createWorkspace(dir),()=>rpc,projects);
+  const controller=new Controller(store,createWorkspace(dir),()=>rpc,projects,protectedSuite?[{projectPath:root,id:'check',label:'Protected check',executable:process.execPath,args:['check.mjs'],timeoutMs:5000,protectedFiles:['check.mjs']}]:[]);
   await controller.selectWorkspace(workspace.id);await controller.connect();
   const server=createHttpServer(controller,'.');await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
   const origin='http://127.0.0.1:'+(server.address() as {port:number}).port;
@@ -60,6 +60,80 @@ test('approved task executes its authoritative brief once and preserves the link
     const event=f.store.eventsAfter(0).find(e=>e.kind==='run.created')!;assert.equal((event.data.run as any).taskId,p.task.id);
   }finally{await f.close();}
   const reopened=new Store(f.db);try{assert.ok(reopened.runs()[0].taskId);assert.equal(reopened.runs()[0].execution,'lost');}finally{reopened.close();}
+});
+
+test('Task baseline is explicitly previewed, stored before dispatch and rejects stale or missing approval',async()=>{
+  const f=await fixture(true);try{
+    const p=await f.plan(),url=f.origin+p.path.replace(/run$/,'verification-preview')+'?workspaceId='+f.workspace.id;
+    assert.equal((await fetch(url)).status,401);
+    assert.equal((await fetch(url+'&workspaceId='+f.workspace.id,{headers:f.headers})).status,400);
+    const response=await fetch(url,{headers:f.headers});assert.equal(response.status,200);
+    const {preview}=await response.json() as any;assert.equal(preview.files[0].path,'check.mjs');assert.equal(f.store.runs().length,0);
+    assert.equal((await f.post(p.path,{requestId:randomUUID(),workspaceId:f.workspace.id})).status,409);
+    assert.equal((await f.post(p.path,{requestId:randomUUID(),workspaceId:f.workspace.id,expectedAcceptanceDigest:'a'.repeat(64)})).status,409);
+    const requestId=randomUUID(),launch={requestId,workspaceId:f.workspace.id,expectedAcceptanceDigest:preview.digest};
+    const originalRequest=f.rpc.request.bind(f.rpc);
+    f.rpc.request=async(method,params)=>{if(method==='turn/start'){
+      const run=f.store.runs()[0];assert.equal(run.acceptanceDigest,preview.digest);
+      assert.equal(f.store.db.prepare('SELECT digest FROM run_acceptance_baselines WHERE run_id=?').get(run.id)?.digest,preview.digest);
+    }return originalRequest(method,params);};
+    assert.equal((await f.post(p.path,launch)).status,200);
+    assert.equal((await f.post(p.path,launch)).status,200);
+    assert.equal((await f.post(p.path,{...launch,expectedAcceptanceDigest:'b'.repeat(64)})).status,409);
+    assert.equal(f.rpc.calls.filter(c=>c.method==='turn/start').length,1);
+  }finally{await f.close();}
+});
+
+test('real checks accept implementation changes but reject weakened tests and cannot replace an original baseline',async()=>{
+  const f=await fixture(true);try{
+    const p=await f.plan(),preview=f.controller.taskVerificationPreview(f.project.id,p.task.id,f.workspace.id)!;
+    const run=await f.controller.submitTask(f.project.id,p.task.id,{requestId:randomUUID(),workspaceId:f.workspace.id,expectedAcceptanceDigest:preview.digest});
+    f.store.updateRun(run.id,{execution:'completed'},'run.completed');
+    writeFileSync(join(f.workspace.path,'source.ts'),'export const original = false;\n');
+    const checks=f.controller.verification;
+    const start=()=>{const view=checks.view(f.workspace.id,run.id);return checks.start({requestId:randomUUID(),runId:run.id,workspaceId:f.workspace.id,commandId:'check',expectedSourceDigest:view.sourceDigest!,expectedConfigDigest:view.commands[0].configDigest});};
+    assert.equal(checks.view(f.workspace.id,run.id).acceptance?.state,'current');
+    start();await checks.settle();let view=checks.view(f.workspace.id,run.id);
+    assert.equal(view.checks[0].exitCode,0);assert.equal(view.checks[0].acceptanceDigest,preview.digest);assert.equal(view.canApprove,true);
+    checks.approve({requestId:randomUUID(),workspaceId:f.workspace.id,runId:run.id,expectedSourceDigest:view.sourceDigest!,expectedCheckSetDigest:view.checkSetDigest!});
+    const recorded=view.checks[0];
+    for(const acceptanceDigest of [undefined,'c'.repeat(64)]){
+      f.store.db.prepare('UPDATE verification_checks SET body=? WHERE id=?').run(JSON.stringify({...recorded,acceptanceDigest}),recorded.id);
+      const mismatched=checks.view(f.workspace.id,run.id);assert.equal(mismatched.canApprove,false);assert.equal(mismatched.approvalCurrent,false);
+    }
+    f.store.db.prepare('UPDATE verification_checks SET body=? WHERE id=?').run(JSON.stringify(recorded),recorded.id);
+    assert.equal(checks.view(f.workspace.id,run.id).approvalCurrent,true);
+    writeFileSync(join(f.workspace.path,'check.mjs'),"// assertions removed\nprocess.exit(0);\n");
+    view=checks.view(f.workspace.id,run.id);assert.equal(view.acceptance?.state,'changed');assert.equal(view.canApprove,false);assert.equal(view.approvalCurrent,false);
+    assert.throws(start,/ACCEPTANCE_/);assert.equal(view.checks.length,1);
+    const later=f.controller.taskVerificationPreview(f.project.id,p.task.id,f.workspace.id)!;assert.notEqual(later.digest,preview.digest);
+    assert.equal(checks.view(f.workspace.id,run.id).acceptance?.baseline?.digest,preview.digest);
+  }finally{await f.close();}
+});
+
+test('baseline persistence failure rolls back Run intent and makes zero native dispatches',async()=>{
+  const f=await fixture(true);try{
+    const p=await f.plan(),preview=f.controller.taskVerificationPreview(f.project.id,p.task.id,f.workspace.id)!;
+    f.store.db.exec("CREATE TRIGGER deny_baseline BEFORE INSERT ON run_acceptance_baselines BEGIN SELECT RAISE(ABORT, 'fixture'); END");
+    await assert.rejects(f.controller.submitTask(f.project.id,p.task.id,{requestId:randomUUID(),workspaceId:f.workspace.id,expectedAcceptanceDigest:preview.digest}));
+    assert.equal(f.store.runs().length,0);assert.equal(f.rpc.calls.filter(c=>c.method==='turn/start').length,0);
+    assert.equal(f.store.eventsAfter(0).some(e=>e.kind==='run.created'),false);
+  }finally{await f.close();}
+});
+
+test('protected file change after dispatching a Check invalidates actual exit-zero evidence',async()=>{
+  const f=await fixture(true);try{
+    writeFileSync(join(f.workspace.path,'check.mjs'),"import {writeFileSync} from 'node:fs';writeFileSync('check.mjs','// removed checks');console.log('exit zero after rewrite');\n");
+    const p=await f.plan(),preview=f.controller.taskVerificationPreview(f.project.id,p.task.id,f.workspace.id)!;
+    const run=await f.controller.submitTask(f.project.id,p.task.id,{requestId:randomUUID(),workspaceId:f.workspace.id,expectedAcceptanceDigest:preview.digest});
+    f.store.updateRun(run.id,{execution:'completed'},'run.completed');
+    const checks=f.controller.verification,view=checks.view(f.workspace.id,run.id);
+    checks.start({requestId:randomUUID(),runId:run.id,workspaceId:f.workspace.id,commandId:'check',expectedSourceDigest:view.sourceDigest!,expectedConfigDigest:view.commands[0].configDigest});
+    await checks.settle();const after=checks.view(f.workspace.id,run.id);
+    assert.equal(after.checks[0].exitCode,0);assert.equal(after.checks[0].verdict,'stale');assert.equal(after.canApprove,false);assert.equal(after.acceptance?.state,'changed');
+    f.store.db.prepare('DELETE FROM run_acceptance_baselines WHERE run_id=?').run(run.id);
+    assert.equal(checks.view(f.workspace.id,run.id).acceptance?.state,'unavailable');assert.equal(checks.view(f.workspace.id,run.id).canApprove,false);
+  }finally{await f.close();}
 });
 
 test('task execution rejects unresolved, stale, foreign, injected and wrong-workspace requests before dispatch',async()=>{

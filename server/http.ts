@@ -220,9 +220,10 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
         }
         const taskRun=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/tasks\/([a-f0-9-]{36})\/run$/);
         if(taskRun){
-          exact(data,['requestId','workspaceId']);
+          exact(data,['requestId','workspaceId',...(Object.hasOwn(data,'expectedAcceptanceDigest')?['expectedAcceptanceDigest']:[])]);
+          if(Object.hasOwn(data,'expectedAcceptanceDigest')&&(typeof data.expectedAcceptanceDigest!=='string'||!/^[a-f0-9]{64}$/.test(data.expectedAcceptanceDigest)))throw new AppError('INVALID_FIELDS',400);
           if(typeof data.requestId!=='string'||typeof data.workspaceId!=='string'||!/^[a-f0-9-]{36}$/.test(data.workspaceId))throw new AppError('INVALID_FIELDS',400);
-          json(res,200,await controller.submitTask(taskRun[1],taskRun[2],data as {requestId:string;workspaceId:string}));return;
+          json(res,200,await controller.submitTask(taskRun[1],taskRun[2],data as Parameters<Controller['submitTask']>[2]));return;
         }
         if(url.pathname==='/api/providers/mock/send'){
           exact(data,['providerId','text']);
@@ -290,6 +291,12 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
         json(res,200,controller.planningSuggestions.view(planningSuggestionsView[1],workspaceId));return;
       }
       const verificationView=url.pathname.match(/^\/api\/workspaces\/([a-f0-9-]{36})\/verification$/);
+      const taskVerificationPreview=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/tasks\/([a-f0-9-]{36})\/verification-preview$/);
+      if(req.method==='GET'&&taskVerificationPreview){
+        const workspaceId=url.searchParams.get('workspaceId');
+        if([...url.searchParams.keys()].join(',')!=='workspaceId'||!workspaceId||!/^[a-f0-9-]{36}$/.test(workspaceId))throw new AppError('INVALID_FIELDS',400);
+        json(res,200,{preview:controller.taskVerificationPreview(taskVerificationPreview[1],taskVerificationPreview[2],workspaceId)});return;
+      }
       const reviewView=url.pathname.match(/^\/api\/workspaces\/([a-f0-9-]{36})\/reviews(\/preview)?$/);
       if(req.method==='GET'&&reviewView){
         const keys=[...url.searchParams.keys()],runId=url.searchParams.get('runId');
