@@ -1,15 +1,19 @@
 import React, { useEffect, useState } from 'react';
 import type { Snapshot, WorkspaceDiff } from '../shared/types.ts';
+import {ProjectCreatePanel} from './project-create.tsx';
 
-export function WorkspacePanel({state,projectId,onProject,locked,action,post}:{state:Snapshot|null;projectId:string;onProject:(id:string)=>void;locked:boolean;action:(fn:()=>Promise<void>)=>Promise<void>;post:(path:string,body:object)=>Promise<any>}){
+export function WorkspacePanel({state,projectId,onProject,onPlanning,online=true,locked,action,post}:{state:Snapshot|null;projectId:string;onProject:(id:string)=>void;onPlanning?:()=>void;online?:boolean;locked:boolean;action:(fn:()=>Promise<void>)=>Promise<void>;post:(path:string,body:object)=>Promise<any>}){
   const [path,setPath]=useState('');
   const projects=state?.projects??[],workspaces=(state?.workspaces??[]).filter(w=>w.projectId===projectId);
   const selected=projects.find(p=>p.id===projectId);
   return <section className="workspace-panel" aria-label="프로젝트와 작업 공간">
     <div className="section-heading"><h2>프로젝트 & 작업 공간</h2><span className="pill">GIT WORKTREE</span></div>
+    {state?.projectCreationAvailable===true&&<ProjectCreatePanel projectId={projectId} projectCount={projects.length} selectedWorkspaceId={state.selectedWorkspaceId??null} online={online} locked={locked} onProject={onProject} onPlanning={onPlanning} action={action} post={post}/>}
+    <details><summary>기존 Git 저장소 등록 (고급)</summary>
     <form onSubmit={e=>{e.preventDefault();void action(async()=>{const p=await post('/api/projects',{path});onProject(p.id);setPath('');});}} className="register-project">
       <label htmlFor="project-path">로컬 Git 저장소 경로</label><div><input id="project-path" value={path} onChange={e=>setPath(e.target.value)} placeholder="C:\\Projects\\my-project" disabled={locked}/><button disabled={locked||!path.trim()}>프로젝트 등록</button></div>
     </form>
+    </details>
     {selected&&<div className="workspace-controls"><div className="project-location"><b>{selected.name}</b><p>{selected.path}</p></div><button disabled={locked||!selected.writeEnabled} onClick={()=>void action(async()=>{const w=await post('/api/workspaces',{projectId:selected.id});await post('/api/workspaces/select',{workspaceId:w.id});})}>새 작업 공간 만들기</button></div>}
     {selected&&!selected.writeEnabled&&<p className="hint">등록은 완료됐으며 쓰기는 잠겨 있습니다. 검증을 마친 저장소의 정확한 경로만 서버의 ORBIT_ALLOWED_PROJECTS에 추가하세요.</p>}
     {workspaces.length>0&&<label className="workspace-select">실행할 작업 공간<select aria-label="실행할 작업 공간" disabled={locked} value={workspaces.some(w=>w.id===state?.selectedWorkspaceId)?state?.selectedWorkspaceId??'':''} onChange={e=>void action(async()=>{await post('/api/workspaces/select',{workspaceId:e.target.value});})}><option value="" disabled>작업 공간 선택</option>{workspaces.map(w=><option key={w.id} value={w.id} disabled={w.status!=='ready'}>{w.branch} · {w.status==='ready'?'사용 가능':w.status==='creating'?'생성 중':'생성 실패'}</option>)}</select></label>}

@@ -10,6 +10,8 @@ import { fingerprintWorkspace,readWorkspaceSourceSnapshot,readWorkspaceSnapshot 
 import { trustedGit } from './git-process.ts';
 import {repositoryIdentity} from './repository-resource.ts';
 import type {RepositoryResource} from '../shared/repository-authority.ts';
+import type {CreateProjectInput,CreatedProject} from '../shared/project-creation.ts';
+import {ManagedProjectCreation} from './project-creation.ts';
 
 const same=(a:string,b:string)=>process.platform==='win32'?a.toLowerCase()===b.toLowerCase():a===b;
 const inside=(parent:string,child:string)=>{const r=relative(parent,child);return !!r&&!r.startsWith('..')&&!isAbsolute(r);};
@@ -42,8 +44,11 @@ function repository(path:string){
 const sensitive=(path:string)=>/(^|\/)(\.env(?:\..*)?|auth\.json|credentials(?:\..*)?|\.aws|\.codex|\.git)(\/|$)|\.(?:sqlite(?:-wal|-shm)?|db(?:-wal|-shm)?|pem|key|p12|pfx|log)$/i.test(path);
 export class Projects {
   private store:Store;private managed:string;private allowed:string[];
-  constructor(store:Store,managed:string,allowed:string[]=[]){this.store=store;mkdirSync(managed,{recursive:true});this.managed=canonical(managed);this.allowed=allowed.map(canonical);}
-  list():Project[]{return this.store.projects().map(p=>({...p,writeEnabled:this.allowed.some(a=>same(a,p.path))}));}
+  private creation?:ManagedProjectCreation;
+  constructor(store:Store,managed:string,allowed:string[]=[],creationRoot?:string){this.store=store;mkdirSync(managed,{recursive:true});this.managed=canonical(managed);this.allowed=allowed.map(canonical);if(creationRoot!==undefined)this.creation=new ManagedProjectCreation(store,creationRoot,this.managed);}
+  get creationAvailable(){return this.creation?.available??false;}
+  createProject(input:CreateProjectInput):CreatedProject{if(!this.creation)throw new AppError('PROJECT_CREATION_UNAVAILABLE',503);return this.creation.create(input,(project,id)=>this.prepareWorktree(project,id),id=>this.validate(id));}
+  list():Project[]{return this.store.projects().map(p=>({...p,writeEnabled:this.allowed.some(a=>same(a,p.path))||!!this.creation?.owns(p)}));}
   workspaces(){return this.store.workspaces();}
   register(path:string):Project {
     const {root}=repository(path);if(same(root,this.managed)||inside(root,this.managed)||inside(this.managed,root))throw new AppError('PROJECT_OVERLAP');
@@ -53,8 +58,11 @@ export class Projects {
   private project(id:string){const p=this.list().find(p=>p.id===id);if(!p)throw new AppError('PROJECT_NOT_FOUND',404);return p;}
   create(projectId:string):Workspace {
     const p=this.project(projectId);if(!p.writeEnabled)throw new AppError('WRITES_DISABLED',403);
+    return this.prepareWorktree(p,randomUUID());
+  }
+  private prepareWorktree(p:Project,id:string):Workspace {
     const {sha}=repository(p.path);accessSync(join(p.path,'.git'),constants.W_OK);canonical(this.managed);
-    const id=randomUUID();const w:Workspace={id,projectId,path:join(this.managed,id),branch:'orbit/'+id,baseSha:sha,createdAt:new Date().toISOString(),status:'creating'};
+    const w:Workspace={id,projectId:p.id,path:join(this.managed,id),branch:'orbit/'+id,baseSha:sha,createdAt:new Date().toISOString(),status:'creating'};
     this.store.saveWorkspace(w);
     try{git(p.path,['worktree','add','--no-track','-b',w.branch,'--',w.path,sha]);for(const name of ['.codex','.agents','.aws'])mkdirSync(join(w.path,name),{recursive:true});w.status='ready';this.store.saveWorkspace(w);this.validate(w.id);return w;}
     catch(e){w.status='failed';this.store.saveWorkspace(w);throw e;}

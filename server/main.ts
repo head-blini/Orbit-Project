@@ -22,7 +22,7 @@ if(!workspace){workspace=createWorkspace(tmpdir());store.setMeta('workspace',wor
 try{assertWorkspace(workspace);}catch{store.close();throw new Error('The disposable workspace was removed or changed. See README recovery instructions.');}
 const allowed:unknown=JSON.parse(process.env.ORBIT_ALLOWED_PROJECTS??'[]');
 if(!Array.isArray(allowed)||allowed.some(p=>typeof p!=='string'))throw new Error('ORBIT_ALLOWED_PROJECTS must be a JSON array of exact repository paths');
-const projects=new Projects(store,join(dataDir,'workspaces'),allowed);
+const projects=new Projects(store,join(dataDir,'workspaces'),allowed,join(dataDir,'projects'));
 const verificationConfig=readVerificationConfiguration(process.env.ORBIT_VERIFICATION_COMMANDS);
 const modelHubConfig=readModelHubConfiguration(process.env.ORBIT_MODEL_HUB);
 const controller=new Controller(store,workspace,(path,write)=>codexFactory(path,write)(),projects,verificationConfig,modelHubConfig);

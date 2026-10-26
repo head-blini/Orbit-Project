@@ -232,6 +232,11 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
           if(!result.ok)throw new AppError(result.code,422);
           json(res,200,{...result,mode:'mock_only',externalApiEnabled:false});return;
         }
+        if(url.pathname==='/api/projects/create'){
+          exact(data,['requestId','name']);
+          if(url.search||typeof data.requestId!=='string'||typeof data.name!=='string')throw new AppError('INVALID_FIELDS',400);
+          json(res,200,controller.createProject({requestId:data.requestId,name:data.name}));return;
+        }
         if(url.pathname==='/api/projects'){
           if(Object.keys(data).join(',')!=='path'||typeof data.path!=='string')throw new AppError('INVALID_FIELDS',400);
           json(res,200,controller.registerProject(data.path));return;
