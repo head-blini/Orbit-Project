@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir } from './temp.ts';
 import { join } from 'node:path';
 import { fingerprintWorkspace,readWorkspaceSourceSnapshot } from '../server/workspace-fingerprint.ts';
 

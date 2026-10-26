@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync,mkdirSync,symlinkSync,rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir } from './temp.ts';
 import { join } from 'node:path';
 import { buttonRef,cliData,evalResult,containedPath,isolatedEnvironment,phaseSignal,runProcess,overallStatus } from '../scripts/lib/orbit-ui-e2e.ts';
 

@@ -5,7 +5,7 @@ import { createHttpServer } from '../server/http.ts';
 import type { Controller } from '../server/controller.ts';
 import { request } from 'node:http';
 import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir } from './temp.ts';
 import { join } from 'node:path';
 import type { ProviderStatus } from '../shared/types.ts';
 import type { NativeProbeReport } from '../shared/capabilities.ts';

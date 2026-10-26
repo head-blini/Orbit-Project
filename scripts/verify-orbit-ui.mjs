@@ -2,7 +2,7 @@
 // Run in normal PowerShell: node scripts/verify-orbit-ui.mjs
 // Sandbox-safe: node scripts/verify-orbit-ui.mjs --check-only (never launches a browser).
 import assert from 'node:assert/strict';
-import { appendFileSync,mkdirSync,mkdtempSync,readFileSync,readdirSync,writeFileSync } from 'node:fs';
+import { appendFileSync,existsSync,mkdirSync,mkdtempSync,readFileSync,readdirSync,writeFileSync } from 'node:fs';
 import { dirname,join,relative,resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
@@ -44,11 +44,12 @@ report.limitations.push('Model Hub는 전용 child의 127.0.0.1 HTTP fixture를 
 report.limitations=report.limitations.map(item=>item.startsWith('브라우저 파일 다운로드는')?'이번 브라우저 다운로드는 저장 기획 MD/JSON와 수동 handoff Markdown만 검사한다. plain --download-path와 제품 버튼 click을 사용하며 CLI download 명령은 사용하지 않는다. Artifact PPTX/MD 저장은 별도 증거(docs/visualization/DOWNLOAD-RESULTS.md)이며 이번에 재검증하지 않는다.':item);
 report.limitations.push('Planning feedback은 실제 AI 실행 대신 Task metadata가 결합된 synthetic terminal Run과 실제 Node Check/현재성 조회를 사용한다. 저장 파일 bytes·parser roundtrip·UI 파일 재가져오기·별도 draft 저장을 검사하며 외부 AI 전달이나 기존 승인·Task 변경은 하지 않는다.');
 report.limitations.push('Merge는 별도로 만든 세 번째 disposable repository의 primary에만 UI 명시 승인 후 실제 fast-forward를 수행한다. 이전 두 primary fixture는 그대로 보존한다. 원 source HEAD/index/bytes와 target 전후 SHA는 fixture 전용 read-only IPC로 비교한다. unknown/lost 복구는 제품 focused HTTP/unit 증거이며 이 브라우저 run에서 DB를 조작해 생성하지 않는다.');
-names.push('Workflow 전용 DAG 저장·미리보기·실제 명령 통과','Workflow 실패·종속 단계 생략·명시 재시도·버전 보존','Workflow 실제 중단·새로고침·재시작·재실행 없음','Bedrock 명시 동의·없는 CLI 실패·진단 복구·전송 차단','Native Review 정확한 입력·동의·mock 완료·복구','Native Review mock 시작·중단·복구·재실행 없음');
+names.push('Workflow 전용 DAG 저장·미리보기·실제 명령 통과','Workflow 실패·종속 단계 생략·명시 재시도·버전 보존','Workflow 실제 중단·새로고침·재시작·재실행 없음','Bedrock 명시 동의·없는 CLI 실패·진단 복구·전송 차단','Native Review 정확한 입력·동의·mock 완료·복구','Native Review mock 시작·중단·복구·재실행 없음','Extensions 명시 조회·정제된 목록·캐시 재사용','Extensions 새로고침·재시작 unknown·자동 수집 없음');
 report.steps.push(...names.slice(29).map(name=>({name,status:'not_run'})));
 report.limitations.push('Workflow는 네 번째 disposable repository의 고정 Node 명령만 실제 OS 권한으로 실행한다. ignored 표식은 의도한 부작용이며 sandbox 격리·AI Run·검증 Check·리뷰 승인으로 자동 승격을 주장하지 않는다. 순차 DAG·실패 시 생략·명시 재시도·실제 중단·기록 복구를 검사하며 lost 복구는 focused 서비스/HTTP 증거 범위이다.');
 report.limitations.push('Bedrock은 네 번째 fixture에만 등록한 존재하지 않는 CLI 경로의 명시 모델 진단 실패를 검사한다. AWS CLI 설치·계정·인증정보·AWS 네트워크·실제 추론·과금·임시 입력 파일 생성/정리 성공은 검사하지 않는다. 다른 프로젝트는 project_blocked이며 실패 진단의 복원은 재시도나 모델 요청을 생성하지 않아야 한다.');
 report.limitations.push('Native Review는 여섯 번째 CLI 인자로 명시한 네 번째 worktree의 read-only factory에만 별도 fake RpcPort를 허용한다. 실제 제품 native protocol runner/ReviewService/HTTP/UI를 거치지만 계정 응답·리뷰 텍스트·프로세스 종료는 합성 RPC 증거이며 실제 Codex CLI·ChatGPT 로그인·AI 추론·구독 사용량·원격 전송을 검증하지 않는다. 고정 README marker는 worktree 생성 직후 baseline 전에만 seed하며 이후 source HEAD/index/digest와 primary를 보존한다. lost·종료 미확인 복구는 focused unit/HTTP 범위이고 브라우저 DB를 조작하지 않는다.');
+report.limitations.push('Extensions는 일곱 번째 exact grant를 받은 네 번째 worktree에서만 fake RpcPort 목록을 수집한다. 명시 수집·60초 캐시·원문 비노출·재시작 unknown을 검증하며 실제 CLI, 계정, 확장 설치·실행·설정 변경이나 외부 요청은 하지 않는다. 설정상 enabled와 Orbit의 실행 허용 상태는 별도로 표시한다.');
 let commandNumber=0,currentStep='',binary,server,serverPort,browserAttempted=false,browserReady=false,projectId,secondProjectId,workspacePath,syntheticRun,sourceWorkspaceId,sourceWorkspacePath,mergeProjectId,mergeWorkspaceId,mergeWorkspacePath,mergeRun,workflowProjectId,workflowWorkspaceId,workflowWorkspacePath;
 const abortController=new AbortController();
 const interrupt=()=>abortController.abort();process.on('SIGINT',interrupt);process.on('SIGTERM',interrupt);
@@ -138,7 +139,7 @@ async function step(name,work,{consoleAllow=[]}={}){
   finally{item.finishedAt=new Date().toISOString();persist();}
 }
 async function startServer(port=0){
-  const child=fork(join(repo,'scripts/lib/orbit-ui-server.mjs'),[runDir,join(repo,'dist'),String(port),mergeProjectPath,workflowProjectPath,workflowProjectPath],{cwd:out('sandbox'),env,execArgv:[],silent:true,windowsHide:true});
+  const child=fork(join(repo,'scripts/lib/orbit-ui-server.mjs'),[runDir,join(repo,'dist'),String(port),mergeProjectPath,workflowProjectPath,workflowProjectPath,workflowProjectPath],{cwd:out('sandbox'),env,execArgv:[],silent:true,windowsHide:true});
   server=child;report.serverPids??=[];report.serverPids.push(child.pid);
   child.stdout.on('data',data=>appendFileSync(out('logs','server.log'),data));child.stderr.on('data',data=>appendFileSync(out('logs','server.log'),data));
   const address=await new Promise((resolveReady,reject)=>{
@@ -213,6 +214,18 @@ async function workflowView(){
   return evaluate(`(async()=>{const response=await fetch('/api/projects/${workflowProjectId}/workflows?workspaceId=${workflowWorkspaceId}');if(!response.ok)throw new Error('FIXTURE_WORKFLOW_VIEW_FAILED');return response.json();})()`);
 }
 async function reviewView(){return evaluate(`(async()=>{const response=await fetch('/api/workspaces/${workflowWorkspaceId}/reviews');if(!response.ok)throw new Error('FIXTURE_REVIEW_VIEW_FAILED');return response.json();})()`);}
+async function inventoryView(){return evaluate(`(async()=>{const response=await fetch('/api/extensions');if(!response.ok)throw new Error('FIXTURE_INVENTORY_VIEW_FAILED');return response.json();})()`);}
+async function inventoryFixture(){
+  assert.ok(server?.connected,'Owned inventory fixture IPC is not connected');const child=server;
+  const result=await new Promise((resolveStats,reject)=>{
+    const timer=setTimeout(()=>{clean();reject(new Error('INVENTORY_FIXTURE_IPC_TIMEOUT'));},10000),clean=()=>{clearTimeout(timer);child.off('message',message);};
+    const message=value=>{if(value?.kind==='inventory-fixture'){clean();resolveStats(value);}else if(value?.kind==='fixture-error'){clean();reject(new Error('INVENTORY_FIXTURE_CONTROL_FAILED'));}};
+    child.on('message',message);child.send({kind:'inventory-fixture'});
+  });
+  assert.equal(result.actualAiExecuted,false);assert.equal(result.actualCliExecuted,false);assert.equal(result.externalRequests,0);assert.equal(result.counts.forbidden,0);return result;
+}
+const inventoryVisible=`$('.extensions-summary')?.innerText.includes('Codex App Server')&&$('.extensions-panel')?.innerText.includes('fixture skill')&&$('.extensions-panel')?.innerText.includes('preToolUse')&&$('.extensions-panel')?.innerText.includes('fixture-disabled-mcp')&&$('.extensions-panel')?.innerText.includes('버전: unknown')&&$('.extensions-panel')?.innerText.includes('설정상 enabled: 켜짐')&&$('.extensions-panel')?.innerText.includes('설정상 enabled: 꺼짐')&&$('.extensions-panel')?.innerText.includes('현재 정책에서 비활성')&&$('[data-extension-kind="plugins"]')?.innerText.includes('Orbit 미연결')&&!document.body.innerText.includes('ORBIT_INVENTORY_FORBIDDEN_RAW')`;
+const inventoryUnknown=`$('.extensions-summary')?.innerText.includes('아직 조회하지 않음')&&!$('.extensions-panel')?.innerText.includes('fixture skill')&&$$('.extensions-panel button').some(node=>node.textContent==='공식 확장 목록 조회'&&node.disabled)&&['skills','hooks','mcp'].every(kind=>document.querySelector('[data-extension-kind="'+kind+'"]')?.innerText.includes('미조회 · unknown'))`;
 async function reviewPreview(){return evaluate(`(async()=>{const response=await fetch('/api/workspaces/${workflowWorkspaceId}/reviews/preview');if(!response.ok)throw new Error('FIXTURE_REVIEW_PREVIEW_FAILED');return response.json();})()`);}
 async function reviewFixture(mode){
   assert.ok(server?.connected,'Owned review fixture IPC is not connected');const child=server;
@@ -726,6 +739,26 @@ try{
       Object.assign(report.nativeReview,{interrupted,interruptedStats,actualMockReviewStarted:true,interruptedAfterRefresh:true,interruptedAfterRestart:true,noReplay:true,noAutomaticConnect:true,afterRestart:after,firstTwoAndMergePreserved:true,fourthPrimaryAndSourcePreserved:true});
       await browser(['scrollintoview','.review-history']);await capture('native-review-interrupted-restored',1744,864);
     });
+    await step(names[35],async()=>{
+      const before=await workflowEvidence(),initial=await inventoryFixture();assert.deepEqual(before,report.nativeReview.before);assert.deepEqual(initial.counts,{created:0,mcp:0,skills:0,hooks:0,closed:0,forbidden:0});
+      await navigate('extensions');await expectUI(inventoryUnknown,'Disconnected inventory must be unknown with collection disabled');assert.equal((await inventoryView()).source,'not_queried');
+      await navigate('agents');await button('Codex 연결');await expectUI(`$('.connection')?.innerText.includes('Codex 연결됨')`,'Explicit synthetic session did not connect');
+      assert.deepEqual((await inventoryFixture()).counts,{created:1,mcp:1,skills:0,hooks:0,closed:0,forbidden:0});assert.equal((await inventoryView()).source,'not_queried','Connection alone must not collect metadata');
+      await navigate('extensions');await button('공식 확장 목록 조회');await expectUI(inventoryVisible,'Sanitized extension inventory or configured/effective distinction is missing');
+      const inventory=await inventoryView(),collected=await inventoryFixture(),cacheStarted=Date.now();assert.equal(inventory.workspaceId,workflowWorkspaceId);assert.equal(inventory.source,'codex_app_server');assert.ok(inventory.checkedAt);assert.ok(!JSON.stringify(inventory).includes(workflowWorkspacePath));assert.deepEqual(collected.counts,{created:1,mcp:2,skills:1,hooks:1,closed:0,forbidden:0});
+      await button('공식 확장 목록 조회');await button('목록 상태 새로고침');await expectUI(inventoryVisible,'Cached inventory disappeared');assert.ok(Date.now()-cacheStarted<60000,'Cache scenario exceeded its 60-second window');assert.deepEqual((await inventoryFixture()).counts,collected.counts,'Immediate repeat and state refresh must not recollect');assert.deepEqual(await inventoryView(),inventory);
+      assert.deepEqual(await workflowEvidence(),before);await reviewDidNotApprove();assert.equal((await modelHubStats()).counts.total,0);
+      report.extensions={workspaceId:workflowWorkspaceId,actualAiExecuted:false,actualCliExecuted:false,before,collected,inventory,explicitCollection:true,cacheReused:true,rawMarkerAbsent:true};
+      await browser(['scrollintoview','.extensions-panel']);await capture('extensions-collected',1744,864);
+    });
+    await step(names[36],async()=>{
+      await browser(['reload']);await ready();await expectUI(inventoryVisible,'Browser refresh must read the current session cache');assert.deepEqual((await inventoryFixture()).counts,report.extensions.collected.counts);assert.deepEqual(await inventoryView(),report.extensions.inventory);
+      await browser(['open',report.url+'/app.css']);await stopServer();await startServer(serverPort);await browser(['open',report.url+'/#/extensions']);await ready();await expectUI(inventoryUnknown,'Server restart must clear inventory and require explicit reconnection');
+      const after=await inventoryFixture(),view=await inventoryView();assert.deepEqual(after.counts,{created:0,mcp:0,skills:0,hooks:0,closed:0,forbidden:0});assert.equal(view.source,'not_queried');assert.equal(view.status,'unknown');assert.equal(view.checkedAt,null);
+      assert.deepEqual(await workflowEvidence(),report.extensions.before);await reviewDidNotApprove();await preservedOriginalFixtures();preservedMergeFixture();assert.equal((await modelHubStats()).counts.total,0);
+      for(const suffix of ['','-wal','-shm']){const path=out('sandbox','test.sqlite'+suffix);if(existsSync(path))assert.equal(readFileSync(path).includes(Buffer.from('ORBIT_INVENTORY_FORBIDDEN_RAW')),false,'Native metadata must not enter the database');}
+      Object.assign(report.extensions,{cacheAfterReload:true,unknownAfterRestart:true,noAutomaticConnect:true,noAutomaticCollection:true,sourcePreserved:true,rawDatabaseMarkerAbsent:true,afterRestart:after});await browser(['scrollintoview','.extensions-panel']);await capture('extensions-restarted-unknown',1744,864);
+    });
   }
 }catch(error){
   report.failure={step:currentStep,cause:String(error.stack??error)};
@@ -740,7 +773,7 @@ try{
   const link=path=>relative(join(repo,'docs'),path).replaceAll('\\','/');
   const markdown=`# Orbit UI E2E 결과\n\n- 실행: ${report.startedAt}\n- 모드: ${report.mode}\n- 결과: **${report.status}**\n- agent-browser: ${report.agentBrowser??'확인 실패'}\n- 격리 서버: ${report.url??'실행하지 않음'}\n- 기록: [result.json](${link(out('result.json'))}) · [commands.jsonl](${link(out('commands.jsonl'))})\n\n## 실행 방법\n\n일반 PowerShell에서 프로젝트 루트 기준:\n\n\`\`\`powershell\nnode scripts/verify-orbit-ui.mjs\n\`\`\`\n\n샌드박스용: \`node scripts/verify-orbit-ui.mjs --check-only\`. 이 모드는 제품 빌드·브라우저를 실행하지 않으며 E2E 결과를 not_run으로 남긴다. 설치·권한 확대·자동 수정은 하지 않는다.\n\n## 단계\n\n| 단계 | 결과 |\n| --- | --- |\n${report.steps.map(item=>`| ${item.name} | ${item.status} |`).join('\n')}\n\n## 실패 및 정리\n\n${report.failure?'실패 단계: '+report.failure.step+'\n\n```text\n'+report.failure.cause+'\n```':'실행한 검사에서 보고된 실패 없음. not_run은 성공이 아니다.'}\n\n정리 오류: ${report.cleanupErrors.length?report.cleanupErrors.join('\n'):'없음'}\n\n최소 후속 조치: 실패한 단계의 stdout/stderr와 브라우저 증거를 먼저 확인한다. CLI 스키마 불일치는 설치 버전의 JSON 출력을 확인해 파서만 수정한다. CDP 실행 실패나 파일시스템 접근 거부는 정상 PowerShell의 동일 명령으로 비교하며 보안 우회나 원인 추정으로 성공 처리하지 않는다.\n\n## 스크린샷\n\n${report.screenshots.length?report.screenshots.map(image=>`- [${image.file}](${link(out(image.file))}) (${image.width}×${image.height})`).join('\n'):'0장 — 브라우저 미실행 또는 캡처 단계 미도달. 기존 수동 캡처를 이번 자동 검증 증거로 대체하지 않는다.'}\n\n## 격리와 검증 한계\n\n새 run 디렉터리의 test.sqlite와 두 disposable Git 저장소만 사용한다. 서버는 실제 제품 HTTP/Controller/Store/Projects를 재사용하고 AI factory는 항상 거절한다. 사용자 DB·인증 파일·실제 프로젝트에 접근하지 않는다. 브라우저는 전용 session/namespace, 빈 명시적 설정, 127.0.0.1 도메인 제한을 사용하며 기존 승인 관련 환경변수는 유지한다. 테스트 중 사용한 DB와 증거는 삭제하지 않는다. SIGINT/SIGTERM은 finally 정리를 수행하며 강제 프로세스 종료·OS 종료는 보장할 수 없다.\n\n${report.limitations.map(item=>'- '+item).join('\n')}\n`;
   // The run-local report and docs entry live at different depths.
-  const documented=markdown.replace('새 run 디렉터리의 test.sqlite와 두 disposable Git 저장소만 사용한다.','새 run 디렉터리의 test.sqlite와 네 disposable Git 저장소를 사용한다. 첫 두 primary fixture는 보존하고 실제 병합은 별도 승인된 세 번째 primary에만 반영한다. 네 번째 worktree에서만 고정 workflow 명령과 ignored 표식 및 baseline 전 고정 리뷰 marker를 사용하며 primary와 앞선 세 저장소는 보존한다.').replace('AI factory는 항상 거절한다.','기본 AI factory는 거절하며 여섯 번째 CLI exact grant에서만 네 번째 worktree의 읽기 전용 fake RpcPort를 별도 허용한다. 실제 Codex CLI·AI는 실행하지 않는다.');
+  const documented=markdown.replace('새 run 디렉터리의 test.sqlite와 두 disposable Git 저장소만 사용한다.','새 run 디렉터리의 test.sqlite와 네 disposable Git 저장소를 사용한다. 첫 두 primary fixture는 보존하고 실제 병합은 별도 승인된 세 번째 primary에만 반영한다. 네 번째 worktree에서만 고정 workflow 명령과 ignored 표식 및 baseline 전 고정 리뷰 marker를 사용하며 primary와 앞선 세 저장소는 보존한다.').replace('AI factory는 항상 거절한다.','기본 AI factory는 거절하며 여섯 번째 exact grant의 읽기 전용 리뷰와 일곱 번째 exact grant의 확장 목록에만 네 번째 worktree의 fake RpcPort를 허용한다. 실제 Codex CLI·AI는 실행하지 않는다.');
   writeFileSync(out('report.md'),documented.replaceAll('('+link(runDir)+'/', '('));
   writeFileSync(join(repo,'docs','ORBIT-E2E-RESULTS.md'),documented);
   process.off('SIGINT',interrupt);process.off('SIGTERM',interrupt);

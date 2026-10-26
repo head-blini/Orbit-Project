@@ -92,7 +92,10 @@ export class Controller {
     return structuredClone(this.provider==='ready'&&this.extensionCache?.workspaceId===(this.workspaceId??null)?this.extensionCache:unknownExtensions(this.workspaceId??null));
   }
   private extensionIdle(){if(this.extensionPending)throw new AppError('EXTENSION_QUERY_ACTIVE',409);}
-  private clearExtensions(){this.extensionCache=null;this.knownMcpNames=null;this.extensionPending=null;}
+  private clearExtensions(){
+    const pending=this.extensionPending;this.extensionCache=null;this.knownMcpNames=null;this.extensionPending=null;
+    if(pending)this.store.append('extensions.updated',null,{workspaceId:this.workspaceId??null,busy:false});
+  }
   refreshExtensions(input:{workspaceId:string|null}):Promise<ExtensionInventory>{
     if(!input||Object.keys(input).join(',')!=='workspaceId'||(input.workspaceId!==null&&(typeof input.workspaceId!=='string'||!/^[a-f0-9-]{36}$/.test(input.workspaceId))))throw new AppError('INVALID_FIELDS',400);
     if(input.workspaceId!==(this.workspaceId??null))throw new AppError('WORKSPACE_MISMATCH',409);

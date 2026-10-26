@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync,mkdirSync,writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir } from './temp.ts';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { Store } from '../server/store.ts';

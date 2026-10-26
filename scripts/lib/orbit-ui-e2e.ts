@@ -67,14 +67,23 @@ export function runProcess(executable:string,args:string[],options:{cwd?:string;
   return new Promise((resolveRun,reject)=>{
     if(options.signal?.aborted){reject(new Error('E2E_INTERRUPTED'));return;}
     const child=spawn(executable,args,{cwd:options.cwd,env:options.env,windowsHide:true,shell:false,stdio:['ignore','pipe','pipe']});
-    let stdout='',stderr='',settled=false,timedOut=false,aborted=false,exitDelay:ReturnType<typeof setTimeout>|undefined;
+    let stdout='',stderr='',settled=false,timedOut=false,aborted=false,exitDelay:ReturnType<typeof setTimeout>|undefined,terminationDelay:ReturnType<typeof setTimeout>|undefined;
     child.stdout.on('data',data=>{stdout+=data.toString();});child.stderr.on('data',data=>{stderr+=data.toString();});
     const finish=(code:number|null,signal:NodeJS.Signals|null)=>{
-      if(settled)return;settled=true;clearTimeout(timer);clearTimeout(exitDelay);options.signal?.removeEventListener('abort',abort);
+      if(settled)return;settled=true;clearTimeout(timer);clearTimeout(exitDelay);clearTimeout(terminationDelay);options.signal?.removeEventListener('abort',abort);
       child.stdout.destroy();child.stderr.destroy();
       resolveRun({code:timedOut||aborted?1:code,signal,stdout,stderr,timedOut,aborted,pid:child.pid});
     };
-    const terminate=()=>{if(child.pid)void stopOwnedProcess(child.pid).catch(error=>{stderr+='\n'+String(error);}).finally(()=>finish(1,null));else finish(1,null);};
+    const terminate=()=>{
+      if(!child.pid){finish(1,null);return;}
+      void stopOwnedProcess(child.pid).catch(error=>{stderr+='\n'+String(error);}).finally(()=>{
+        if(settled)return;
+        // kill() sends a signal; only exit/close confirms the owned child ended.
+        // Keep failure bounded if the OS never delivers that confirmation.
+        if(child.exitCode!==null||child.signalCode!==null){finish(1,child.signalCode);return;}
+        terminationDelay=setTimeout(()=>{stderr+='\nOWNED_PROCESS_EXIT_UNCONFIRMED';finish(1,null);},1500);
+      });
+    };
     const abort=()=>{aborted=true;terminate();};
     const timer=setTimeout(()=>{timedOut=true;terminate();},options.timeoutMs??45000);
     options.signal?.addEventListener('abort',abort,{once:true});

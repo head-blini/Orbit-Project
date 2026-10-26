@@ -25,6 +25,8 @@
 - [x] Independent `web/extensions.tsx` renders the four inventory sections, current scope, source/time, unknown version and configured-vs-effective state. Initial render/GET never POSTs. Explicit refresh rejects stale responses, duplicate clicks and foreign project scope. Keep Capability Registry alongside it.
 - [ ] Run focused tests and independent review, then full tests/type/build and Windows browser checks. Add fixture-only known metadata in the existing explicitly granted fake-RPC workspace; verify explicit collection, refresh caching, restart unknown/no auto collection, raw fields absent and prior features preserved.
 
+Mac follow-up: focused39/39, full479pass/1Windows-only skip/type/build0 and independent review completed. The busy-unlock defect was reproduced and fixed. Chrome CUA verified the two dedicated scenarios with2JPEGs and clean teardown. The automated harness now has37steps/45expectedPNGs; its full run and Windows revalidation remain pending. See ORBIT-MASTER-RESULTS for scope and evidence.
+
 ## Review focus
 
 1. A MCP entry is unknown, active, has tools or pagination: never display verified disabled or continue using that session.

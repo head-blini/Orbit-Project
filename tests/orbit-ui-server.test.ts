@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { fork,execFileSync,type ChildProcess } from 'node:child_process';
 import { mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync,existsSync } from 'node:fs';
 import { join,resolve } from 'node:path';
-import { tmpdir } from 'node:os';
+import { tmpdir } from './temp.ts';
 import { once } from 'node:events';
 import { randomUUID,createHash } from 'node:crypto';
 import { isolatedEnvironment } from '../scripts/lib/orbit-ui-e2e.ts';
@@ -210,7 +210,7 @@ test('E2E fourth workflow fixture requires its own exact grant, fixed scoped com
 test('E2E missing Bedrock CLI destination requires the explicit fourth-project grant and never creates a CLI or model request',async()=>{
   const root=mkdtempSync(join(tmpdir(),'orbit-ui-server-bedrock-test-')),sandbox=join(root,'sandbox'),assets=join(root,'assets');mkdirSync(sandbox);mkdirSync(assets);
   writeFileSync(join(root,'e2e-owned.json'),'{}');writeFileSync(join(assets,'index.html'),'<!doctype html><title>missing Bedrock fixture</title>');
-  const first=join(sandbox,'orbit-ui-fixture'),other=join(sandbox,'orbit-ui-other'),merge=join(sandbox,'orbit-ui-merge'),workflow=join(sandbox,'orbit-ui-workflow'),missingCli=join(root,'missing-bedrock','aws.exe');
+  const first=join(sandbox,'orbit-ui-fixture'),other=join(sandbox,'orbit-ui-other'),merge=join(sandbox,'orbit-ui-merge'),workflow=join(sandbox,'orbit-ui-workflow'),missingCli=join(root,'missing-bedrock',process.platform==='win32'?'aws.exe':'aws');
   const env=isolatedEnvironment(process.env),config=join(root,'empty.gitconfig');writeFileSync(config,'');Object.assign(env,{GIT_CONFIG_GLOBAL:config,GIT_CONFIG_NOSYSTEM:'1',GIT_TERMINAL_PROMPT:'0'});
   for(const path of [first,other,merge,workflow]){
     mkdirSync(path);execFileSync('git',['init','-q','-b','main',path],{env,windowsHide:true,stdio:'pipe'});writeFileSync(join(path,'README.md'),'owned missing CLI fixture\n');

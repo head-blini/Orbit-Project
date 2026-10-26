@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {mkdtempSync,readFileSync,existsSync} from 'node:fs';
-import {tmpdir} from 'node:os';
+import {tmpdir} from './temp.ts';
 import {join} from 'node:path';
 import {Store} from '../server/store.ts';
 import type {Projects} from '../server/projects.ts';

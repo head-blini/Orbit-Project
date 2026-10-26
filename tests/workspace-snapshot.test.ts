@@ -1,7 +1,7 @@
 import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir } from './temp.ts';
 import { join } from 'node:path';
 import { fingerprintWorkspace,readWorkspaceSnapshot,readWorkspaceSourceSnapshot,assertWorkspaceManifest } from '../server/workspace-fingerprint.ts';
 

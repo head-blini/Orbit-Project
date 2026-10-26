@@ -18,6 +18,7 @@
 - 2026-10-25 추가 사용자 지시: 기존 전체 설계 완성이 최우선이며 현재 개발 범위의 빌드/테스트/브라우저 검증을 먼저 끝낸다. 그 후 Codex/Claude Code 공식 기능을 Capability Registry에 반영하고 Solo/Cross Review/Debate/Race/Cooperate/Goal 실행 모드를 설계·연결한다.
 - 경쟁 실행은 서로 다른 worktree, 동일한 승인 요구사항 버전·base SHA·명령·E2E 시나리오를 사용한다. 결과 비교는 agent 자기평가가 아닌 실제 검증 증거에 따른다. 구독 인증과 API 과금·권한·사용량 상한을 분리하고, 미지원/미설치/미검증을 ready로 표시하지 않는다.
 - Skills/MCP/Hooks/subagents/Goal/plan/verification 인터페이스는 공식 API/CLI 재사용이 우선. 서드파티는 출처 검토·격리 실험을 거치기 전 설치하거나 활성화하지 않는다. 추가 프레임워크 의존성 도입 없음.
+- 2026-10-26 Mac 재개: 인계 branch `codex/orbit-mac-handoff-2026-10-26`, HEAD `23a9296`의 깨끗한 clone에서 계속한다. Node 24.22.1을 공식 SHA-256 검증 후 ignored `.local/toolchains`에 준비했다. Mac native resolver/진단, canonical 임시 fixture, Bedrock 기본 임시 root, 프로세스 종료 관찰, Extensions 실패 unlock 수정 후 기본 병렬 `npm run verify` 479 pass/1 Windows-only skip/0 fail·type/build0. Task17 Chrome 검증과 전체 Goal은 진행 중이다.
 
 ## 요구사항 상태 (2026-10-26 갱신)
 
@@ -30,7 +31,7 @@
 | E Visualization | 제한 Mermaid flowchart/SVG, architecture, Artifact 이력·source staleness, 실제 editable PPTX/MD·브라우저 저장 검증 | PDF, sequence/C4/UML |
 | F Automation | 로컬 고정 명령 workflow/template 버전·DAG·명시 실행·실패 중단·재시도·lost 복구, 실제 Node·Windows browser 검증 | 예약·외부 서비스 단계 미연결 |
 | G Model Hub | 5종 HTTP 호환 + 공식 AWS CLI 2 Bedrock text adapter·명시 진단/전송·중단·unknown usage/cost·복구; 7종 상태, mock/미설치 E2E | 실제 AWS/외부 실서비스 인증·호환 검증, 고급 라우팅/비용 집계 |
-| H Extensions | 공식 Codex 읽기 전용 metadata inventory·캐시·UI·fake RPC/HTTP 계약 구현 | Task17 전용 browser·독립 최종 리뷰, profile/source·권한 preview/backup/restore·실제 native 조회 |
+| H Extensions | 공식 Codex 읽기 전용 metadata inventory·캐시·UI·fake RPC/HTTP 계약, Mac Chrome 2시나리오·독립 리뷰 | Windows 37단계 통합 재검증, profile/source·권한 preview/backup/restore·실제 native 조회 |
 | I Privacy/Security | loopback/session/Origin/CSRF/MCP·sandbox, 입력 검사·출력 redaction·source fingerprint | 프로젝트별 정책·fallback 재검사·감사 확장 |
 | J Usage | Codex 공식 계정 quota/token 조회·출처/시각·unknown 처리, live available 확인 | 작업별 token/time/retry·API 비용·다른 제공자 집계 |
 | K Runner | 기존 Runner 명령 검증·중단·재시작 quarantine, native Git 후보/ff 반영·관찰 복구 연결 | 다중 worker 결과의 순차 통합 |
@@ -51,14 +52,14 @@
 - [x] Task 9: 공식 Codex/Claude capability 조사 및 Registry·안전한 native 버전 진단·웹 표시. 문서/설치/runtime/policy/test·auth/billing을 분리함. 전체221/type/build/browser18 통과. 실서비스 미검증·미연결 기능은 그대로 표시.
 - [ ] Task 10: 6모드 설계·순수 gate·Race 비교 계약·UI 설명 완료(12 focused+독립리뷰). Solo 기존 실행기 외 5 executor 및 새 gate의 Controller 연결은 미구현. 역할·인계·종료/예산·승인 통합을 다음 수직기능과 연결한다.
 - [x] Task 11: TypeScript 5.9.3 map-only source graph 수직기능. Git 목록·같은 bytes의 fingerprint·민감 경로/links/크기 제한, source-bound 그래프·코드 탐색·잠재 변경 영향·Artifact 현재성. 독립 리뷰 P2 2건 수정. 전체278/278·type/build0·Windows22/22·30PNG·재시작 복구 확인. 다른 언어/runtime정확성은 범위 밖. 새 프레임워크·Graphify 설치 없음.
-- [x] Task 5 HTTP 수직기능: 기본 registry 빈 목록, 7종 상태와 5종 HTTP 호환 adapter 분리. 서버 destination/모델 allowlist/정책·승인, inert GET·명시 models/chat POST, bounded stream·중단·사용량 unknown·재시작 uncertain 구현. 전체303/303·type/build0·Windows24/24·32PNG 통과. 실제 AI/외부 HTTP 0회. Bedrock과 외부 실서비스 검증은 남음.
+- [x] Task 5 HTTP 수직기능: 기본 registry 빈 목록, 7종 상태와 5종 HTTP 호환 adapter 분리. 서버 destination/모델 allowlist/정책·승인, inert GET·명시 models/chat POST, bounded stream·중단·사용량 unknown·재시작 uncertain 구현. 전체303/303·type/build0·Windows24/24·32JPEG 통과. 실제 AI/외부 HTTP 0회. Bedrock과 외부 실서비스 검증은 남음.
 - [x] Task 12: 기획 저장 버전 MD/JSON 무손실 내보내기·Task/Run 개발 증거 피드백. sourceIssue 수집실패 P2 회귀 수정. 전체322/322·type/build0·Windows26/26·34PNG, 실제 다운로드 MD/JSON 재가져오기·피드백 bytes·기존 승인/Task 보존 확인. 계획: docs/superpowers/plans/2026-10-26-planning-handoff.md.
 - [x] Task 13: 승인 raw snapshot→독립 후보 commit→별도 승인→clean 동일 base primary ff 병합. 전체358/358·type/build0·Windows29/29·37PNG. 원 source HEAD/index/bytes·기존 두 fixture 보존과 실제 ff·refresh/restart/no replay 검증. durable intent·멱등성·미확정 관찰 복구, native Goal 명시 차단/Registry 정합성 포함. 계획: docs/superpowers/plans/2026-10-26-approved-merge.md.
 - [x] Task 14: 로컬 명령 워크플로 저장 버전·DAG·preview/별도 승인·실제 Runner·실패 중단·명시 재시도·lost 격리/복구. 전체382/382·type/build0·Windows32/32·40PNG. 실제 exit7/종속 skip·attempt2·실제 중단·restart/no replay·source 보존 확인. 계획: docs/superpowers/plans/2026-10-26-local-workflows.md.
 - [x] Task 15: 선택형 공식 AWS CLI 2 Bedrock catalog/Converse adapter. 전체405/405·type/build0·Windows33/33·41PNG. strict 서버 설정·명시 동의·소유 임시 입력 정리·restart root 보존·unknown 과금, 실제 로컬 Node/mock 계약·미설치 browser 진단/재시작/no replay 검증. 실제 AWS 인증/모델/청구는 미검증. 계획: docs/superpowers/plans/2026-10-26-bedrock-cli.md.
 - [x] Task 16: 공식 Codex 별도 읽기 전용 Native Review. bounded 정제 Diff preview/동의·source/input 결합·단일 review/start·중단·lost 복구·독립 이력 구현. 전체445/445·type/build0·Windows35/35·43PNG 통과. 실제 AI 리뷰와 전체 Cross Review executor는 별도 미검증/미구현. 계획: docs/superpowers/plans/2026-10-26-native-review.md.
 
-- [ ] Task 17: 공식 Skills/Hooks/thread-scoped MCP inventory 구현. 조회 중 실행 상호 배제·60초 캐시·세션 폐기·원문 비노출 및 null 읽기 전용 세션 UI, exact7th grant fixture 포함. 전용 browser2단계와 독립 최종 리뷰 미완료. Mac 인계를 위해 여기서 보존한다. 계획: docs/superpowers/plans/2026-10-26-extension-inventory.md.
+- [x] Task 17 로컬 수직기능: 공식 Skills/Hooks/thread-scoped MCP inventory·실행 상호 배제·60초 캐시·세션 폐기·원문 비노출·null 읽기 전용 세션 UI. Mac 기본 전체479pass/1skip·type/build0, focused39/39, 독립 리뷰의 실패 unlock 수정 후 추가 지적 없음. exact7th fixture와 Chrome CUA 2시나리오·2JPEG에서 명시 수집/캐시/restart unknown·자동 조회0·source 보존 확인. 통합 스크립트는37단계/45PNG로 확장했으나 전체 실행 및 Windows 재검증은 남아 있다. 실제 native 목록 조회도 미검증. 계획: docs/superpowers/plans/2026-10-26-extension-inventory.md.
 
 ## 검토 초점
 

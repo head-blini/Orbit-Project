@@ -76,7 +76,7 @@ const modelHubDefinitions=[{id:'e2e-local-model',label:'E2E localhost model fixt
 // Explicit fourth-project fixture only. Never create an executable, read AWS
 // credential values, or contact AWS. Runtime absence must precede credential IO.
 if(workflowEnabled)modelHubDefinitions.push({id:'bedrock-missing-cli',label:'Bedrock CLI missing fixture',providerId:'bedrock',enabled:true,projectPaths:[workflowProjectPath],
-  models:['amazon.nova-micro-v1:0'],cliPath:containedPath(root,'missing-bedrock','aws.exe'),region:'us-east-1',
+  models:['amazon.nova-micro-v1:0'],cliPath:containedPath(root,'missing-bedrock',process.platform==='win32'?'aws.exe':'aws'),region:'us-east-1',
   credentialEnvs:{accessKeyId:'ORBIT_BEDROCK_ACCESS_KEY',secretAccessKey:'ORBIT_BEDROCK_SECRET_KEY',sessionToken:null},timeoutMs:2000,maxOutputTokens:8});
 const modelHubConfig=readModelHubConfiguration(JSON.stringify(modelHubDefinitions));
 // Separate explicit sixth-argument grant. This fake implements RpcPort only;

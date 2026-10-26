@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir } from './temp.ts';
 import { join } from 'node:path';
 import { acquireInstance } from '../server/instance.ts';
 test('second instance cannot acquire shared data; clean shutdown permits restart',()=>{

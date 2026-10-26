@@ -1,7 +1,7 @@
 import {spawn as nativeSpawn,type ChildProcess,type SpawnOptions} from 'node:child_process';
-import {lstatSync} from 'node:fs';
 import {delimiter,isAbsolute,join} from 'node:path';
 import {findCodex} from './codex.ts';
+import {resolveNativeExecutable} from './native-executable.ts';
 import {buildChildEnv} from './child-env.ts';
 import type {NativeProbe,NativeProbeReport} from '../shared/capabilities.ts';
 export type {NativeProbe,NativeProbeReport} from '../shared/capabilities.ts';
@@ -14,9 +14,8 @@ const empty=(status:NativeProbe['status']):NativeProbe=>({status,version:null});
 export interface NativeProbeDependencies {
   findCodex?:()=>string;path?:string;isFile?:(path:string)=>boolean;
   spawn?:(executable:string,args:string[],options:SpawnOptions)=>ChildProcess;
-  env?:NodeJS.ProcessEnv;now?:()=>number;
+  env?:NodeJS.ProcessEnv;now?:()=>number;platform?:NodeJS.Platform;
 }
-function regularFile(path:string){try{return lstatSync(path).isFile();}catch{return false;}}
 
 /** Dependency injection is for trusted server tests only. No lookup or execution
  * occurs until the returned function is explicitly called. Found versions do not
@@ -24,13 +23,17 @@ function regularFile(path:string){try{return lstatSync(path).isFile();}catch{ret
  */
 export function createNativeVersionProbe(dependencies:NativeProbeDependencies={}){
   return async():Promise<NativeProbeReport>=>{
-    const now=dependencies.now??Date.now,isFile=dependencies.isFile??regularFile;
+    const now=dependencies.now??Date.now,platform=dependencies.platform??process.platform;
+    const executable=(path:string)=>{
+      if(!isAbsolute(path)||(platform==='win32'&&!path.toLowerCase().endsWith('.exe')))return null;
+      return dependencies.isFile?(dependencies.isFile(path)?path:null):resolveNativeExecutable(path,platform);
+    };
     const checkedAt=new Date(now()).toISOString();
     let env:NodeJS.ProcessEnv;
-    try{env=buildChildEnv(dependencies.env??process.env);}catch{return {checkedAt,codex:empty('failed'),claude:empty('failed')};}
+    try{env=buildChildEnv(dependencies.env??process.env,platform);}catch{return {checkedAt,codex:empty('failed'),claude:empty('failed')};}
     const launch=dependencies.spawn??((executable,args,options)=>nativeSpawn(executable,args,options));
     async function execute(kind:'codex'|'claude',path:string):Promise<NativeProbe>{
-      try{if(!isAbsolute(path)||!path.toLowerCase().endsWith('.exe')||!isFile(path))return empty('failed');}catch{return empty('failed');}
+      try{const native=executable(path);if(!native)return empty('failed');path=native;}catch{return empty('failed');}
       return await new Promise<NativeProbe>(resolve=>{
         let child:ChildProcess,done=false,timer:NodeJS.Timeout|undefined,total=0;
         const chunks:Buffer[]=[];
@@ -64,7 +67,7 @@ export function createNativeVersionProbe(dependencies:NativeProbeDependencies={}
       try{
         for(const directory of (dependencies.path??env.PATH??'').split(delimiter)){
           if(!isAbsolute(directory))continue;
-          const path=join(directory,'claude.exe');if(isFile(path))return execute('claude',path);
+          const path=join(directory,platform==='win32'?'claude.exe':'claude');if(executable(path))return execute('claude',path);
         }
         return empty('not_found_on_path');
       }catch{return empty('failed');}

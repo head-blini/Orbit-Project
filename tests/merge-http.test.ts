@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync,mkdirSync,writeFileSync,readFileSync } from 'node:fs';
 import { join,resolve } from 'node:path';
-import { tmpdir } from 'node:os';
+import { tmpdir } from './temp.ts';
 import { Store } from '../server/store.ts';
 import { Projects } from '../server/projects.ts';
 import { Controller } from '../server/controller.ts';

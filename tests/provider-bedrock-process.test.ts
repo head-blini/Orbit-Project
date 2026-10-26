@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtempSync} from 'node:fs';
-import {tmpdir} from 'node:os';
+import {tmpdir} from './temp.ts';
 import {join} from 'node:path';
 const processModule=await import('../server/providers/bedrock-process.ts').catch(()=>null);
 function api(){assert.ok(processModule,'bounded Bedrock subprocess must exist');return processModule;}

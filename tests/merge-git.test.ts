@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,existsSync,lstatSync,unlinkSync} from 'node:fs';
 import {join,delimiter,isAbsolute,relative,resolve} from 'node:path';
-import {tmpdir} from 'node:os';
+import {tmpdir} from './temp.ts';
 import {randomUUID} from 'node:crypto';
 
 const gitBinary=(process.env.PATH??'').split(delimiter).filter(isAbsolute).map(path=>join(path,process.platform==='win32'?'git.exe':'git')).find(path=>existsSync(path)&&lstatSync(path).isFile())!;

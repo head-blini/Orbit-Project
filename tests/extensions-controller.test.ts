@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {EventEmitter} from 'node:events';
 import {mkdtempSync} from 'node:fs';
-import {tmpdir} from 'node:os';
+import {tmpdir} from './temp.ts';
 import {join} from 'node:path';
 import {Store} from '../server/store.ts';
 import {Controller} from '../server/controller.ts';
@@ -85,6 +85,25 @@ test('an unexpected MCP runtime invalidates native launch permission instead of 
     assert.equal(f.rpc.calls.some(c=>c.method==='skills/list'||c.method==='hooks/list'),false);
     await assert.rejects(f.controller.submit({requestId:'after-bad-inventory',prompt:'hello'}),/NOT_CONNECTED/);
   }finally{await f.close();}
+});
+
+test('failed isolation and transport closure publish an inventory unlock before any late result',async()=>{
+  for(const kind of ['isolation','closed']){
+    const f=fixture();let release!:(value:unknown)=>void;
+    try{
+      await f.controller.connect();f.rpc.holdMcp=new Promise(resolve=>{release=resolve;});
+      const pending=f.controller.refreshExtensions({workspaceId:null});await tick();
+      assert.equal(f.controller.snapshot().extensionBusy,true);
+      if(kind==='isolation'){
+        release({data:[{name:'foreign',runtimeStatus:'connected',tools:{danger:{}}}],nextCursor:null});
+        await assert.rejects(pending,/MCP_ISOLATION_REQUIRED/);
+      }else{await f.rpc.close();await tick();}
+      assert.equal(f.controller.snapshot().extensionBusy,false);
+      assert.deepEqual(f.store.eventsAfter(0).filter(e=>e.kind==='extensions.updated').map(e=>e.data.busy),[true,false]);
+      if(kind==='closed'){release({data:[],nextCursor:null});await pending;}
+      assert.deepEqual(f.store.eventsAfter(0).filter(e=>e.kind==='extensions.updated').map(e=>e.data.busy),[true,false]);
+    }finally{release?.({data:[],nextCursor:null});await f.close();}
+  }
 });
 
 test('a late isolation failure from a closed RPC cannot disconnect the new verified session',async()=>{

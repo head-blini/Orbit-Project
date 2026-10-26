@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtempSync,readFileSync,writeFileSync,readdirSync,existsSync,mkdirSync,linkSync} from 'node:fs';
 import {join} from 'node:path';
-import {tmpdir} from 'node:os';
+import {tmpdir} from './temp.ts';
 import {randomUUID} from 'node:crypto';
 
 const transport=await import('../server/providers/bedrock-transport.ts').catch(()=>null);

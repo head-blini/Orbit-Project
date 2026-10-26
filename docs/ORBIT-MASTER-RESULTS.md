@@ -144,7 +144,7 @@
 - SQLite요청/진단서비스, explicitCSRF POST, inertGET, allowlist교집합models, textstream·중단·재시작lost·동일request중복전송방지를연결했다. 원문prompt는별도DB필드에저장하지않고 response는safeText만보존하며 audit에는ID/status만남긴다. 응답DB갱신은200ms로제한한다.
 - ModelHub처음단위검사는missingmodule로RED, HTTP처음은미구현route로RED. 구현후service4/HTTP1통과. Controller/HTTP/SSR관련합계27/27 및전체type exit0 확인. 실제외부서비스나인증정보를사용하지않았다.
 - 독립리뷰P2: 기존128000byte예약이64000자CJK/JSONescape출력을수용하지못하는storagequota초과를재현했다. UTF16unit당최대6 JSONbytes+metadata를전송전에예약하도록수정,실제SQLite에bounded CJK이력을채운후추가network0으로거절하는회귀통과. 다른확정P1/P2는현재읽은service/config/HTTP범위에서없었다.
-- 최종 Model Hub gate 1회: **전체303/303·타입·빌드 exit0, Windows24/24·32PNG**. 증거 `C:/Users/lclk1/AppData/Local/Temp/orbit-e2e-11B9Ee` (2026-10-25T15:31:19.661Z 시작). 초기·동의 전 mock통신0, models1·chat2, 개인정보 차단 시 증가0, hang interrupt 후 socket abort, refresh/restart 후 재전송0·동일 설정/이력 복구를 확인했다. 실제 AI·계정 조회·외부 HTTP0회.
+- 최종 Model Hub gate 1회: **전체303/303·타입·빌드 exit0, Windows24/24·32JPEG**. 증거 `C:/Users/lclk1/AppData/Local/Temp/orbit-e2e-11B9Ee` (2026-10-25T15:31:19.661Z 시작). 초기·동의 전 mock통신0, models1·chat2, 개인정보 차단 시 증가0, hang interrupt 후 socket abort, refresh/restart 후 재전송0·동일 설정/이력 복구를 확인했다. 실제 AI·계정 조회·외부 HTTP0회.
 - cleanupErrors0, 브라우저와 서버5개 종료·앱/mock 포트 닫힘·원본 fixture 보존. 메인 에이전트가31-model-hub-current PNG를 직접 확인했다. UI의 “요청 출력 상한”은 공급자 준수 여부 미확인을 명시한다. Bedrock·외부 서비스 인증은 미구현/미검증이며 전체 Goal은 미완료다.
 
 ## Planning 내보내기·피드백 진행 (2026-10-26)
@@ -211,3 +211,24 @@
 - 인계 시 실제 도구: Node v24.22.1, Git2.56.0.windows.3. 타입/build exit0. 첫 전체 실행은471중470pass/1fail(exit1): 기존merge-http의fetch ECONNRESET. 원인 확정 없이 성공 처리하지 않으며 해당 집중검사 및 동일 전체검사를 재실행한다.
 - 인계 전체 재검사도471중470pass/1fail(exit1), 동일merge-http ECONNRESET. 집중merge-http1/1 exit0(25.2초). 원인은 미확정이며 테스트 삭제/완화/재시도 코드는 추가하지 않았다. 같은 전체검사를 concurrency4로 확인 중이다.
 - 최종 인계 bounded 전체검사 `node --test --test-concurrency=4 tests/*.test.ts spikes/phase0/*.test.mjs`: **471/471·fail/skip0·exit0**(86.8초). 타입·build0, staged diff 공백 검사0. 기본 병렬 전체검사의 ECONNRESET은 미해결로 기록하며 Task17 전용 browser/Mac native 검증은 미실행이다. 추가 기능 구현 없이 인계 브랜치에 보존한다.
+
+## Mac 재개: 런타임·회귀 (2026-10-26)
+
+- 시작 branch `codex/orbit-mac-handoff-2026-10-26`, HEAD `23a9296b80c09f7b226478e8c2bc03dd4f7400ad`, dirty 없음. macOS 26.2 arm64, Git 2.50.1 (Apple Git-155), 기본 Node25.8.2는 engine 범위 밖이었다. 공식 Node24.22.1 darwin-arm64 배포본 SHA-256 `89c682593d76cd44233fa53b1563264e7de9cbb189cad169135c5b4fadfbc0a7` 확인 후 `.local/toolchains`에 설치했다. 시스템 Node는 변경하지 않았다.
+- 최초 `npm ci`는 Node25 engine 경고 후 제한된 네트워크의 registry ENOTFOUND로 exit1. Node24와 허용된 registry 접근으로 `npm ci --cache .local/npm-cache --no-audit --no-fund` exit0(11 packages). esbuild postinstall 승인 미설정 경고는 있었지만 설치된 플랫폼 패키지로 아래 실제 build가 통과했다. lockfile 변경 없음.
+- Mac PATH의 codex는 npm JS symlink였다. native 파일 검증(regular/executable/header), absolute PATH, npm nested/sibling/bundled vendor, native symlink와 명시 override를 구현했다. shell wrapper를 실행하지 않는다. Windows 파일/패키지 회귀와 격리 옵션은 유지한다. resolver RED3fail→GREEN5/5, native probe Mac RED→GREEN, 관련21/21·type0. 독립 리뷰의 Windows-host POSIX fixture 지적을 반영해 해당 OS 전용 케이스를 구분했다. 실제 Windows/Linux runtime은 이번에 실행하지 않았다.
+- 설치 native `codex-cli 0.162.1`의 `--version`, readonly/write의 모든 restricted flag를 `features list`로 확인(exit0). 공식 `app-server generate-json-schema` exit0, `.local/capability-schema-mac`의 Skills/Hooks/thread-scoped MCP/Review schema를 확인했다. 모델·account RPC·인증 파일 접근은 하지 않았다. 실제 native 세션/리뷰/inventory 성공을 뜻하지 않는다.
+- 첫 기본 `npm run verify`: type0, **477중415pass/61fail/1skip**, build 미도달. `.local/verification/mac-first-verify.log`. Mac `/var` OS temp alias를 no-link 정책이 거절한 실패가 다수였다. 같은 기본 병렬 전체검사를 canonical TMPDIR에서 진단: **471pass/5fail/1skip**, `.local/verification/mac-canonical-temp-diagnostic.log`. merge-http는 통과했고 ECONNRESET은 재현되지 않았다.
+- 테스트 fixture의 OS temp root만 정규화하는 `tests/temp.ts`를 도입하고 생산 경로 보호는 유지했다. 실제 Bedrock 기본 temp root도 canonical OS 경로로 저장하도록 RED→GREEN 보완했다. 명시한 linked temp root는 계속 거절한다. E2E fixture의 `aws.exe`를 플랫폼별 이름으로 수정하고, kill 요청 후 소유 child exit/close 관찰 전에 완료를 반환하던 경합을 수정했다. 관련18/18 exit0.
+- Task17 독립 리뷰에서 MCP 실패/transport 종료 뒤 server busy는 false지만 UI busy가 true로 남는 경로를 실제 Controller/reducer/AgentCenter로2/2 재현했다. `clearExtensions`의 unlock 이벤트 누락 회귀 RED→GREEN으로 수정했다. 이전 session의 지연 finally가 새 request를 해제하지 않는 기존 경계는 유지했다.
+- 최종 기본 환경 `npm run verify` **exit0: type0, 전체480중479pass/1 Windows-only skip/0fail, build0**(tests22.6초). `.local/verification/mac-second-verify.log`. concurrency 변경·재시도·assertion 완화 없음. 기본 병렬 merge-http가 통과했지만 과거 Windows ECONNRESET의 원인이 해결됐다고 주장하지 않는다.
+- Task17 전용 Chrome 수집/캐시·재시작 검증은 진행 중이다. agent-browser CLI는 이 Mac PATH에 없으므로 연결된 Chrome 도구와 동일 exact-grant fixture로 검증한다. 전체35/37단계 gate와 구분해 기록한다. 전체 Goal 미완료.
+
+### Task17 Mac 브라우저·독립 검토 완료
+
+- 연결된 Chrome CUA로 **전용 2시나리오·2JPEG**를 확인했다. 증거 `.local/ui-e2e/mac-task17-tMEmcL/result.json` 및 `screenshots/01-extensions-collected.jpg`, `02-extensions-restarted.jpg`. 실제 제품 Controller/HTTP/SQLite/UI와 exact seventh-grant fake RPC를 사용했다. 제품 연결은 created1/MCP1/Skills0/Hooks0, 명시 조회 뒤 MCP2/Skills1/Hooks1이었다. 연속 조회·캐시 새로고침·브라우저 reload 후 같은 계수와 목록을 유지했다.
+- Skills 버전·실행은 unknown, Hook configured enabled와 blocked execution·native trust 별도, MCP disabled override·Plugins 미연결을 화면에서 확인했다. 합성 금지 원문 marker와 로컬 경로는 화면/cache에 없었다. 실제 AI/CLI/외부 요청0, 금지 RPC0이다.
+- 서버 재시작 후 모든 RPC 계수0, disconnected·목록 unknown·조회 버튼 비활성으로 복원했다. primary/source HEAD·index·digest는 baseline과 동일하며 DB/WAL/SHM에 합성 금지 marker가 없었다. 소유 서버2개 exit0 관찰·loopback 포트 종료·브라우저 탭 종료, cleanupErrors0. 서버를 분리하려던 `/app.css` 이동은 Chrome client가 차단하여 `about:blank`로 전환했다. 제품 화면에서 수집한 console 경고/오류는0이었다.
+- `scripts/verify-orbit-ui.mjs`에 같은2단계 및 seventh grant·IPC counters·DB 원문 부재·기존 fixture 보존 검사를 추가했다. 총37단계/예정45PNG이며 구문·diff 공백 검사 exit0, 관련 **39/39 exit0** (`.local/verification/task17-final-focused.log`). 독립 최종 리뷰 추가 지적 없음, 리뷰어 focused3/3·구문0. **전체37단계 자동 브라우저·Windows 재검증·실제 native inventory는 미실행**이다. Mac 전용2시나리오를 전체 통합 pass로 집계하지 않는다.
+- 전체 Goal은 미완료다. 다음 수직기능은 기존 Planning 버전의 차이·영향 Task를 표시하고 명시 승인 후 후속 Task를 만드는 재계획 경로이다.
+- 보존 직전 기본 `npm run verify` 재실행도 **type0·479pass/1skip/0fail·build0**, exit0(22.3초)이었다. 로그 `.local/verification/mac-task17-final-verify.log`. CUA screenshot은 실제 JPEG bytes여서 최초 PNG signature assertion이 실패했으며 파일명을 `.jpg`로 정정하고 증거 hash를 기록했다. 픽셀 변환은 하지 않았다.

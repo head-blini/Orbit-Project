@@ -3,8 +3,12 @@ import assert from 'node:assert/strict';
 import {EventEmitter} from 'node:events';
 import type {ChildProcess,SpawnOptions} from 'node:child_process';
 import {join,delimiter} from 'node:path';
-import {tmpdir} from 'node:os';
-import {createNativeVersionProbe,createNativeProbeService,type NativeProbeReport} from '../server/capability-probe.ts';
+import {tmpdir} from './temp.ts';
+import {chmodSync,mkdtempSync,realpathSync,rmSync,symlinkSync,writeFileSync} from 'node:fs';
+import {createNativeVersionProbe as createProbe,createNativeProbeService,type NativeProbeReport,type NativeProbeDependencies} from '../server/capability-probe.ts';
+
+// Keep the original Windows contracts explicit on all test hosts.
+const createNativeVersionProbe=(dependencies:NativeProbeDependencies)=>createProbe({platform:'win32',...dependencies});
 
 const root=join(tmpdir(),'orbit-native-fixture'),codex=join(root,'codex.exe'),claude=join(root,'claude.exe');
 function child(output:string,code=0,stderr=''){
@@ -71,4 +75,18 @@ test('cache normalizes probe exceptions and unexpected report strings without ex
   for(const probe of [async()=>{throw new Error('SYNTHETIC_PRIVATE_DETAILS');},async()=>({checkedAt:'SYNTHETIC_PRIVATE_DETAILS',codex:{status:'found',version:'SYNTHETIC_PRIVATE_DETAILS'},claude:{status:'failed',version:null}} as NativeProbeReport)]){
     const service=createNativeProbeService(probe);const report=await service.refresh();assert.equal(JSON.stringify(report).includes('SYNTHETIC'),false);assert.deepEqual(report.codex,{status:'unknown',version:null});
   }
+});
+
+test('macOS version probe follows native symlinks and rejects executable script wrappers',{skip:process.platform==='win32'},async t=>{
+  const directory=realpathSync(mkdtempSync(join(tmpdir(),'orbit-native-mac-')));t.after(()=>rmSync(directory,{recursive:true,force:true}));
+  const native=join(directory,'codex-native');writeFileSync(native,Buffer.from('cffaedfe00000000','hex'));chmodSync(native,0o755);
+  symlinkSync(native,join(directory,'claude'));
+  const calls:string[]=[];
+  const probe=createProbe({platform:'darwin',findCodex:()=>native,path:directory,env:{PATH:directory},spawn:(executable,args,options)=>{
+    calls.push(executable);assert.deepEqual(args,['--version']);assert.equal(options.shell,false);
+    return child(calls.length===1?'codex-cli 0.162.1\n':'2.1.31 (Claude Code)\n');
+  }});
+  const report=await probe();assert.equal(report.codex.version,'0.162.1');assert.equal(report.claude.version,'2.1.31');assert.deepEqual(calls,[native,native]);
+  writeFileSync(native,'#!/bin/sh\necho codex-cli 0.162.1\n');
+  const rejected=await probe();assert.equal(rejected.codex.status,'failed');assert.equal(rejected.claude.status,'not_found_on_path');assert.equal(calls.length,2);
 });

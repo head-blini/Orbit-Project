@@ -11,7 +11,10 @@ function directory(path:string){
   if(typeof path!=='string'||!isAbsolute(path)||/[\x00-\x1f\x7f]/.test(path)||path.split(/[\\/]/).some(part=>part==='.'||part==='..'))unavailable();
   const root=resolve(path);for(let p=root;;p=dirname(p)){const value=stat(p);if(!value?.isDirectory()||value.isSymbolicLink()||realpathSync(p).toLowerCase()!==p.toLowerCase())unavailable();if(dirname(p)===p)break;}return root;
 }
-function location(requestId:string,tempRoot?:string){if(!bedrockRequestId(requestId))unavailable();const root=directory(tempRoot??tmpdir());return join(root,'orbit-bedrock-'+requestId);}
+// Normalize only the OS-selected default. Explicit configuration still passes
+// the strict no-link policy, and the service persists this canonical root.
+export function bedrockTemporaryRoot(tempRoot?:string):string {return directory(tempRoot??realpathSync(tmpdir()));}
+function location(requestId:string,tempRoot?:string){if(!bedrockRequestId(requestId))unavailable();return join(bedrockTemporaryRoot(tempRoot),'orbit-bedrock-'+requestId);}
 export interface BedrockTemporary {path:string;requestId:string;config:string;credentials:string;boto:string}
 export function createBedrockTemporary(requestId:string,tempRoot?:string):BedrockTemporary {
   try{

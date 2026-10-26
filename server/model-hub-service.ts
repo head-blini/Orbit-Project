@@ -1,5 +1,5 @@
 import { createHash,randomUUID } from 'node:crypto';
-import {tmpdir} from 'node:os';
+import {bedrockTemporaryRoot} from './providers/bedrock-temporary.ts';
 import type { Store } from './store.ts';
 import { AppError } from './errors.ts';
 import { safeText } from './privacy.ts';
@@ -129,7 +129,7 @@ export class ModelHubService {
       if(Number(usage.count)>=200||Number(usage.bytes)+reserved>16*1024*1024)throw new AppError('MODEL_HISTORY_QUOTA',413);
       // Persist the owned base before any process/input file. A restarted server
       // with a different TEMP must clean the original location, not a new one.
-      if(config.providerId==='bedrock'&&!this.store.getMeta('bedrockTemporaryRoot'))this.store.setMeta('bedrockTemporaryRoot',this.bedrockDependencies.tempRoot??tmpdir());
+      if(config.providerId==='bedrock'&&!this.store.getMeta('bedrockTemporaryRoot'))this.store.setMeta('bedrockTemporaryRoot',bedrockTemporaryRoot(this.bedrockDependencies.tempRoot));
       this.store.db.prepare('INSERT INTO model_hub_requests VALUES(?,?,?,?,?)').run(record.id,record.requestId,digest,record.projectId,JSON.stringify(record));
       this.store.append('model.request_updated',null,{requestId:record.id,projectId:record.projectId,destinationId:record.destinationId,execution:record.execution});
     });
