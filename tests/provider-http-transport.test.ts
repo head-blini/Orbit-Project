@@ -7,6 +7,7 @@ import { EventEmitter } from 'node:events';
 import { Readable } from 'node:stream';
 import type { AddressInfo } from 'node:net';
 import { createHttpProviderTransport,type HttpTransportConfig,type HttpChatEvent } from '../server/providers/http-transport.ts';
+import {AppError} from '../server/errors.ts';
 
 async function fixture(handler:http.RequestListener){
   const server=http.createServer(handler);await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
@@ -222,6 +223,14 @@ test('external resolution rejects private, special, mapped, IPv6 and mixed DNS r
     const transport=createHttpProviderTransport(config('https://models.example.test/v1',{providerId:'openai-compatible',locality:'external',requireCredential:true,credential:()=> 'synthetic'}));
     await assert.rejects(transport.listModels(),/^Error: PROVIDER_DESTINATION_REJECTED$/);
   }
+});
+
+test('dispatch admission is checked after DNS and before the HTTP request',async t=>{
+  let blocked=false,calls=0;
+  t.mock.method(dns,'lookup',async()=>{blocked=true;return [{address:'1.1.1.1',family:4}] as never;});
+  t.mock.method(https,'request',(()=>{calls++;throw new Error('NO_EXTERNAL_REQUEST');}) as typeof https.request);
+  const transport=createHttpProviderTransport(config('https://models.example.test/v1',{providerId:'openai-compatible',locality:'external'}),()=>{if(blocked)throw new AppError('SOLO_RECOVERY_REQUIRED');});
+  await assert.rejects(transport.listModels(),/^Error: SOLO_RECOVERY_REQUIRED$/);assert.equal(calls,0);
 });
 
 test('verified external IPv4 is pinned to its hostname with strict TLS and no proxy or global agent reuse',async t=>{

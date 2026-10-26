@@ -5,6 +5,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from './temp.ts';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
+import {randomUUID} from 'node:crypto';
 import { Controller } from '../server/controller.ts';
 import { Store } from '../server/store.ts';
 import { Projects } from '../server/projects.ts';
@@ -28,7 +29,8 @@ test('only selected workspace reaches Codex; runs and threads scoped, active swi
     const start=rpc.calls.find(x=>x.method==='thread/start')!.params;assert.equal(start.cwd,a.path);assert.equal(start.sandbox,'workspace-write');assert.equal(start.approvalPolicy,'on-request');assert.deepEqual(start.config.mcp_servers,{local:{enabled:false}});assert.deepEqual(start.config.sandbox_workspace_write.writable_roots,[]);
     const run=await c.submit({requestId:'workspace-request-a',prompt:'change code',workspaceId:a.id});assert.equal(run.workspaceId,a.id);const turn=rpc.calls.find(x=>x.method==='turn/start')!.params;assert.equal(turn.cwd,a.path);assert.equal(turn.sandboxPolicy.excludeTmpdirEnvVar,true);assert.equal(turn.sandboxPolicy.networkAccess,false);
     await assert.rejects(c.selectWorkspace(b.id),/RUN_ACTIVE/);writeFileSync(join(a.path,'code.ts'),'changed\n');rpc.emit('closed');assert.equal(store.getRun(run.id)!.execution,'lost');
-    await c.selectWorkspace(b.id);assert.equal(c.snapshot().runs.length,0);assert.equal(c.snapshot().threadId,null);await c.connect();await c.selectWorkspace(a.id);await c.connect();assert.equal(c.snapshot().runs[0].id,run.id);assert.equal(rpc.calls.filter(x=>x.method==='turn/start').length,1);assert.ok(rpc.calls.some(x=>x.method==='thread/resume'));assert.equal(readFileSync(join(a.path,'code.ts'),'utf8'),'changed\n');assert.equal(readFileSync(join(root,'code.ts'),'utf8'),'original\n');
+    await assert.rejects(c.selectWorkspace(b.id),/SOLO_RECOVERY_REQUIRED/);await assert.rejects(c.connect(),/SOLO_RECOVERY_REQUIRED/);
+    assert.equal(c.snapshot().runs[0].id,run.id);assert.equal(rpc.calls.filter(x=>x.method==='turn/start').length,1);assert.ok(!rpc.calls.some(x=>x.method==='thread/resume'));assert.equal(readFileSync(join(a.path,'code.ts'),'utf8'),'changed\n');assert.equal(readFileSync(join(root,'code.ts'),'utf8'),'original\n');
   }finally{await c.close();store.close();}
 });
 test('a stale browser cannot submit to the workspace another tab selected',async()=>{
@@ -36,4 +38,21 @@ test('a stale browser cannot submit to the workspace another tab selected',async
 });
 test('workspace policy with extra writable root or temporary grants never reaches ready',async()=>{
   const {store,c,rpc,a}=setup();try{await c.selectWorkspace(a.id);for(const patch of [{writableRoots:[tmpdir()]},{excludeTmpdirEnvVar:false},{excludeSlashTmp:false},{networkAccess:true},{type:'dangerFullAccess'}]){rpc.policyPatch=patch;await assert.rejects(c.connect(),/POLICY_MISMATCH/);assert.equal(c.snapshot().provider,'error');}assert.equal(rpc.calls.some(x=>x.method==='turn/start'),false);}finally{await c.close();store.close();}
+});
+test('public service paths and another workspace cannot bypass persisted Solo quarantine',async()=>{
+  const {store,c,a,b,rpc,root}=setup();try{
+    await c.selectWorkspace(a.id);
+    const run=store.createRun('solo-uncertain-fixture','digest','Fixture',a.id);store.updateRun(run.id,{execution:'lost'},'run.lost');
+    const hash='a'.repeat(64),id=randomUUID();
+    assert.throws(()=>c.verification.start({requestId:id,workspaceId:a.id,runId:run.id,commandId:'fixture',expectedSourceDigest:hash,expectedConfigDigest:hash}),/RUN_ACTIVE/);
+    assert.throws(()=>c.verification.approve({requestId:id,workspaceId:a.id,runId:run.id,expectedSourceDigest:hash,expectedCheckSetDigest:hash}),/VERIFICATION_REQUIRED/);
+    assert.throws(()=>c.workflows.preview(b.id,id),/WORKFLOW_BUSY/);
+    assert.throws(()=>c.reviews.preview(a.id,run.id),/REVIEW_BUSY/);
+    assert.throws(()=>c.planningSuggestions.preview(a.projectId,{workspaceId:a.id,text:'Plan a local app'}),/PLANNING_BUSY/);
+    assert.throws(()=>c.merges.prepare({requestId:id,workspaceId:a.id,runId:run.id,expectedSourceDigest:hash,expectedCheckSetDigest:hash,expectedApprovalId:id,expectedTargetBranch:'main',expectedTargetHead:a.baseSha}),/MERGE_BUSY/);
+    await assert.rejects(c.modelHub.diagnose('fixture',{projectId:a.projectId,expectedConfigDigest:hash,confirmed:true}),/SOLO_RECOVERY_REQUIRED/);
+    assert.throws(()=>c.modelHub.start({requestId:id,projectId:a.projectId,destinationId:'fixture',expectedConfigDigest:hash,confirmed:true,model:'fixture',text:'Fixture'}),/SOLO_RECOVERY_REQUIRED/);
+    assert.equal(c.snapshot().soloRecoveryRequired,true);assert.equal(c.modelHub.view(a.projectId).requests.length,0);
+    assert.equal(store.runs().length,1);assert.equal(rpc.calls.length,0);assert.equal(readFileSync(join(root,'code.ts'),'utf8'),'original\n');
+  }finally{await c.close();store.close();}
 });

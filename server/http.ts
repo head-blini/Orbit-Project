@@ -125,6 +125,7 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
         }
         if(url.pathname==='/api/capabilities/probe'){
           exact(data,[]);
+          controller.assertExecutionAvailable();
           const probe=await nativeProbe.refresh();
           json(res,200,buildCapabilityRegistry(controller.snapshot().provider,probe));return;
         }

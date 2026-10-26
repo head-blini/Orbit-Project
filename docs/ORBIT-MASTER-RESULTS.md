@@ -1,5 +1,17 @@
 # Orbit 전체 구현·검증 증거
 
+## Task26 — Solo 종료 불확실 실행 격리 (2026-10-27)
+
+- Task25 local commit `25ecf4a` 위에서 진행. 저장된 lost Run 또는 저장 실패 시 메모리 차단 상태가 있으면 재연결·새 프롬프트·작업 공간 변경과 Check/Review/Planning/Workflow/Merge/Model Hub의 새 실행을 차단한다. 기존 요청 결과 재조회와 기록·상태 조회는 실행을 반복하지 않는다. 같은 상태 DB 재시작 시 unresolved Run을 lost로 읽어 계속 차단한다.
+- RPC closed 시 generation을 먼저 무효화한다. lost 저장 실패 후 늦은 완료 알림이 durable Run을 completed로 덮는 경계 결함을 독립 리뷰/FakeRpc로 재현해 수정했다. 현재 concrete Rpc의 close 이후 stdout은 이미 차단되며, 일반 OS 종료에서 자연 발생까지 확인한 것은 아니다.
+- Model Hub는 접수·비동기 대기 이후·실제 HTTP request/Bedrock invoke 직전에 동일 admission을 확인한다. DNS/CLI 버전 대기 중 Solo loss가 발생해도 후속 전송을 하지 않는다. 서버 내부 함수 인자만 사용하며 browser 설정 필드를 추가하지 않았다. 차단 사유는 `SOLO_RECOVERY_REQUIRED`로 보존한다.
+- 실패 기록: `solo-quarantine-red.log` 1fail, `solo-quarantine-red2.log` restart/storage/workspace RED, `solo-ui-red.log` 1fail. `solo-services.log`는 승인 경로의 기대 오류가 잘못되어 1fail 후 수정. 첫 전체 `solo-quarantine-verify.log`는 HTTP 대역의 새 메서드 누락으로 1개 테스트 실패 및 deferred 테스트 대기, 소유 테스트 프로세스 종료 후 총829/826pass/2fail/1skip으로 종료; build 미실행. 대역·timeout 보완 뒤 집중36/36과 전체839/838pass/1skip/0fail 통과.
+- 후속 리뷰 경계 RED: `solo-review-red.log` 21/19pass/2fail(late event·queued dispatch), `solo-dispatch-red.log` Bedrock6/5pass/1fail, `solo-http-dispatch-red.log` DNS dispatch1fail. 수정 후 `solo-review-green.log`36/36, `solo-dispatch-green.log`39/39. 마지막 독립 검토 추가 지적 없음, `git diff --check` 통과.
+- 최종 `.local/verification/solo-quarantine-dispatch-final.log`: **macOS Node24.22.1, type0 / 841total / 840pass / 0fail / 1 Windows-only skip / build0 / exit0**,25.28초. loopback fixture를 위한 승인된 host 검사이며 실제 AI·외부 서비스 요청은0이다.
+- Chrome CUA `.local/ui-e2e/solo-quarantine-20261027`: Task25 DB 사본에 합성 lost Run1개를 넣은 실제 Controller/HTTP/SQLite 서버. Goal 이력 개정1–3 조회, 격리 배너·연결/프롬프트 비활성, 동일DB 새 프로세스 재시작 후 유지 확인. browser-checks.json과3JPEG, console warn/error0. native factory0, 기존 합성 Run1개 유지. 서버46408/46431 정상 종료exit0, 검증 탭423251705 닫음.
+- 한계: 같은 Controller/상태 DB의 quarantine만 구현했다. 안전한 release endpoint, 정확한 종료/자식 프로세스 증거, 공통 ownership, 다른 state-dir와 동시 실행 격리, Windows 실제 재검증은 미완료다. 따라서 lost 이후 실행 재개 기능은 제공하지 않는다. 기록 삭제·새 state-dir로 우회하도록 안내하지 않는다. 실제 AI 성공·V4-02 전체 완료·제품 완료를 뜻하지 않는다.
+- 다음: 기존 `shared/recovery.ts` 순수계약을 감사하고 persisted recovery/identity/ownership과 연결한 뒤 수동 복구를 구현한다. 공통 dispatch와 신뢰된 수용 판정이 갖춰져야 원클릭 실행 연결을 자격 검증할 수 있다.
+
 ## Task25 — Goal Tracking 통합 및 새 목표 기준선 (2026-10-27)
 
 - 실제 환경: macOS Darwin25.2 arm64, 시작 HEAD `faba903bb9e6856e26166600cbcc413058fef553`, branch `codex/orbit-mac-handoff-2026-10-26`(remote보다8commits ahead), 단일 checkout. 최초 cwd의 하위 `Orbit-Project`가 실제 Git root다. 시스템 Node25.8.2 대신 기존 ignored Node24.22.1 사용. 기존 Goal/Control Plane/Recovery 미커밋 변경 보존.

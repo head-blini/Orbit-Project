@@ -6,6 +6,7 @@ import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {Store} from '../server/store.ts';
 import {ModelHubService} from '../server/model-hub-service.ts';
+import {AppError} from '../server/errors.ts';
 import {readModelHubConfiguration} from '../server/providers/model-hub-configuration.ts';
 import {createBedrockTemporary,writeBedrockRequest} from '../server/providers/bedrock-temporary.ts';
 import type {BedrockTransportDependencies} from '../server/providers/bedrock-transport.ts';
@@ -47,6 +48,22 @@ function mockDependencies(tempRoot:string){
   return {calls,deps,get body(){return body;}};
 }
 const syntheticCredential=(name:string)=>name==='ORBIT_BEDROCK_ACCESS_KEY'?'synthetic-access':'synthetic-secret';
+
+test('Solo quarantine during Bedrock version wait prevents the subsequent catalog or inference process',async()=>{
+  for(const operation of ['models','chat'] as const){
+    const f=fixture(),mock=mockDependencies(f.dir);let blocked=false,armed=false;
+    const original=mock.deps.invoke!;
+    mock.deps.invoke=async request=>{const result=await original(request);if(armed&&request.args[0]==='--version')blocked=true;return result;};
+    const hub=new ModelHubService(f.store,f.configs,syntheticCredential,mock.deps,()=>{if(blocked)throw new AppError('SOLO_RECOVERY_REQUIRED');});
+    try{
+      if(operation==='chat')await hub.diagnose('bedrock',f.consent);
+      const before=mock.calls.length;armed=true;
+      if(operation==='models'){const result=await hub.diagnose('bedrock',f.consent);assert.equal(result.status,'failed');assert.equal(result.issue,'SOLO_RECOVERY_REQUIRED');}
+      else{hub.start({...f.consent,destinationId:'bedrock',requestId:randomUUID(),model:'amazon.nova-micro-v1:0',text:'ordinary fixture input'});await hub.settle();const result=hub.view(f.project.id).requests[0];assert.equal(result.execution,'failed');assert.equal(result.issue,'SOLO_RECOVERY_REQUIRED');assert.equal(result.temporaryInput,'removed');}
+      assert.deepEqual(mock.calls.slice(before).map(args=>args[0]),['--version']);
+    }finally{await hub.close();await f.close();}
+  }
+});
 
 test('Bedrock service commits one consented mock result, removes the real temp input and never replays a receipt',async()=>{
   const f=fixture(),mock=mockDependencies(f.dir),hub=new ModelHubService(f.store,f.configs,syntheticCredential,mock.deps);

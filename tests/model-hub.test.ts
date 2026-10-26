@@ -53,6 +53,28 @@ test('Model Hub denies private input, stale configuration, unavailable models an
     f.hub.interrupt(f.project.id,request.id);await f.hub.settle();assert.equal(f.hub.view(f.project.id).requests[0].execution,'interrupted');
   }finally{await f.close();}
 });
+test('admission is rechecked before queued model dispatch and preserves stored request replay',async()=>{
+  const f=await fixture();let blocked=false;
+  const guarded=new ModelHubService(f.store,f.configs,()=>undefined,{},()=>{if(blocked)throw new Error('SOLO_RECOVERY_REQUIRED');});
+  try{
+    await f.hub.diagnose('local-fixture',f.consent);
+    const input=f.input(),request=guarded.start(input);blocked=true;await guarded.settle();
+    assert.equal(f.requests.length,1,'only the earlier explicit catalog request may reach the server');
+    assert.equal(guarded.view(f.project.id).requests[0].execution,'failed');
+    assert.equal(guarded.start(input).id,request.id,'stored receipt must not dispatch again');
+    assert.throws(()=>guarded.start({...input,requestId:randomUUID()}),/SOLO_RECOVERY_REQUIRED/);
+    await assert.rejects(guarded.diagnose('local-fixture',f.consent),/SOLO_RECOVERY_REQUIRED/);
+  }finally{await guarded.close();await f.close();}
+});
+
+test('queued model catalog diagnosis rechecks admission before transport',async()=>{
+  const f=await fixture();let blocked=false;
+  const guarded=new ModelHubService(f.store,f.configs,()=>undefined,{},()=>{if(blocked)throw new Error('SOLO_RECOVERY_REQUIRED');});
+  try{
+    const pending=guarded.diagnose('local-fixture',f.consent);blocked=true;
+    assert.equal((await pending).status,'failed');assert.equal(f.requests.length,0);
+  }finally{await guarded.close();await f.close();}
+});
 
 test('Model Hub never labels over-limit or uncertain recovery as completion',async()=>{
   const f=await fixture('over_limit');try{

@@ -21,7 +21,8 @@
 | Phase 6 설치/통합 | Task8, V4-10 | 깨끗한 설치, macOS/Windows 실제 E2E, 시나리오 A–E 미완료. mock 통과는 실제 AI 성공이 아님 |
 
 - [x] Task25: 기존 미커밋 Goal Tracking/Control Plane 통합. 서버/UI 계약, 자동화 화면 연결, 실행 목록 상한, lost Check 복구 표시. 전체832/831pass/1skip/0fail 및 Mac Chrome 생성·상태·격리·재시작 검증.
-- [ ] 다음: V4-02 Solo uncertain 실행의 영속 차단을 기존 Controller에 연결. 종료 증거와 공통 소유권이 검증되기 전 새 실행으로 우회하지 않는다.
+- [x] Task26: V4-02 Solo uncertain 실행의 영속 차단을 기존 Controller와 서비스/Model Hub 실제 전송 경계에 연결. 전체841/840pass/1skip/0fail·type/build0, Mac Chrome 격리·이력·재시작 검증. 이 단계는 같은 상태 DB의 quarantine만 완료했다.
+- [ ] 다음: 기존 Recovery 순수계약 감사, 정확한 종료 증거·공통 resource ownership·persisted recovery 연결과 안전한 수동 해제. 이후 신뢰된 수용 판정 및 원클릭 실행 연결. 종료 증거와 공통 소유권이 검증되기 전 새 실행으로 우회하지 않는다.
 
 재개 branch `codex/orbit-mac-handoff-2026-10-26`, 시작 HEAD `faba903bb9e6856e26166600cbcc413058fef553`. 기존 dirty Goal/Control Plane/Recovery 파일을 보존한다. 아래 과거 Windows 경로·branch는 역사 기록이며 현재 경로는 Mac의 `Orbit_Project/Orbit-Project`다.
 

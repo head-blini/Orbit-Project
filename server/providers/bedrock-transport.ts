@@ -64,7 +64,7 @@ export function cleanupBedrockInput(requestId:string,dependencies:BedrockTranspo
 /** Official AWS CLI v2 JSON only. Construction/GET are inert; no CLI discovery,
  * environment values or credential callback occur until exact authorization.
  */
-export function createBedrockProviderTransport(input:BedrockTransportConfig,dependencies:BedrockTransportDependencies={}){
+export function createBedrockProviderTransport(input:BedrockTransportConfig,dependencies:BedrockTransportDependencies={},beforeDispatch:()=>void=()=>{}){
   const fields=['providerId','cliPath','region','approved','models','timeoutMs','maxOutputTokens','credential','authorize'],data=readDataRecord(input,fields);
   if(!data||data.providerId!=='bedrock'||typeof data.cliPath!=='string'||!isAbsolute(data.cliPath)||/[\x00-\x1f\x7f]/.test(data.cliPath)||data.cliPath.split(/[\\/]/).some(part=>part==='.'||part==='..')
     ||(process.platform==='win32'?(!/^[A-Za-z]:[\\/]/.test(data.cliPath)||!data.cliPath.toLowerCase().endsWith('.exe')):basename(data.cliPath)!=='aws')||typeof data.region!=='string'||! /^(?:us|eu|ap|sa|ca|me|af|il|mx)-(?:[a-z]+-)+[1-9]$/.test(data.region)
@@ -82,7 +82,7 @@ export function createBedrockProviderTransport(input:BedrockTransportConfig,depe
     }catch{op.check();return code('PROVIDER_OUTBOUND_DENIED',403);}
   }
   async function checkedProcess(args:string[],temporary:BedrockTemporary,op:Operation,credential?:BedrockCredential,version=false){
-    op.check();const result=await invoke({executable:config.cliPath,args:Object.freeze([...args]),cwd:temporary.path,env:Object.freeze(environment(dependencies.env??process.env,temporary,config.region,credential)),timeoutMs:version?Math.min(3000,op.remaining()):op.remaining(),maxStdoutBytes:version?4096:256*1024,maxStderrBytes:version?4096:16384,signal:op.controller.signal});
+    op.check();beforeDispatch();const result=await invoke({executable:config.cliPath,args:Object.freeze([...args]),cwd:temporary.path,env:Object.freeze(environment(dependencies.env??process.env,temporary,config.region,credential)),timeoutMs:version?Math.min(3000,op.remaining()):op.remaining(),maxStdoutBytes:version?4096:256*1024,maxStderrBytes:version?4096:16384,signal:op.controller.signal});
     op.check();if(result.timedOut)code('PROVIDER_TIMEOUT',504);if(result.aborted)code('PROVIDER_ABORTED',409);if(result.overflow)code('PROVIDER_RESPONSE_TOO_LARGE');if(result.exitCode!==0)code('PROVIDER_REQUEST_FAILED');
     if(version){const stdout=decode(result.stdout,4096),stderr=decode(result.stderr,4096);if(!/^aws-cli\/2\.[0-9]+\.[0-9]+[\x20-\x7e]*\r?\n?$/.test(stdout||stderr)||stdout&&stderr)code('BEDROCK_CLI_UNSUPPORTED',503);return null;}
     const text=decode(result.stdout,256*1024);try{return JSON.parse(text) as unknown;}catch{return code('PROVIDER_INVALID_RESPONSE');}

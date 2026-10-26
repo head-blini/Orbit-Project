@@ -8,6 +8,7 @@ export interface Run {
 }
 export interface AppEvent {seq:number; kind:string; at:string; runId:string|null; data:Record<string,unknown>}
 export interface Snapshot {
+  soloRecoveryRequired?:boolean;
   extensionBusy?:boolean;
   verificationBusy?:boolean;
   mergeBusy?:boolean;

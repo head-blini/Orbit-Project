@@ -2,9 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Store } from '../server/store.ts';
 import { createHttpServer } from '../server/http.ts';
-import type { Controller } from '../server/controller.ts';
+import { Controller } from '../server/controller.ts';
+import {createWorkspace} from '../server/workspace.ts';
 import { request } from 'node:http';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import {createHash,randomUUID} from 'node:crypto';
 import { tmpdir } from './temp.ts';
 import { join } from 'node:path';
 import type { ProviderStatus } from '../shared/types.ts';
@@ -12,7 +14,7 @@ import type { NativeProbeReport } from '../shared/capabilities.ts';
 
 async function fixture(){
   const store=new Store(':memory:');let submissions=0,probes=0;const projectCalls:unknown[]=[];
-  const controller={store,snapshot:()=>({provider:'disconnected',issue:null,threadId:null,workspace:'fixture',readOnly:true,runs:store.runs(),lastSeq:store.lastSeq()}),connect:async()=>{},submit:async(input:any)=>{submissions++;return {id:'r',...input};},interrupt:async()=>{}} as unknown as Controller;
+  const controller={store,assertExecutionAvailable:()=>{},snapshot:()=>({provider:'disconnected',issue:null,threadId:null,workspace:'fixture',readOnly:true,runs:store.runs(),lastSeq:store.lastSeq()}),connect:async()=>{},submit:async(input:any)=>{submissions++;return {id:'r',...input};},interrupt:async()=>{}} as unknown as Controller;
   Object.assign(controller,{registerProject:(path:string)=>{projectCalls.push(path);return {id:'project'};},createWorktree:(id:string)=>{projectCalls.push(id);return {id:'workspace'};},selectWorkspace:async(id:string)=>{projectCalls.push(id);},workspaceDiff:(id:string)=>({workspaceId:id,files:[]})});
   const assets=mkdtempSync(join(tmpdir(),'aicc-assets-'));writeFileSync(join(assets,'index.html'),'<!doctype html><title>Fixture</title>');
   const probeReport={checkedAt:'2026-10-25T00:00:00.000Z',codex:{status:'found' as const,version:'0.164.0'},claude:{status:'not_found_on_path' as const,version:null}};
@@ -21,6 +23,31 @@ async function fixture(){
   const response=await fetch(origin+'/api/session');const cookie=response.headers.get('set-cookie')!.split(';')[0];const {csrfToken}=await response.json() as any;
   return {origin,cookie,csrfToken,store,projectCalls,probes:()=>probes,count:()=>submissions,close:async()=>{server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));store.close();}};
 }
+
+test('persisted Solo quarantine denies HTTP dispatch and probes while preserving state and request replay',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'orbit-http-quarantine-')),store=new Store(':memory:');let nativeCalls=0,probeCalls=0;
+  const input={requestId:'quarantine-http-request',prompt:'Fixture',workspaceId:null};
+  const run=store.createRun(input.requestId,createHash('sha256').update(input.prompt).digest('hex'),input.prompt);
+  store.updateRun(run.id,{execution:'lost'},'run.lost');
+  const controller=new Controller(store,createWorkspace(dir),()=>{nativeCalls++;throw new Error('NO_NATIVE_FIXTURE');});
+  const server=createHttpServer(controller,'unused',{nativeProbe:{get:()=>null,refresh:async()=>{probeCalls++;throw new Error('NO_NATIVE_PROBE');}}});
+  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const origin='http://127.0.0.1:'+(server.address() as {port:number}).port;
+  try{
+    const session=await fetch(origin+'/api/session'),{csrfToken}=await session.json() as {csrfToken:string};
+    const headers={Origin:origin,Cookie:session.headers.get('set-cookie')!.split(';')[0],'Content-Type':'application/json','X-CSRF-Token':csrfToken};
+    for(const [path,body] of [['/api/connect',{}],['/api/capabilities/probe',{}],['/api/runs',{...input,requestId:'new-http-request'}],
+      ['/api/model-hub/destinations/fixture/models',{projectId:randomUUID(),expectedConfigDigest:'0'.repeat(64),confirmed:true}]] as const){
+      const response=await fetch(origin+path,{method:'POST',headers,body:JSON.stringify(body)});
+      assert.equal(response.status,409,path);assert.deepEqual(await response.json(),{error:'SOLO_RECOVERY_REQUIRED'});
+    }
+    const state=await (await fetch(origin+'/api/state',{headers})).json() as any;
+    assert.equal(state.soloRecoveryRequired,true);assert.equal(state.runs[0].id,run.id);
+    const replay=await fetch(origin+'/api/runs',{method:'POST',headers,body:JSON.stringify(input)});
+    assert.equal(replay.status,200);assert.equal((await replay.json() as any).id,run.id);
+    assert.equal(nativeCalls,0);assert.equal(probeCalls,0);assert.equal(store.runs().length,1);
+  }finally{await controller.close();server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));store.close();rmSync(dir,{recursive:true,force:true});}
+});
 
 test('capability reads are inert; native version probes require exact body, session, Origin and CSRF',async()=>{
   const f=await fixture();try{
@@ -44,12 +71,12 @@ test('capability reads are inert; native version probes require exact body, sess
   }finally{await f.close();}
 });
 
-test('capability probe reports current connection after awaiting version diagnosis',async()=>{
+test('capability probe reports current connection after awaiting version diagnosis',{timeout:5000},async()=>{
   const store=new Store(':memory:');let provider:ProviderStatus='ready';
   let finish!:(report:NativeProbeReport)=>void,started!:()=>void;
   const began=new Promise<void>(resolve=>{started=resolve;});
   const pending=new Promise<NativeProbeReport>(resolve=>{finish=resolve;});
-  const controller={store,snapshot:()=>({provider})} as unknown as Controller;
+  const controller={store,assertExecutionAvailable:()=>{},snapshot:()=>({provider})} as unknown as Controller;
   const server=createHttpServer(controller,'unused',{nativeProbe:{get:()=>null,refresh:()=>{started();return pending;}}});
   await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
   const origin='http://127.0.0.1:'+(server.address() as {port:number}).port;

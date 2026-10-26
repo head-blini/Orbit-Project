@@ -39,7 +39,7 @@ export function Dashboard({state,projectId,onNavigate}:{state:Snapshot|null;proj
 export function Development({state,projectId,onProjects,onVisualize=()=>{},online=false,post=async()=>{throw new Error('OFFLINE');}}:{state:Snapshot|null;projectId:string;onProjects:()=>void;onVisualize?:()=>void;online?:boolean;post?:(path:string,body:object)=>Promise<unknown>}) {
   const workspaces=state?.workspaces?.filter(workspace=>workspace.projectId===projectId)??[];
   const matching=workspaceMatchesProject(state,projectId),latest=state?.runs.at(-1);
-  const nativeBusy=state?.provider==='connecting'||!!state?.runs.some(run=>!terminal(run.execution));
+  const nativeBusy=!!state?.soloRecoveryRequired||state?.provider==='connecting'||!!state?.runs.some(run=>!terminal(run.execution));
   const mergeBusy=!!state?.mergeBusy;
   const otherBusy=!!state?.planningBusy||!!state?.extensionBusy||!!state?.verificationBusy||!!state?.modelHubBusy||!!state?.workflowBusy||nativeBusy;
   const reviewBusy=!!state?.reviewBusy;

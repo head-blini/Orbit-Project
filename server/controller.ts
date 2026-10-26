@@ -41,22 +41,25 @@ export class Controller {
   private extensionCache:ExtensionInventory|null=null;private extensionPending:Promise<ExtensionInventory>|null=null;
   private knownMcpNames:readonly string[]|null=null;
   private telemetry:RunTelemetry;
+  private soloLost=false;
+  private soloRecoveryRequired(){return this.soloLost||this.store.runs().some(run=>run.execution==='lost');}
+  assertExecutionAvailable(){if(this.soloRecoveryRequired())throw new AppError('SOLO_RECOVERY_REQUIRED',409);}
   constructor(store:Store,workspace:string,factory:(workspace:string,write:boolean)=>RpcPort,projects?:Projects,verificationConfig:VerificationConfiguration[]=[],modelHubConfig:readonly ModelHubConfiguration[]=[]){
     this.store=store;this.workspace=workspace;this.factory=factory;this.projects=projects;
     this.telemetry=new RunTelemetry(metrics=>this.store.saveRunMetrics(metrics));
     const selected=projects?.workspaces().find(w=>w.id===store.getMeta('selectedWorkspace'));if(selected){this.workspaceId=selected.id;this.workspace=selected.path;}
-    this.modelHub=new ModelHubService(store,modelHubConfig);
-    this.verification=new VerificationService(store,projects,verificationConfig,()=>!!this.extensionPending||!!this.active()||!!this.connecting||this.switching||this.modelHub.active||!!this.workflows?.active||!!this.reviews?.active||!!this.planningSuggestions?.active);
+    this.modelHub=new ModelHubService(store,modelHubConfig,undefined,undefined,()=>this.assertExecutionAvailable());
+    this.verification=new VerificationService(store,projects,verificationConfig,()=>this.soloRecoveryRequired()||!!this.extensionPending||!!this.active()||!!this.connecting||this.switching||this.modelHub.active||!!this.workflows?.active||!!this.reviews?.active||!!this.planningSuggestions?.active);
     this.sourceGraphs=new SourceGraphService(store,projects);
-    this.merges=new MergeService(store,projects,this.verification,()=>!!this.extensionPending||!!this.active()||!!this.connecting||this.switching||this.modelHub.active||!!this.workflows?.active||!!this.reviews?.active||!!this.planningSuggestions?.active);
-    this.workflows=new WorkflowService(store,projects,verificationConfig,()=>!!this.extensionPending||!!this.active()||!!this.connecting||this.switching||this.modelHub.active||this.verification.active||this.merges.active||!!this.reviews?.active||!!this.planningSuggestions?.active,id=>{this.merges.ensureAvailable(id);this.verification.ensureAvailable(id);this.planningSuggestions.ensureAvailable(id);this.reviews.ensureAvailable(id);});
-    this.reviews=new ReviewService(store,projects,factory,()=>!!this.extensionPending||!!this.active()||!!this.connecting||this.switching||this.modelHub.active||this.verification.active||this.merges.active||this.workflows.active||!!this.planningSuggestions?.active,id=>{this.planningSuggestions.ensureAvailable(id);this.merges.ensureAvailable(id);this.verification.ensureAvailable(id);this.workflows.ensureAvailable(id);});
-    this.planningSuggestions=new PlanningAgentService(store,projects,factory,()=>!!this.extensionPending||!!this.active()||!!this.connecting||this.switching||this.modelHub.active||this.verification.active||this.merges.active||this.workflows.active||this.reviews.active,id=>{this.merges.ensureAvailable(id);this.verification.ensureAvailable(id);this.workflows.ensureAvailable(id);this.reviews.ensureAvailable(id);});
+    this.merges=new MergeService(store,projects,this.verification,()=>this.soloRecoveryRequired()||!!this.extensionPending||!!this.active()||!!this.connecting||this.switching||this.modelHub.active||!!this.workflows?.active||!!this.reviews?.active||!!this.planningSuggestions?.active);
+    this.workflows=new WorkflowService(store,projects,verificationConfig,()=>this.soloRecoveryRequired()||!!this.extensionPending||!!this.active()||!!this.connecting||this.switching||this.modelHub.active||this.verification.active||this.merges.active||!!this.reviews?.active||!!this.planningSuggestions?.active,id=>{this.merges.ensureAvailable(id);this.verification.ensureAvailable(id);this.planningSuggestions.ensureAvailable(id);this.reviews.ensureAvailable(id);});
+    this.reviews=new ReviewService(store,projects,factory,()=>this.soloRecoveryRequired()||!!this.extensionPending||!!this.active()||!!this.connecting||this.switching||this.modelHub.active||this.verification.active||this.merges.active||this.workflows.active||!!this.planningSuggestions?.active,id=>{this.planningSuggestions.ensureAvailable(id);this.merges.ensureAvailable(id);this.verification.ensureAvailable(id);this.workflows.ensureAvailable(id);});
+    this.planningSuggestions=new PlanningAgentService(store,projects,factory,()=>this.soloRecoveryRequired()||!!this.extensionPending||!!this.active()||!!this.connecting||this.switching||this.modelHub.active||this.verification.active||this.merges.active||this.workflows.active||this.reviews.active,id=>{this.merges.ensureAvailable(id);this.verification.ensureAvailable(id);this.workflows.ensureAvailable(id);this.reviews.ensureAvailable(id);});
   }
-  snapshot():Snapshot{return {provider:this.provider,issue:this.issue,threadId:this.thread(),workspace:basename(this.workspace),readOnly:!this.workspaceId,runs:this.store.runs().filter(r=>r.workspaceId===this.workspaceId),lastSeq:this.store.lastSeq(),connections:providerConnections,externalApiEnabled:this.modelHub.externalEnabled,modelHubConfigured:this.modelHub.configured,modelHubBusy:this.modelHub.active,extensionBusy:!!this.extensionPending,verificationBusy:this.verification.active,mergeBusy:this.merges.active,workflowBusy:this.workflows.active,reviewBusy:this.reviews.active,planningBusy:this.planningSuggestions.active,...(this.projects?{selectedWorkspaceId:this.workspaceId??null,projects:this.projects.list(),workspaces:this.projects.workspaces()}:{})};}
+  snapshot():Snapshot{return {soloRecoveryRequired:this.soloRecoveryRequired(),provider:this.provider,issue:this.issue,threadId:this.thread(),workspace:basename(this.workspace),readOnly:!this.workspaceId,runs:this.store.runs().filter(r=>r.workspaceId===this.workspaceId),lastSeq:this.store.lastSeq(),connections:providerConnections,externalApiEnabled:this.modelHub.externalEnabled,modelHubConfigured:this.modelHub.configured,modelHubBusy:this.modelHub.active,extensionBusy:!!this.extensionPending,verificationBusy:this.verification.active,mergeBusy:this.merges.active,workflowBusy:this.workflows.active,reviewBusy:this.reviews.active,planningBusy:this.planningSuggestions.active,...(this.projects?{selectedWorkspaceId:this.workspaceId??null,projects:this.projects.list(),workspaces:this.projects.workspaces()}:{})};}
   private thread(){return this.store.getThread(this.workspaceId);}
-  private validate(){this.planningSuggestions.ensureAvailable(this.workspaceId);this.workflows.ensureAvailable(this.workspaceId);this.merges.ensureAvailable(this.workspaceId);this.verification.ensureAvailable(this.workspaceId);if(this.workspaceId)this.projects!.writable(this.workspaceId);else assertWorkspace(this.workspace);}
-  private idle(){this.extensionIdle();this.planningSuggestions.ensureAvailable(this.workspaceId);this.reviews.ensureAvailable(this.workspaceId);this.workflows.ensureAvailable();this.merges.ensureAvailable();this.verification.ensureAvailable();if(this.modelHub.active)throw new AppError('MODEL_REQUEST_ACTIVE');if(this.active())throw new AppError('RUN_ACTIVE');if(this.connecting||this.switching)throw new AppError('SESSION_BUSY');}
+  private validate(){this.assertExecutionAvailable();this.planningSuggestions.ensureAvailable(this.workspaceId);this.workflows.ensureAvailable(this.workspaceId);this.merges.ensureAvailable(this.workspaceId);this.verification.ensureAvailable(this.workspaceId);if(this.workspaceId)this.projects!.writable(this.workspaceId);else assertWorkspace(this.workspace);}
+  private idle(){this.assertExecutionAvailable();this.extensionIdle();this.planningSuggestions.ensureAvailable(this.workspaceId);this.reviews.ensureAvailable(this.workspaceId);this.workflows.ensureAvailable();this.merges.ensureAvailable();this.verification.ensureAvailable();if(this.modelHub.active)throw new AppError('MODEL_REQUEST_ACTIVE');if(this.active())throw new AppError('RUN_ACTIVE');if(this.connecting||this.switching)throw new AppError('SESSION_BUSY');}
   startModelRequest(input:Parameters<ModelHubService['start']>[0]){this.extensionIdle();this.planningSuggestions.ensureAvailable(this.workspaceId);this.reviews.ensureAvailable(this.workspaceId);this.workflows.ensureAvailable();this.merges.ensureAvailable();this.verification.ensureAvailable();if(this.active())throw new AppError('RUN_ACTIVE');if(this.connecting||this.switching)throw new AppError('SESSION_BUSY');return this.modelHub.start(input);}
   registerProject(path:string){this.idle();if(!this.projects)throw new AppError('UNSUPPORTED',404);return this.projects.register(path);}
   createWorktree(projectId:string){this.idle();this.merges.ensureProjectAvailable(projectId);if(!this.projects)throw new AppError('UNSUPPORTED',404);return this.projects.create(projectId);}
@@ -158,7 +161,7 @@ export class Controller {
   private status(status:ProviderStatus,issue:string|null=null){this.provider=status;this.issue=issue;if(status!=='ready'){this.clearExtensions();this.launchValidated=false;this.usage=unknownUsage();}this.store.append('provider.status',null,{status,issue});}
   private active():Run|undefined{return this.store.runs().find(r=>!terminal(r.execution));}
   async connect():Promise<void>{
-    this.extensionIdle();
+    this.assertExecutionAvailable();this.extensionIdle();
     this.planningSuggestions.ensureAvailable(this.workspaceId);this.reviews.ensureAvailable(this.workspaceId);
     if(this.modelHub.active)throw new AppError('MODEL_REQUEST_ACTIVE');
     this.verification.ensureAvailable(this.workspaceId);
@@ -170,7 +173,7 @@ export class Controller {
     this.status('connecting');const generation=++this.generation;
     try{
       this.validate();const rpc=this.factory(this.workspace,!!this.workspaceId);this.rpc=rpc;
-      rpc.on('closed',()=>{if(generation!==this.generation)return;this.rpc=null;this.loseActive();this.telemetry.disconnect();this.status('disconnected','TRANSPORT_CLOSED');});
+      rpc.on('closed',()=>{if(generation!==this.generation)return;++this.generation;this.rpc=null;this.loseActive();this.telemetry.disconnect();this.status('disconnected','TRANSPORT_CLOSED');});
       rpc.on('notification',(e:any)=>{if(generation===this.generation)this.onEvent(e);});
       rpc.on('approval',(e:any)=>{if(generation===this.generation)this.store.append('approval.denied',this.active()?.id??null,{kind:e.method,decision:'deny'});});
       await rpc.initialize();const a=await rpc.request('account/read',{refreshToken:false});
@@ -229,7 +232,7 @@ export class Controller {
     if(this.projects&&(input.workspaceId===undefined||input.workspaceId!==(this.workspaceId??null)))throw new AppError('WORKSPACE_MISMATCH');
     const digest=createHash('sha256').update(input.prompt).digest('hex');const prior=this.store.findRequest(input.requestId);
     if(prior){if(prior.digest!==digest||prior.run.workspaceId!==this.workspaceId||prior.run.taskId!==task?.taskId)throw new AppError('IDEMPOTENCY_CONFLICT');return prior.run;}
-    this.extensionIdle();if(this.provider!=='ready'||!this.rpc)throw new AppError('NOT_CONNECTED');
+    this.assertExecutionAvailable();this.extensionIdle();if(this.provider!=='ready'||!this.rpc)throw new AppError('NOT_CONNECTED');
     this.planningSuggestions.ensureAvailable(this.workspaceId);this.reviews.ensureAvailable(this.workspaceId);
     if(this.modelHub.active)throw new AppError('MODEL_REQUEST_ACTIVE');
     if(this.switching)throw new AppError('SESSION_BUSY');if(this.active())throw new AppError('RUN_ACTIVE');this.validate();
@@ -295,7 +298,13 @@ export class Controller {
     return safeTextItems([...this.output.values()],final);
   }
   private clearDeadline(){if(this.deadline)clearTimeout(this.deadline);this.deadline=null;}
-  private loseActive(){this.clearDeadline();const r=this.active();if(r){this.store.updateRun(r.id,{execution:'lost'},'run.lost');this.telemetry.finish(r.id,true);}}
+  private loseActive(){
+    this.clearDeadline();const r=this.active();if(!r)return;
+    this.soloLost=true;
+    try{this.store.updateRun(r.id,{execution:'lost'},'run.lost');}
+    catch{/* Keep the volatile denial; the durable nonterminal Run is quarantined on restart. */}
+    this.telemetry.finish(r.id,true);
+  }
   private async failTransport(issue:string){this.loseActive();this.telemetry.disconnect();const rpc=this.rpc;this.rpc=null;++this.generation;this.status('error',issue);if(rpc)await rpc.close();}
   async close(){await this.planningSuggestions.close();await this.reviews.close();await this.workflows.close();await this.modelHub.close();await this.verification.close();this.loseActive();this.telemetry.disconnect();const rpc=this.rpc;this.rpc=null;++this.generation;if(rpc)await rpc.close();this.provider='disconnected';this.launchValidated=false;this.clearExtensions();}
 }

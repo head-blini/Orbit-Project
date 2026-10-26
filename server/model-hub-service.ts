@@ -12,7 +12,7 @@ const unknownUsage=():ModelHubUsage=>({promptTokens:null,completionTokens:null,t
 const emptyCatalog=():ModelHubCatalog=>({status:'not_queried',models:[],checkedAt:null,issue:null});
 const needsCleanup=(record:ModelHubRequest)=>record.providerId==='bedrock'&&['possible','present','cleanup_required'].includes(record.temporaryInput??'possible')&&record.execution!=='running';
 const issues=new Set(['PROVIDER_ABORTED','PROVIDER_TIMEOUT','PROVIDER_DESTINATION_REJECTED','PROVIDER_CREDENTIAL_REQUIRED','PROVIDER_REQUEST_FAILED','PROVIDER_REDIRECT_REJECTED','PROVIDER_AUTH_REQUIRED','PROVIDER_RATE_LIMITED','PROVIDER_HTTP_ERROR','PROVIDER_INVALID_RESPONSE','PROVIDER_RESPONSE_TOO_LARGE','PROVIDER_STREAM_INCOMPLETE','PROVIDER_OUTBOUND_DENIED','PROVIDER_OUTPUT_LIMIT',
-  'BEDROCK_CLI_NOT_FOUND','BEDROCK_CLI_UNTRUSTED','BEDROCK_CLI_UNSUPPORTED','BEDROCK_TEMPORARY_INPUT_FAILED','BEDROCK_CLEANUP_REQUIRED']);
+  'BEDROCK_CLI_NOT_FOUND','BEDROCK_CLI_UNTRUSTED','BEDROCK_CLI_UNSUPPORTED','BEDROCK_TEMPORARY_INPUT_FAILED','BEDROCK_CLEANUP_REQUIRED','SOLO_RECOVERY_REQUIRED']);
 const issue=(error:unknown)=>error instanceof AppError&&issues.has(error.message)?error.message:'PROVIDER_REQUEST_FAILED';
 type Consent={projectId:string;expectedConfigDigest:string;confirmed:boolean};
 type Input=Consent&{requestId:string;destinationId:string;model:string;text:string};
@@ -24,7 +24,9 @@ export class ModelHubService {
   private diagnostics=new Map<string,{controller:AbortController;task:Promise<ModelHubCatalog>}>();
   private cleanupTasks=new Map<string,Promise<ModelHubRequest>>();
   private bedrockDependencies:BedrockTransportDependencies;
-  constructor(store:Store,configurations:readonly ModelHubConfiguration[]=[],readCredential:(name:string)=>string|undefined=name=>process.env[name],bedrockDependencies:BedrockTransportDependencies={}){
+  private admission:()=>void;
+  constructor(store:Store,configurations:readonly ModelHubConfiguration[]=[],readCredential:(name:string)=>string|undefined=name=>process.env[name],bedrockDependencies:BedrockTransportDependencies={},admission:()=>void=()=>{}){
+    this.admission=admission;
     this.store=store;this.configurations=[...configurations];this.readCredential=readCredential;
     this.bedrockDependencies=Object.freeze({...bedrockDependencies});
     store.db.exec(`CREATE TABLE IF NOT EXISTS model_hub_requests(id TEXT PRIMARY KEY,request_id TEXT NOT NULL UNIQUE,digest TEXT NOT NULL,project_id TEXT NOT NULL,body TEXT NOT NULL);
@@ -60,7 +62,7 @@ export class ModelHubService {
         if(request.providerId!=='bedrock'||request.region!==config.region||request.operation!==operation)return {allowed:false};
         return authorizeConfiguredRequest(config,{projectPath:this.project(consent.projectId).path,expectedConfigDigest:consent.expectedConfigDigest,operation,confirmed:consent.confirmed,
           ...(operation==='chat'?{model:request.model,messages:request.messages}:{})});
-      }},operation==='chat'?this.bedrockInputDependencies():this.bedrockDependencies);
+      }},operation==='chat'?this.bedrockInputDependencies():this.bedrockDependencies,this.admission);
     }
     return createHttpProviderTransport({providerId:config.providerId,endpoint:config.endpoint,approved:config.enabled,locality:config.locality,models:config.models,
       requireCredential:config.requireCredential,credential:()=>config.credentialEnv?this.readCredential(config.credentialEnv):undefined,timeoutMs:config.timeoutMs,maxOutputTokens:config.maxOutputTokens,
@@ -68,7 +70,7 @@ export class ModelHubService {
         if(request.endpoint!==config.endpoint||request.providerId!==config.providerId||request.operation!==operation)return {allowed:false};
         return authorizeConfiguredRequest(config,{projectPath:this.project(consent.projectId).path,expectedConfigDigest:consent.expectedConfigDigest,operation,confirmed:consent.confirmed,
           ...(operation==='chat'?{model:request.model,messages:request.messages}:{})});
-      }});
+      }},this.admission);
   }
   private bedrockInputDependencies():BedrockTransportDependencies {
     const root=this.store.getMeta('bedrockTemporaryRoot');
@@ -88,6 +90,7 @@ export class ModelHubService {
       requests,bedrockRecovery,activeRequestId:this.pending.keys().next().value??null,billing:'separate_from_native_subscription',costSource:'unknown'};
   }
   async diagnose(destinationId:string,consent:Consent):Promise<ModelHubCatalog> {
+    this.admission();
     const config=this.configuration(destinationId);
     if(!this.decision(config,consent,'models').allowed)throw new AppError('MODEL_HUB_REQUEST_DENIED',403);
     const existing=this.diagnostics.get(config.id);if(existing)return existing.task;
@@ -95,7 +98,7 @@ export class ModelHubService {
     const controller=new AbortController();
     const task=Promise.resolve().then(async()=>{
       let catalog:ModelHubCatalog;
-      try{const models=await this.transport(config,consent,'models').listModels({signal:controller.signal});catalog={status:models.length?'available':'empty',models,checkedAt:new Date().toISOString(),issue:null};}
+      try{this.admission();const models=await this.transport(config,consent,'models').listModels({signal:controller.signal});catalog={status:models.length?'available':'empty',models,checkedAt:new Date().toISOString(),issue:null};}
       catch(error){catalog={status:'failed',models:[],checkedAt:new Date().toISOString(),issue:issue(error)};}
       this.store.transaction(()=>{
         this.store.db.prepare('INSERT INTO model_hub_catalogs VALUES(?,?,?) ON CONFLICT(destination_id) DO UPDATE SET config_digest=excluded.config_digest,body=excluded.body').run(config.id,config.configDigest,JSON.stringify(catalog));
@@ -110,6 +113,7 @@ export class ModelHubService {
     const digest=createHash('sha256').update(JSON.stringify({projectId:input.projectId,destinationId:input.destinationId,model:input.model,text:input.text,expectedConfigDigest:input.expectedConfigDigest,confirmed:input.confirmed})).digest('hex');
     const prior=this.store.db.prepare('SELECT digest,body FROM model_hub_requests WHERE request_id=?').get(input.requestId);
     if(prior){if(prior.digest!==digest)throw new AppError('IDEMPOTENCY_CONFLICT',409);return JSON.parse(prior.body as string);}
+    this.admission();
     const config=this.configuration(input.destinationId);
     if(!this.decision(config,input,'chat',{model:input.model,text:input.text}).allowed)throw new AppError('MODEL_HUB_REQUEST_DENIED',403);
     const catalog=this.catalog(config);if(catalog.status!=='available'||!catalog.models.includes(input.model))throw new AppError('MODEL_CATALOG_REQUIRED',409);
@@ -146,6 +150,7 @@ export class ModelHubService {
   private async execute(record:ModelHubRequest,config:ModelHubConfiguration,input:Input,signal:AbortSignal){
     const start=performance.now();let done=false,usage=unknownUsage(),response='',lastWrite=-Infinity;
     try{
+      this.admission();
       const options={signal,requestId:record.id,onTemporaryInput:(state:BedrockTemporaryState)=>{this.update(record.id,{temporaryInput:state});}};
       for await(const event of this.transport(config,input,'chat').chat({model:input.model,messages:[{role:'user',content:input.text}]},
         options)){

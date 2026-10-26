@@ -95,7 +95,7 @@ function usage(value:unknown):HttpProviderUsage {
 }
 
 /** Trusted server configuration only. Construction is inert; every operation reauthorizes. */
-export function createHttpProviderTransport(input:HttpTransportConfig){
+export function createHttpProviderTransport(input:HttpTransportConfig,beforeDispatch:()=>void=()=>{}){
   const data=record(input),keys=['providerId','endpoint','approved','locality','credential','requireCredential','models','authorize','timeoutMs','maxResponseBytes','maxOutputTokens'];
   if(!data||Object.keys(data).some(key=>!keys.includes(key))||!providers.includes(data.providerId as string)||typeof data.approved!=='boolean'
     ||typeof data.requireCredential!=='boolean'||typeof data.credential!=='function'||typeof data.authorize!=='function'
@@ -140,6 +140,7 @@ export function createHttpProviderTransport(input:HttpTransportConfig){
       headers:{Accept:chat?'text/event-stream':'application/json','Accept-Encoding':'identity',...(payload?{'Content-Type':'application/json','Content-Length':Buffer.byteLength(payload)}:{}),...(credential?{Authorization:'Bearer '+credential}:{})},
       ...(url.protocol==='https:'?{servername:config.locality==='external'?url.hostname:undefined,rejectUnauthorized:true}:{})};
     const response=await op.wait(new Promise<http.IncomingMessage>((resolve,reject)=>{
+      beforeDispatch();
       const req=(url.protocol==='https:'?https:http).request(options,resolve);req.on('error',()=>reject(new AppError('PROVIDER_REQUEST_FAILED')));req.end(payload);
     }));
     try{

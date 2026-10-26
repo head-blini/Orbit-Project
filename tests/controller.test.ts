@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync,rmSync } from 'node:fs';
 import { tmpdir } from './temp.ts';
 import { join } from 'node:path';
 import { Controller } from '../server/controller.ts';
@@ -145,11 +145,40 @@ test('interrupt acceptance stays interrupting until terminal event; verification
   assert.equal(store.getRun(r.id)?.execution,'interrupted');assert.equal(store.getRun(r.id)?.verification,'not_run');
   await c.close();store.close();
 });
-test('disconnect marks active run lost; reconnect loads saved thread and never resends prompt',async()=>{
-  const {c,rpc,store}=setup();await c.connect();await c.submit({requestId:'request-0001',prompt:'hello'});
-  rpc.emit('closed');assert.equal(c.snapshot().provider,'disconnected');assert.equal(store.runs()[0].execution,'lost');
-  await c.connect();assert.equal(rpc.starts,1);assert.ok(rpc.sent.some(x=>x.method==='thread/resume'));
-  await c.close();store.close();
+test('disconnect quarantines Solo before reconnect or another turn while preserving request replay',async()=>{
+  const {c,rpc,store}=setup();try{
+    await c.connect();const input={requestId:'request-0001',prompt:'hello'},run=await c.submit(input);
+    rpc.emit('closed');assert.equal(c.snapshot().provider,'disconnected');assert.equal(store.runs()[0].execution,'lost');
+    await assert.rejects(c.connect(),/SOLO_RECOVERY_REQUIRED/);
+    await assert.rejects(c.submit({...input,requestId:'request-0002'}),/SOLO_RECOVERY_REQUIRED/);
+    assert.equal((await c.submit(input)).id,run.id);assert.equal(rpc.starts,1);assert.ok(!rpc.sent.some(x=>x.method==='thread/resume'));
+    assert.equal(c.snapshot().soloRecoveryRequired,true);assert.equal(store.runs().length,1);
+  }finally{await c.close();store.close();}
+});
+test('restart quarantines an unresolved stored Solo run before factory creation',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'orbit-solo-restart-')),path=join(dir,'state.sqlite');let store=new Store(path),calls=0;
+  const run=store.createRun('uncertain-restart','digest','Fixture');store.close();store=new Store(path);
+  const c=new Controller(store,createWorkspace(dir),()=>{calls++;return new FakeRpc();});
+  try{
+    assert.equal(store.getRun(run.id)?.execution,'lost');assert.equal(c.snapshot().soloRecoveryRequired,true);
+    await assert.rejects(c.connect(),/SOLO_RECOVERY_REQUIRED/);assert.equal(calls,0);
+    assert.throws(()=>c.registerProject('/never-read'),/SOLO_RECOVERY_REQUIRED/);
+    assert.throws(()=>c.createWorktree('another-project'),/SOLO_RECOVERY_REQUIRED/);
+    await assert.rejects(c.selectWorkspace('another-workspace'),/SOLO_RECOVERY_REQUIRED/);
+    assert.equal(store.getRun(run.id)?.prompt,'Fixture');
+  }finally{await c.close();store.close();rmSync(dir,{recursive:true,force:true});}
+});
+test('loss persistence failure retains a volatile deny barrier without claiming recovery',async()=>{
+  const {c,rpc,store}=setup();try{
+    await c.connect();await c.submit({requestId:'storage-loss-request',prompt:'Fixture'});
+    store.db.exec("CREATE TRIGGER fail_loss BEFORE UPDATE ON runs BEGIN SELECT RAISE(FAIL,'loss fixture'); END;");
+    assert.doesNotThrow(()=>rpc.emit('closed'));
+    assert.equal(c.snapshot().soloRecoveryRequired,true);assert.equal(store.runs()[0].execution,'running');
+    await assert.rejects(c.connect(),/SOLO_RECOVERY_REQUIRED/);assert.equal(rpc.starts,1);
+    store.db.exec('DROP TRIGGER fail_loss');
+    rpc.emit('notification',{method:'turn/completed',params:{threadId:'thread-fixture',turn:{id:'turn-fixture',status:'completed'}}});
+    assert.equal(store.runs()[0].execution,'running','late events from the closed RPC must not erase the durable unresolved Run');
+  }finally{store.db.exec('DROP TRIGGER IF EXISTS fail_loss');await c.close();store.close();}
 });
 test('foreign events cannot alter the active run and completion does not pass verification',async()=>{
   const {c,rpc,store}=setup();await c.connect();await c.submit({requestId:'request-0001',prompt:'hello'});
