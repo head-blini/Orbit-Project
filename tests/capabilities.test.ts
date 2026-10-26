@@ -67,3 +67,10 @@ test('extension list contracts do not claim native activation or live inventory 
   assert.equal(provider.capabilities.find(item=>item.id==='skills')!.effective,'available');
   for(const id of ['hooks','mcp','plugins'])assert.equal(provider.capabilities.find(item=>item.id===id)!.effective,'blocked_policy');
 });
+
+test('native planning advertises stable structured proposal contracts and keeps live runtime unknown',()=>{
+  const capability=buildCapabilityRegistry('ready',null).providers[0].capabilities.find(item=>item.id==='planning')!;
+  assert.equal(capability.effective,'available');assert.equal(capability.verification,'contract_tests');assert.equal(capability.runtime,'unknown');
+  assert.match(capability.interfaces.join(' '),/turn\/start.*outputSchema/);assert.doesNotMatch(capability.interfaces.join(' '),/collaborationMode/);
+  assert.match(capability.note,/실서비스.*미검증/);assert.match(capability.note,/별도.*저장/);
+});

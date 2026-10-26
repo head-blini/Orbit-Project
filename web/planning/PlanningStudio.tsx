@@ -5,6 +5,9 @@ import type { PlanningInput } from '../../server/planning/parser.ts';
 import type { PlanningExportFormat } from '../../shared/planning-handoff.ts';
 import type { PlanningComparisonProps } from '../../shared/planning-revisions.ts';
 import { PlanningComparisonPanel } from './PlanningComparison.tsx';
+import type { PlanningAgentPanelProps } from '../../shared/planning-agent.ts';
+import { PlanningAgentPanel } from './PlanningAgent.tsx';
+import { mergeStudioRecords } from '../studio-client.ts';
 import './planning.css';
 
 export interface PlanningStudioProps {
@@ -18,6 +21,7 @@ export interface PlanningStudioProps {
   onExport?(projectId: string, version: PlanningVersion, format: PlanningExportFormat): Promise<void>;
   onCompare?:PlanningComparisonProps['onCompare'];
   onReplan?:PlanningComparisonProps['onReplan'];
+  agentPlanning?:Omit<PlanningAgentPanelProps,'projectId'|'onSaved'>;
 }
 
 const starter = '# 새 기획안\n\n## Goal\n\n## Requirements\n### REQ-01\n\n#### Acceptance criteria\n\n## Constraints\n\n## Decisions\n\n## Open questions\n';
@@ -102,6 +106,11 @@ function PlanningProject(props: PlanningStudioProps) {
   }
 
   return <section className="planning-studio" aria-label="Planning Studio" aria-busy={busy}>
+    {props.agentPlanning&&<PlanningAgentPanel {...props.agentPlanning} projectId={props.projectId} busy={busy||props.agentPlanning.busy} onSaved={version=>{
+      if(!alive.current)return;
+      setVersions(rows=>mergeStudioRecords(rows,[version]));
+      setMessage('Codex 제안을 별도 초안으로 추가했습니다. 현재 편집 내용은 유지했습니다.');
+    }}/>}
     <header><h2>기획안 편집기</h2></header>
     <p role="status">{message}</p>
     <div className="planning-toolbar">
@@ -201,8 +210,8 @@ export function PlanningPreview({ draft }: { draft: PlanningDraft }) {
       </article>)}
     </section>}
     <h4>미결정 사항</h4><ul>{draft.openQuestions.map((question, index) => <li key={index}>{question}</li>)}</ul>
-    {draft.provenance && <section aria-label="사용자 제공 출처 정보"><h4>사용자 제공 출처 정보 · 미검증</h4>
-      <p>사용자가 입력한 표기입니다. 제공자·작성자·URL의 신원과 내용은 검증하지 않았으며 기획 승인 근거가 아닙니다.</p>
+    {draft.provenance && <section aria-label="출처 정보"><h4>출처 정보 · 미검증</h4>
+      <p>직접 입력·가져오기 또는 Orbit 기획 제안 경로에서 저장된 표기입니다. 제공자·작성자·URL의 신원과 내용은 검증하지 않았으며 기획 승인 근거가 아닙니다.</p>
       <dl className="planning-metadata-values"><dt>출처 유형</dt><dd>{draft.provenance.kind}</dd>
         <dt>제공자 표기</dt><dd>{draft.provenance.providerId ?? '미기재'}</dd>
         <dt>외부 원문 URL</dt><dd>{draft.provenance.externalUrl ?? '미기재'}</dd>

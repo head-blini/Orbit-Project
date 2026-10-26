@@ -263,3 +263,21 @@
 - 전용 Chrome CUA `.local/ui-e2e/mac-task19-JCR8SF/result.json`, `screenshots/01-decisions-and-source.jpg`, `02-approved-followup.jpg`, `03-restored-metadata.jpg`: 결정·근거와 사용자 제공 출처 표시, active link/image0, 결정 변경의 영향 Task1개, 승인→선택 후속 생성→reload/restart의2개 Task·출처·결정 보존. 기존 Task 및 primary/source HEAD·index·digest 동일.
 - 제품 JSON 다운로드 버튼의 event wait는10초 timeout이었으나 예상 Downloads 파일을 확인했다. 실제813B JSON을 다시 parse한 결과 저장 승인본과 정확히 일치했고 SHA256 `274ce4c24e223db88bac12ed801d715f4c7229c9a95a02913dfc1cbe88076569`; 증거 `downloaded-plan.json`, `download-evidence.json`. 각 단계의 HTTP JSON/Markdown export도 모든 metadata 보존 확인.
 - AI/nativeCLI/외부요청0, Run0, console warning/error0. 소유 서버2개 exit0·port 종료·tab 종료·cleanupComplete true·cleanupErrors0. dedicated Mac 범위이며 전체 자동/Windows E2E를 대체하지 않는다. 전체 Goal과 선택적 AI 기획·나머지 A–K 기능은 미완료다.
+
+- Task19 검증 변경은 로컬 커밋 `aceedc9`로 보존했으며 원격 push는 하지 않았다.
+
+## Task20 선택형 네이티브 기획 제안 진행 (2026-10-26)
+
+- 설치된 0.162.1 stable schema와 공식 App Server 문서에서 ordinary `turn/start`의 `outputSchema`와 `agentMessage final_answer`를 확인했다. 실험 collaborationMode에 의존하지 않는다. 새 세션·읽기 전용·MCP 격리·승인 거부, 도구 이벤트/외부 phase 차단, 단일 turn/60초와 종료 관찰 계약을 구현 중이다. native 파일 읽기·컨텍스트·보존·전송을 gateway가 통제한다고 주장하지 않는다.
+- 입력 원문은 preview/start 요청에서만 사용하고 SQLite/audit에는 digest와 lifecycle·검증된 proposal만 저장한다. 별도 save는 Studio의 결정적 receipt를 사용해 crash/응답 유실 후 같은 미승인 초안을 복구한다. 자동 승인·Task·Run은 없다.
+- 입력 최초 missing-module5RED→5GREEN; 서비스5RED→5GREEN. 추가 decoded C0 edge가 trim으로 숨겨지는 회귀1RED→GREEN으로 원본 decoded 문자열을 정규화 전에 검사했다. 현재 input/service11/11. Registry 신규1RED→GREEN; 기존 Controller 포함30/30. native initial17RED→19GREEN, 기존 review 포함34/34; UI12/12, 관련34/34. production page embed SSR은 미연결 RED를 먼저 확인했다.
+- 독립 리뷰에서 thread/start의 실제 cwd/ephemeral/provider attestation 누락과 Rpc error가 close 증거로 취급되는 경계를 발견했다. 담당 작업자가 회귀와 수정을 진행 중이며 전체 성공으로 표시하지 않는다. 실제 모델 호출0; 전체/type/build/브라우저 최종 결과는 후속 기록한다.
+
+### Task20 최종 로컬 검증
+
+- 입력6/service8/native21/HTTP7/UI13/페이지 연결1/Registry1/Rpc close3 신규 회귀를 포함한다. 추가 독립 검토에서 발견한 (1) 실제 cwd/ephemeral/OpenAI provider 확인, (2) kill error를 close로 간주하던 Rpc 종료 증거, (3) 배경 SQLite UPDATE 실패의 미관찰 rejection, (4) 영수증 재확인 시 approved→draft UI 회귀를 보완했다. 각 실패를 재현했고 최종 독립 검토 추가 지적 없음. SQLite 실패는 메모리 lost 격리로 노출하고 durable 복구 저장 성공 후에만 해제한다.
+- 처음 동결된 전체검사 `.local/verification/native-planning-frozen-verify.log`는599total/598pass/1skip/0fail/type0/build0. 브라우저에서 Orbit 생성 출처까지 사용자 입력이라고 표시하던 문구를 발견해 공통 미검증 출처 표기로 수정하고 UI 회귀를 추가했다. 최종 `.local/verification/native-planning-final-verify.log`: **600total / 599pass / 1 Windows-only skip / 0fail**, type0·build0·exit0,24.0초. 원래 UI 테스트의 setImmediate 해시 완료 가정은 실제 POST 신호로 대체해 중복클릭 assertions를 유지했다. HTTP test의 unknown Studio.read 타입 오류5건도 명시적 반환형으로 수정 후 type0.
+- dedicated Chrome CUA 증거 `.local/ui-e2e/mac-task20-POGrI1/result.json`와4JPEG: preview까지 RPC0/plan0 → 별도 동의 후 완료 proposal1/plan0 → 명시 save로 draft1/기존 dirty 편집 유지 → 별도 승인 후 receipt 재확인해 approved 보존 → reload/server restart 동일 version/모델 재호출0 → 소유 fake turn 중단/close → restart intent lost 격리 → unchecked recovery 차단/별도 종료 확인 후 lost 유지·격리 해제. UI 출처 문구 수정 후 reload 재확인.
+- fake RPC created2/turn2/interrupt1/closed2, 실제 AI/nativeCLI/외부요청0, Task0/Run0. primary/workspace HEAD·index·source digest/text 동일. 시작 시 proposal save는 draft였고 이후 테스트의 명시 승인만 approved로 변경했다. 브라우저 warn/error0, 소유 host exit0·loopback 포트 종료·tab 종료·cleanupComplete true/errors0. screenshot 실제 JPEG signature·SHA256 기록.
+- ignored browser host 첫 실행은 read-only Projects로 source fingerprint를 요청해 WRITES_DISABLED로 종료했다. 제품 권한을 바꾸지 않고 fixture 전용 증거 객체를 분리했다. 다음 비대화형 host는 stdin EOF로 즉시 정상 종료해, PTY 소유 host에서 위 시나리오를 진행했다. 이 예비 실행을 브라우저 성공으로 집계하지 않았다.
+- 현재 Mac dedicated 검증이며 전체37단계 자동/Windows E2E 및 실제 Codex 모델 기획은 미검증이다. 전체 플랫폼 Goal은 미완료로 유지한다.

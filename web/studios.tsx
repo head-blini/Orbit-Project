@@ -1,5 +1,6 @@
 import { useEffect,useMemo,useRef,useState } from 'react';
 import type { Snapshot } from '../shared/types.ts';
+import { terminal } from '../shared/types.ts';
 import type { ArtifactRecord,SavedTask } from '../shared/parallel.ts';
 import { PlanningStudio } from './planning/index.tsx';
 import { PlanningFeedbackPanel } from './planning/PlanningFeedback.tsx';
@@ -9,16 +10,16 @@ import { createStudioMutator,mergeStudioRecords } from './studio-client.ts';
 import './studios.css';
 type Post=(path:string,data:object)=>Promise<any>;
 type StudioPageId='planning'|'visualization';
-type TaskActions={state?:Snapshot|null;canRunTask?:boolean;onRunTask?:(task:SavedTask)=>Promise<void>};
+type TaskActions={state?:Snapshot|null;busy?:boolean;canRunTask?:boolean;onRunTask?:(task:SavedTask)=>Promise<void>};
 async function get<T>(path:string):Promise<T>{const response=await fetch(path);if(!response.ok)throw new Error('LOAD_FAILED');return response.json() as Promise<T>;}
 function downloadStudioBlob(blob:Blob,filename:string){
   const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=filename;
   document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
 export function StudioPage({projectId,page,post,online,...taskActions}:{projectId:string;page:StudioPageId;post:Post;online:boolean}&TaskActions) {
- return <fieldset className="studio-page" disabled={!online}>{projectId?<ProjectStudio key={projectId} projectId={projectId} page={page} post={post} {...taskActions}/>:<div className="empty-state"><h2>프로젝트를 먼저 등록하세요</h2><p>기획과 시각화는 Codex 연결 없이 사용할 수 있습니다.</p><a className="button-link" href="#/projects">프로젝트 등록으로 이동</a></div>}</fieldset>;
+ return <fieldset className="studio-page" disabled={!online}>{projectId?<ProjectStudio key={projectId} projectId={projectId} page={page} post={post} online={online} {...taskActions}/>:<div className="empty-state"><h2>프로젝트를 먼저 등록하세요</h2><p>기획과 시각화는 Codex 연결 없이 사용할 수 있습니다.</p><a className="button-link" href="#/projects">프로젝트 등록으로 이동</a></div>}</fieldset>;
 }
-function ProjectStudio({projectId,page,post,state,canRunTask,onRunTask}:{projectId:string;page:StudioPageId;post:Post}&TaskActions){
+function ProjectStudio({projectId,page,post,online,state,busy,canRunTask,onRunTask}:{projectId:string;page:StudioPageId;post:Post;online:boolean}&TaskActions){
   const [artifacts,setArtifacts]=useState<ArtifactRecord[]>([]),[tasks,setTasks]=useState<SavedTask[]>([]),[error,setError]=useState(''),[loading,setLoading]=useState(true);
   const alive=useRef(false),postRef=useRef(post);postRef.current=post;
   const mutate=useMemo(()=>{let storage:Storage|undefined;try{storage=typeof window==='undefined'?undefined:window.sessionStorage;}catch{/* Retain requests in memory if browser storage is unavailable. */}return createStudioMutator((path,data)=>postRef.current(path,data),storage);},[]);
@@ -34,6 +35,8 @@ function ProjectStudio({projectId,page,post,state,canRunTask,onRunTask}:{project
     {error&&<p role="alert">{error}</p>}<button disabled={loading} onClick={()=>void reload()}>저장 기록 다시 불러오기</button>
     {page==='planning'&&<div>
       <PlanningStudio projectId={projectId} showTaskPreview={false} list={()=>get(root+'/plans')}
+        agentPlanning={{post,online,workspaceId:state?.workspaces?.find(workspace=>workspace.id===state.selectedWorkspaceId&&workspace.projectId===projectId)?.id??null,
+          busy:!!busy||!!state?.extensionBusy||!!state?.verificationBusy||!!state?.mergeBusy||!!state?.workflowBusy||!!state?.reviewBusy||!!state?.modelHubBusy||state?.provider==='connecting'||!!state?.runs.some(run=>!terminal(run.execution))}}
         onExport={async(_project,version,format)=>{
           const response=await fetch(`${root}/plans/${version.id}/export?revision=${version.revision}&hash=${encodeURIComponent(version.contentHash)}&format=${format}`);
           if(!response.ok)throw new Error('PLANNING_EXPORT_FAILED');

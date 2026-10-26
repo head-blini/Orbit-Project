@@ -11,18 +11,23 @@ export function denyRequest(e:any):object {
 }
 export class Rpc extends EventEmitter implements RpcPort {
   child:ChildProcessWithoutNullStreams;private pending=new Map<number,{resolve:(v:any)=>void;reject:(e:Error)=>void;timer:NodeJS.Timeout}>();
-  private nextId=1;private buffer='';private ended=false;private closed:Promise<void>;
+  private nextId=1;private buffer='';private ended=false;private stopped=false;private closed:Promise<void>;
   constructor(command:string,args:string[],cwd:string,privateTimeout=20000){
     super();this.timeout=privateTimeout;
     const env=buildChildEnv();
     this.child=spawn(command,args,{cwd,env,shell:false,windowsHide:true,stdio:['pipe','pipe','pipe']});
     this.closed=new Promise(resolve=>{
-      const finish=()=>{if(this.ended)return;this.ended=true;for(const p of this.pending.values()){clearTimeout(p.timer);p.reject(new Error('TRANSPORT_CLOSED'));}this.pending.clear();this.emit('closed');resolve();};
-      this.child.on('error',finish);this.child.on('close',finish);
+      const endTransport=()=>{if(this.ended)return;this.ended=true;for(const p of this.pending.values()){clearTimeout(p.timer);p.reject(new Error('TRANSPORT_CLOSED'));}this.pending.clear();};
+      const finish=()=>{if(this.stopped)return;this.stopped=true;endTransport();this.emit('closed');resolve();};
+      // A failed signal can emit error while the child is still alive. Only
+      // actual close, or a spawn failure with no assigned PID, proves it stopped.
+      this.child.on('error',()=>{endTransport();if(this.child.pid===undefined)finish();});
+      this.child.on('close',finish);
     });
     this.child.stdin.on('error',()=>{});this.child.stderr.on('data',()=>{});
     this.child.stdout.setEncoding('utf8');
     this.child.stdout.on('data',(chunk:string)=>{
+      if(this.ended)return;
       this.buffer+=chunk;if(this.buffer.length>2*1024*1024){this.child.kill();return;}
       let i;while((i=this.buffer.indexOf('\n'))>=0){
         const line=this.buffer.slice(0,i);this.buffer=this.buffer.slice(i+1);if(!line.trim())continue;
@@ -44,5 +49,10 @@ export class Rpc extends EventEmitter implements RpcPort {
     });
   }
   async initialize(){await this.request('initialize',{clientInfo:{name:'ai_coding_control_center',version:'0.1.0'},capabilities:{experimentalApi:false}});this.send({method:'initialized',params:{}});}
-  async close(){if(!this.ended)this.child.stdin.end();const timer=setTimeout(()=>this.child.kill(),1500);await this.closed;clearTimeout(timer);}
+  async close(){
+    if(this.stopped)return this.closed;
+    if(!this.child.stdin.writableEnded)this.child.stdin.end();
+    const timer=setTimeout(()=>{if(!this.stopped)this.child.kill();},1500);
+    try{await this.closed;}finally{clearTimeout(timer);}
+  }
 }

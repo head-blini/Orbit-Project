@@ -66,3 +66,13 @@ The final decoded download text, including its envelope, must fit the existing U
 - `normalizeStoredPlanningDraft` validates stored structure without applying the external256KiB input limit to expanded JSON. Execution and comparison require exact normalized shape and original SHA256; no legacy migration rewrites hashes.
 - Decision changes produce `plan_context_changed` impacts. Attribution-only changes remain visible but do not affect tasks. Execution includes decisions and excludes provenance. Both use saved authoritative versions.
 - Preview renders metadata as escaped text without anchors, images or URL requests. Export privacy checks cover every decoded decision/source/reference string before returning bytes. Incomplete decisions save but cannot approve; metadata cannot supply authority.
+
+
+## 선택형 Native Planning 제안 (Task20)
+
+- 프로젝트의 선택된 등록 worktree에 대해 `POST /api/projects/:projectId/planning-suggestions/preview` `{workspaceId,text}`로 정확한 전송 지침·input/preview digest를 받는다. 입력은1–8000자/UTF-8 32KiB이며 decoded 개인정보/인증정보/C0/DEL 검사를 통과해야 한다. 입력 원문을 SQLite/audit에 저장하지 않는다.
+- `POST .../start`는 `{requestId,workspaceId,text,expectedPreviewDigest,confirmed:true}`만 받는다. 서버 project/workspace/path/base/schema/policy를 재확인하고 durable receipt 뒤1개 읽기 전용 `turn/start outputSchema`를 실행한다. source/승인/ID를 주장하는 모델 결과는 거절한다. 일치하는 completed `agentMessage final_answer`와 완료 turn, 실제 owned process close가 모두 필요하다.
+- `GET ...?workspaceId=...`는 저장된 lifecycle/검증된 proposal만 읽는다. SQLite 이력 한도는 project100건/16MiB. POST `.../:id/interrupt` `{workspaceId}`, `.../recover` `{workspaceId,suggestionId,confirmedStopped:true}`를 분리한다. running은 재시작 시 lost가 되며 자동 재호출하지 않는다. 종료 미확인 또는 배경 저장 실패는 실행을 격리하고 명시적으로 종료를 확인해야 해제된다.
+- `POST .../:id/save` `{workspaceId,expectedOutputDigest}`만 새 미승인 PlanningVersion을 만든다. 결정적 Studio 영수증 `planning-${suggestion.id}`가 응답 유실·재시작·Studio commit 이후 연결 저장 실패에도 중복 생성을 막는다. 기존 버전/Task/Run은 바꾸지 않는다. UI는 현재 편집 내용을 유지하고 버전 목록에 추가하며 동일 revision의 최신 승인 상태를 오래된 영수증으로 덮지 않는다.
+- 모든 mutation은 session/Origin/CSRF와 exact body/query 검사를 거친다. 자동 조회는 GET만 하며 불확실한 mutation 응답 후 재시작은 성공한 명시 상태 새로고침이 필요하다.
+- Native CLI의 readOnly는 파일 읽기를 허용한다. MCP/도구 이벤트/승인 차단과 ephemeral 설정 확인은 컨텍스트 로딩·제공자 보존·원격 과금 통제를 증명하지 않는다. 기존 Model Hub gateway 범위와 구분하며 실제 native 모델 호출은 미검증이다.

@@ -12,7 +12,8 @@ export interface Snapshot {
   verificationBusy?:boolean;
   mergeBusy?:boolean;
   reviewBusy?:boolean;
-    workflowBusy?:boolean;
+  planningBusy?:boolean;
+  workflowBusy?:boolean;
   modelHubBusy?:boolean;modelHubConfigured?:boolean;
   connections?:{id:string;status:'mock_only';externalApiEnabled:boolean;coding:boolean}[];externalApiEnabled?:boolean;
   provider:ProviderStatus; issue:string|null; threadId:string|null;

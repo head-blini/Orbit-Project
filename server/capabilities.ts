@@ -10,7 +10,7 @@ const codexDefinitions:Definition[]=[
   define('streaming','응답 스트리밍','supported',['item/agentMessage/delta; turn/completed'],[appServer],'정제된 누적 텍스트만 저장하며 실행 완료를 검증 성공으로 취급하지 않습니다.'),
   define('resume','세션 복구','supported',['thread/resume'],[appServer],'프로젝트·worktree에 저장된 thread ID만 복구합니다. 프롬프트 자동 재전송은 없습니다.'),
   define('interrupt','실행 중단','supported',['turn/interrupt'],[appServer],'중단 요청과 실제 중단 상태를 구분합니다.'),
-  define('planning','계획 인터페이스','conditional',['turn/start collaborationMode; collaborationMode/list (experimental)'],[appServer],'Orbit Planning 저장·승인과 native plan mode는 별도입니다. 실험 API 연결은 아직 없습니다.'),
+  define('planning','계획 제안','supported',['thread/start; turn/start outputSchema; agentMessage final_answer'],[appServer],'별도 읽기 전용 세션에 미리 본 요청을 1 turn 전송합니다. 검증된 제안은 별도 초안 저장 후 기존 승인 절차를 따릅니다. 실서비스 호출은 미검증이며 native 파일 읽기·컨텍스트·보존·전송은 Orbit 게이트웨이 통제 밖입니다.'),
   define('review','코드 리뷰','supported',['thread/start; review/start (inline custom); exitedReviewMode'],[appServer],'별도 읽기 전용 세션에서 승인한 정제 Diff를 1 turn으로 검토합니다. 매 실행 인증·sandbox·MCP 격리를 다시 확인하며 실서비스 리뷰는 미검증입니다. 완료는 실제 검증·사용자 승인이 아닙니다.'),
   define('verification','검증 증거','conditional',['agent tools; local command runner'],['https://learn.chatgpt.com/docs/agent-configuration/subagents'],'native 도구 검증은 미연결입니다. 별도 Orbit 서버 검증기는 등록한 로컬 명령의 exit·source 증거를 저장합니다. 모델 완료 판단과 구분합니다.'),
   define('skills','Skills','supported',['skills/list; skills/config/write; SKILL.md'],[appServer,'https://learn.chatgpt.com/docs/build-skills'],'연결한 세션에서 명시적으로 정제된 목록을 조회합니다. 실제 목록 API는 미검증이며 버전은 unknown입니다. 설정 변경·설치·프로필 적용은 미연결입니다.'),
@@ -41,7 +41,7 @@ const claudeDefinitions:Definition[]=[
 
 /** A read-only description, never authorization to launch, install, or change policy. */
 export function buildCapabilityRegistry(status:ProviderStatus,probe:NativeProbeReport|null):CapabilityRegistry {
-  const connected=new Set<CapabilityId>(['session','streaming','resume','interrupt','usage','review','skills']);
+  const connected=new Set<CapabilityId>(['session','streaming','resume','interrupt','usage','review','skills','planning']);
   const blocked=new Set<CapabilityId>(['mcp','hooks','plugins','subagents','goal']);
   const capabilities=(definitions:Definition[],native:boolean):Capability[]=>definitions.map(definition=>({
     ...structuredClone(definition),

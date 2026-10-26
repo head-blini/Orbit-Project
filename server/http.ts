@@ -56,7 +56,25 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
         const token=req.headers['x-csrf-token'];
         if(req.headers.origin!==origin||typeof token!=='string'||token.length!==64||!timingSafeEqual(Buffer.from(token),Buffer.from(session.csrf)))throw new AppError('CSRF_REJECTED',403);
         const largeStudioInput=studioRoute&&studioRoute[2]!=='tasks'&&(!studioRoute[3]||studioRoute[4]==='revisions');
-        const data=await body(req,largeStudioInput?6*256*1024+256*1024:18000);
+        const planningSuggestion=url.pathname.match(/^\/api\/projects\/([a-f0-9-]{36})\/planning-suggestions\/(preview|start|recover|([a-f0-9-]{36})\/(interrupt|save))$/);
+        const data=await body(req,largeStudioInput?6*256*1024+256*1024:planningSuggestion?64000:18000);
+        if(planningSuggestion){
+          if(url.search)throw new AppError('INVALID_FIELDS',400);
+          const projectId=planningSuggestion[1],action=planningSuggestion[2],id=planningSuggestion[3];
+          if(action==='preview'){
+            exact(data,['workspaceId','text']);json(res,200,controller.previewPlanning(projectId,data as unknown as Parameters<Controller['previewPlanning']>[1]));return;
+          }
+          if(action==='start'){
+            exact(data,['requestId','workspaceId','text','expectedPreviewDigest','confirmed']);json(res,200,controller.startPlanning(projectId,data as unknown as Parameters<Controller['startPlanning']>[1]));return;
+          }
+          if(action==='recover'){
+            exact(data,['workspaceId','suggestionId','confirmedStopped']);json(res,200,controller.recoverPlanning(projectId,data as unknown as Parameters<Controller['recoverPlanning']>[1]));return;
+          }
+          if(planningSuggestion[4]==='interrupt'){
+            exact(data,['workspaceId']);json(res,200,controller.interruptPlanning(projectId,id,data.workspaceId as string));return;
+          }
+          exact(data,['workspaceId','expectedOutputDigest']);json(res,200,controller.savePlanningDraft(projectId,id,data as unknown as Parameters<Controller['savePlanningDraft']>[2]));return;
+        }
         const planningFeedback=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/planning-feedback$/);
         if(planningFeedback){
           if(url.search)throw new AppError('INVALID_FIELDS',400);
@@ -221,6 +239,12 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
           json(res,200,controller.sourceGraphs.file(sourceGraphView[1],recordId,sourceGraphView[2]));
         }else{if(url.search)throw new AppError('INVALID_FIELDS',400);json(res,200,controller.sourceGraphs.view(sourceGraphView[1]));}
         return;
+      }
+      const planningSuggestionsView=url.pathname.match(/^\/api\/projects\/([a-f0-9-]{36})\/planning-suggestions$/);
+      if(req.method==='GET'&&planningSuggestionsView){
+        const workspaceId=url.searchParams.get('workspaceId');
+        if([...url.searchParams.keys()].join(',')!=='workspaceId'||!workspaceId||!/^[a-f0-9-]{36}$/.test(workspaceId))throw new AppError('INVALID_FIELDS',400);
+        json(res,200,controller.planningSuggestions.view(planningSuggestionsView[1],workspaceId));return;
       }
       const verificationView=url.pathname.match(/^\/api\/workspaces\/([a-f0-9-]{36})\/verification$/);
       const reviewView=url.pathname.match(/^\/api\/workspaces\/([a-f0-9-]{36})\/reviews(\/preview)?$/);

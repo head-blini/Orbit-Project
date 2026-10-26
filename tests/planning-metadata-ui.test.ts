@@ -30,7 +30,7 @@ test('actual planning preview renders decisions with topic, decision and rationa
 
 test('actual planning preview labels source claims unverified and renders all URLs and references as inert text',async()=>{
   const {studio}=await components();const html=renderToStaticMarkup(createElement(studio.PlanningPreview,{draft}));
-  assert.match(html,/사용자 제공 출처 정보/);assert.match(html,/검증하지 않/);assert.match(html,/출처 유형/);assert.match(html,/제공자 표기/);assert.match(html,/작성자 표기/);assert.match(html,/외부 원문 URL/);assert.match(html,/참고 자료/);
+  assert.match(html,/aria-label="출처 정보"/);assert.match(html,/<h4>출처 정보 · 미검증<\/h4>/);assert.match(html,/검증하지 않/);assert.match(html,/출처 유형/);assert.match(html,/제공자 표기/);assert.match(html,/작성자 표기/);assert.match(html,/외부 원문 URL/);assert.match(html,/참고 자료/);
   assert.match(html,/external &lt;em&gt;claim&lt;\/em&gt;/);assert.match(html,/provider &lt;img src=x&gt;/);assert.match(html,/author &lt;script&gt;claim\(\)&lt;\/script&gt;/);
   assert.match(html,/https:\/\/example\.invalid\/plan\?title=&lt;svg&gt;&amp;from=source/);assert.match(html,/Reference &lt;iframe src=x&gt;/);assert.match(html,/https:\/\/example\.invalid\/reference\?title=&lt;img&gt;&amp;from=ref/);
   assert.doesNotMatch(html,/<a(?:\s|>)|<script|<img|<iframe|<svg|<[^>]+\s(?:href|src|srcset)=/);
@@ -38,7 +38,7 @@ test('actual planning preview labels source claims unverified and renders all UR
 
 test('legacy drafts omit optional metadata sections while partial source and decision text remains readable',async()=>{
   const {studio}=await components();const {decisions:_,provenance:__,...legacy}=draft;
-  const old=renderToStaticMarkup(createElement(studio.PlanningPreview,{draft:legacy}));assert.doesNotMatch(old,/사용자 제공 출처 정보|<h4>결정 사항<\/h4>|undefined|null/);assert.match(old,/기획을 보존한다/);
+  const old=renderToStaticMarkup(createElement(studio.PlanningPreview,{draft:legacy}));assert.doesNotMatch(old,/출처 정보|<h4>결정 사항<\/h4>|undefined|null/);assert.match(old,/기획을 보존한다/);
   const partial=renderToStaticMarkup(createElement(studio.PlanningPreview,{draft:{...legacy,decisions:[{topic:'Pending choice',decision:'',rationale:''}],provenance:{kind:'file',providerId:null,externalUrl:null}}}));
   assert.match(partial,/Pending choice/);assert.match(partial,/결정 미입력/);assert.match(partial,/근거 미입력/);assert.match(partial,/미기재/);assert.doesNotMatch(partial,/undefined|null|<a(?:\s|>)/);
 });

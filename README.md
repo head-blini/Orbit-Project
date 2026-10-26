@@ -8,7 +8,7 @@
 
 ## 실행
 
-필요 환경: Windows, Node.js **24.x**, npm, Git. AI 실행에는 이미 설치·로그인된 Codex CLI가 필요하며 기획·시각화·소스 분석은 AI 없이 사용할 수 있습니다. 실제 검증 버전은 **0.164.0-alpha.11.1**입니다. 별도 OpenAI API 키는 사용하지 않습니다.
+필요 환경: Windows 또는 macOS, Node.js **24.x**, npm, Git. AI 실행에는 이미 설치·로그인된 Codex CLI가 필요하며 기획·시각화·소스 분석은 AI 없이 사용할 수 있습니다. 기존 Windows live 검증 버전은 **0.164.0-alpha.11.1**입니다. Mac은 **0.162.1** native 탐색·제한 옵션·stable schema와 로컬 계약/브라우저를 검증했으며 Mac의 실제 모델 실행은 미검증입니다. 별도 OpenAI API 키는 사용하지 않습니다.
 
 일반 사용자 PowerShell에서 프로젝트 폴더로 이동한 뒤:
 
@@ -71,6 +71,7 @@ Remove-Item Env:ORBIT_ALLOWED_PROJECTS
 ## 통합 기능과 현재 한계 (2026-10-26)
 
 - **기획 스튜디오:** 저장·승인·Task 생성 뒤 선택한 worktree에서 Task를 실행합니다. 현재 승인 버전·미해결 질문·제약을 서버에서 확인하며 AI 없이도 기획을 저장할 수 있습니다. 저장 버전은 Markdown/JSON v1으로 내보내 다시 가져올 수 있습니다. Task/Run을 선택하면 상태·체크·현재 승인·변경 파일 목록의 수동 인계용 피드백을 생성합니다. 원문 코드·패치·명령·모델 응답·실행 로그는 제외하며 외부 서비스에 자동 전송하지 않습니다. 새 기획안은 별도 초안으로 검토·승인합니다.
+- **Codex 기획 제안(선택):** Planning에서 등록한 격리 작업 공간을 선택하고 요청 미리보기 → 별도 동의 → 검증된 제안 확인 → 새 초안 저장 순서로 사용합니다. 공식 stable `turn/start outputSchema`의 최종 응답만 검사하며 제안 완료는 기획 승인·Task·Run을 만들지 않습니다. 원문 요청은 Orbit 이력에 저장하지 않고 영수증/digest와 검증된 결과만 보존합니다. 읽기 전용 Native CLI도 파일을 읽을 수 있으며 컨텍스트 로딩·보존·제공자 전송은 Model Hub 게이트웨이 밖입니다. 1 turn/60초와 종료 관찰을 사용하고 재시작 또는 종료 미확인 작업은 별도 종료 확인 후 복구합니다. 실제 모델 호출은 미검증이며 로컬 fake RPC 검증과 구분합니다.
 - **시각화 스튜디오:** 저장된 Artifact를 실제 편집 가능한 PPTX와 Markdown으로 내보냅니다. ZIP/XML·편집 후 재저장·HTTP 파일 생성과 실제 제품 버튼의 브라우저 파일 저장을 검증했습니다. 자동화 도구의 `download` 명령 취소와 정상 `click` 저장을 구분한 증거는 [다운로드 결과](docs/visualization/DOWNLOAD-RESULTS.md)에 있습니다. PowerPoint GUI는 미검증입니다.
 - **모델 제공자 / 확장 기능:** Capability Registry에서 공식 지원·현재 연결·정책 제한을 구분합니다. CLI 버전 진단은 native 실행 파일의 `--version`만 호출합니다. 인증·모델 요청·확장 설치는 수행하지 않으며 PATH 미발견을 설치 없음으로 단정하지 않습니다.
 - **에이전트 센터:** Solo는 기존 Codex 실행 경로입니다. Cross Review, Debate, Race, Cooperate, Goal은 설계·검증 계약만 있고 executor가 미연결입니다. 기존 hooks/MCP/plugins/subagents 제한은 유지합니다.
