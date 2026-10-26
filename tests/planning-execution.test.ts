@@ -60,10 +60,16 @@ test('an approved plan with unresolved questions cannot be executed',()=>{
   assert.throws(()=>buildExecutionBrief(task,version),/^Error: UNRESOLVED_QUESTIONS$/);
 });
 
-test('unsupported nonempty decisions fail explicitly rather than disappearing from execution context',()=>{
+test('approved decisions remain in the execution brief while user attribution is excluded',()=>{
   const {task,version}=fixture();Object.assign(version.draft,{decisions:[{topic:'storage',decision:'Use SQLite',rationale:'local-first'}]});
   version.contentHash=createHash('sha256').update(JSON.stringify(version.draft)).digest('hex');
-  assert.throws(()=>buildExecutionBrief(task,version),/^Error: UNSUPPORTED_DECISIONS$/);
+  version.draft.provenance={kind:'external_web',providerId:'synthetic-provider',externalUrl:'https://example.invalid/private-attribution',author:'Attribution-only author'};
+  version.contentHash=createHash('sha256').update(JSON.stringify(version.draft)).digest('hex');
+  const brief=buildExecutionBrief(task,version);
+  assert.match(brief.prompt,/Use SQLite/);assert.match(brief.prompt,/local-first/);
+  assert.doesNotMatch(brief.prompt,/synthetic-provider|private-attribution|Attribution-only author/);
+  version.draft.decisions![0].decision='Altered after approval';
+  assert.throws(()=>buildExecutionBrief(task,version),/^Error: PLANNING_VERSION_INVALID$/);
 });
 
 test('oversized execution context is rejected without silently truncating plan constraints',()=>{
@@ -86,4 +92,12 @@ test('the full brief at the Controller character limit is accepted and one extra
   assert.ok(brief.prompt.includes(version.draft.constraints[0]));
   version.draft.constraints[0]+='x';version.contentHash=createHash('sha256').update(JSON.stringify(version.draft)).digest('hex');
   assert.throws(()=>buildExecutionBrief(task,version),/^Error: EXECUTION_BRIEF_TOO_LARGE$/);
+});
+
+test('incomplete decisions and decision context exceeding the prompt limit cannot execute',()=>{
+  for(const decision of ['', 'x'.repeat(4000)]){
+    const {task,version}=fixture();version.draft.decisions=[{topic:'Storage',decision,rationale:'Local data'}];
+    version.contentHash=createHash('sha256').update(JSON.stringify(version.draft)).digest('hex');
+    assert.throws(()=>buildExecutionBrief(task,version),decision? /^Error: EXECUTION_BRIEF_TOO_LARGE$/ : /^Error: PLANNING_VERSION_INVALID$/);
+  }
 });

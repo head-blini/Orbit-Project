@@ -247,3 +247,19 @@
 - 전용 Chrome CUA 증거: `.local/ui-e2e/mac-task18-B9GhIA/result.json`, `screenshots/01-draft-comparison.jpg`, `02-selected-followup.jpg`, `03-restored-comparison.jpg`(실제JPEG3개·SHA256 기록). draft 생성 차단→승인 시 preview 초기화→재비교→R1만 선택+별도 동의→1개 후속 Task 생성→전체 생성으로 R3만 추가→reload/server restart 후4개 Task·기존 ID·predecessor 연결 보존을 확인했다. 재시작 후 consent 미복원·중복 생성 차단.
 - primary/source HEAD·index·digest 및 이전 Task 원본 동일, model/run/nativeCLI/외부요청0, console warning/error0. 소유 서버2개 exit0·loopback 포트 종료·탭 종료·cleanupComplete true·cleanupErrors0. 최초 브라우저 exact label 조회는 DOM의 combobox locator로 해결했고, ignored host의 중복 binding 구문 오류는 실행 전에 수정했다.
 - Task18 전용 Mac 검증이며 전체37단계 자동 E2E와 Windows 최종 gate를 대신하지 않는다. decisions/전체 가져오기 출처 metadata·선택적 AI 기획 등 전체 Goal 미완료 항목은 계속 진행한다.
+
+- Task18 검증 변경은 로컬 커밋 `278ef12`로 보존했으며 원격 push는 하지 않았다.
+
+## Task19 기획 결정·출처 metadata 진행 (2026-10-26)
+
+- 기존 v1의 optional decisions/provenance를 확장해 legacy hash를 유지한다. Root는 shared/실행/비교/통합, 독립 작업자는 parser/export 및 UI를 담당한다. 출처는 사용자 입력의 미검증 metadata이며 링크를 방문하지 않고 실행 명세에 포함하지 않는다. 결정 내용과 이유는 승인된 실행 명세에 보존한다.
+- 실행/비교 회귀32개 중29pass/3fail로 미지원 경로를 확인했다(`.local/verification/planning-metadata-root-red.log`). Studio persistence 회귀2개도 UNSUPPORTED_DECISIONS로 실패했다(`planning-metadata-service-red.log`,exit1). 구현·전체 검증·브라우저 검증은 진행 중이다.
+
+### Task19 최종 로컬 검증
+
+- 결정 주제·내용·근거(최대100개)와 source kind/provider/원문URL/작성자/참고 링크(최대50개)를 정규화해 보존한다. 기존 absent 필드와 hash는 변경하지 않는다. 결정이 불완전하면 저장만 가능하고 승인은 차단된다. 결정 변경은 모든 이전 Task의 기획 맥락에 반영하며 승인된 실행 brief에도 포함한다. 출처는 미검증 사용자 입력이며 실행 prompt에서 제외하고 URL을 요청하지 않는다.
+- Parser/export 신규15개 RED3pass/12fail→focused40/40; UI 신규5개 RED→기존 포함19/19. 새 필드 export 개인정보 검사를 잠시 제거한 mutation check에서2개가 예상대로 실패한 뒤 원복했다. 초기 full539pass/1skip과 mutation 확인 시간이 겹칠 수 있어 동결 후 재검사했다.
+- 최종 `.local/verification/planning-metadata-frozen-verify.log`: **540total / 539pass / 1 Windows-only skip / 0fail**, type0·build0·exit0,23.2초. 실행/비교/실제SQLite 보존·legacy hash·불완전 결정 차단 회귀 포함. 독립 최종 리뷰 추가 지적 없음.
+- 전용 Chrome CUA `.local/ui-e2e/mac-task19-JCR8SF/result.json`, `screenshots/01-decisions-and-source.jpg`, `02-approved-followup.jpg`, `03-restored-metadata.jpg`: 결정·근거와 사용자 제공 출처 표시, active link/image0, 결정 변경의 영향 Task1개, 승인→선택 후속 생성→reload/restart의2개 Task·출처·결정 보존. 기존 Task 및 primary/source HEAD·index·digest 동일.
+- 제품 JSON 다운로드 버튼의 event wait는10초 timeout이었으나 예상 Downloads 파일을 확인했다. 실제813B JSON을 다시 parse한 결과 저장 승인본과 정확히 일치했고 SHA256 `274ce4c24e223db88bac12ed801d715f4c7229c9a95a02913dfc1cbe88076569`; 증거 `downloaded-plan.json`, `download-evidence.json`. 각 단계의 HTTP JSON/Markdown export도 모든 metadata 보존 확인.
+- AI/nativeCLI/외부요청0, Run0, console warning/error0. 소유 서버2개 exit0·port 종료·tab 종료·cleanupComplete true·cleanupErrors0. dedicated Mac 범위이며 전체 자동/Windows E2E를 대체하지 않는다. 전체 Goal과 선택적 AI 기획·나머지 A–K 기능은 미완료다.

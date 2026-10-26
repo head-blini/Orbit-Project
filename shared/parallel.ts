@@ -1,9 +1,15 @@
 /** Provider-neutral Studio contracts. These records never grant execution authority. */
 export type PlanningSource = 'manual' | 'import';
+export interface PlanningDecision {topic:string;decision:string;rationale:string}
+export interface PlanningProvenance {
+  kind:string;providerId:string|null;externalUrl:string|null;
+  author?:string;references?:{title:string;url:string}[];
+}
 export interface PlanningDraft {
   schemaVersion:'1.0'; title:string; goal:string;
   requirements:{label:string;description:string;acceptanceCriteria:string[]}[];
   constraints:string[]; openQuestions:string[]; source:PlanningSource;
+  decisions?:PlanningDecision[]; provenance?:PlanningProvenance;
 }
 export type PlanningParseResult = {ok:true;draft:PlanningDraft} | {ok:false;issues:{field:string;code:string}[]};
 export interface PlanningVersion {

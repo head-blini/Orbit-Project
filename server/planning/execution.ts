@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import type { PlanningVersion, SavedTask } from '../../shared/parallel.ts';
 import { AppError } from '../errors.ts';
-import { approvalIssues, parsePlanningDraft, serializePlanningDraft } from './parser.ts';
+import { approvalIssues, normalizeStoredPlanningDraft } from './parser.ts';
 
 export interface ExecutionBrief {prompt:string;planningVersionId:string;requirementLabels:string[]}
 export const MAX_EXECUTION_PROMPT_CHARS=4000;
@@ -23,11 +23,8 @@ export function buildExecutionBrief(task:SavedTask,version:PlanningVersion):Exec
     ||!Number.isSafeInteger(version.revision)||version.revision<1)throw new AppError('PLANNING_VERSION_INVALID',409);
   const draft=version.draft;
   if(!draft||typeof draft!=='object')throw new AppError('PLANNING_VERSION_INVALID',409);
-  // The current shared v1 contract does not support decisions. Never silently
-  // discard a nonempty value when a future/foreign record reaches this boundary.
-  if('decisions' in draft&&(!Array.isArray(draft.decisions)||draft.decisions.length))throw new AppError('UNSUPPORTED_DECISIONS',422);
   try{
-    const parsed=parsePlanningDraft({format:'json',text:serializePlanningDraft(draft),source:draft.source});
+    const parsed=normalizeStoredPlanningDraft(draft);
     if(!parsed.ok||!isDeepStrictEqual(parsed.draft,draft)||approvalIssues(draft).length
       ||createHash('sha256').update(JSON.stringify(draft)).digest('hex')!==version.contentHash)throw new Error();
   }catch{throw new AppError('PLANNING_VERSION_INVALID',409);}
@@ -41,7 +38,7 @@ export function buildExecutionBrief(task:SavedTask,version:PlanningVersion):Exec
     ||task.description!==requirement.description||!isDeepStrictEqual(task.acceptanceCriteria,requirement.acceptanceCriteria))throw new AppError('TASK_PLAN_MISMATCH',409);
   const prompt='Implement the saved task below within the selected isolated workspace. Follow every plan constraint. Report verification honestly; an agent response is not a passed check.\n'+JSON.stringify({
     taskId:task.id,planningVersionId:version.id,contentHash:version.contentHash,title:version.draft.title,
-    goal:version.draft.goal,requirements,constraints:version.draft.constraints,decisions:[],
+    goal:version.draft.goal,requirements,constraints:version.draft.constraints,decisions:version.draft.decisions??[],
   },null,2);
   if(prompt.length>MAX_EXECUTION_PROMPT_CHARS)throw new AppError('EXECUTION_BRIEF_TOO_LARGE',422);
   return {prompt,planningVersionId:version.id,requirementLabels:[...task.requirementLabels]};

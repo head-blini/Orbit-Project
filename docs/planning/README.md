@@ -1,12 +1,12 @@
 # Planning Studio
 
-This isolated module supports planning with zero providers. It does not connect to ChatGPT, call a model, create a Run, or grant coding permissions. Storage is in memory. HTTP, SQLite and the application's main screen are integration work, not implemented here.
+This isolated module supports planning with zero providers. It does not connect to ChatGPT, call a model, create a Run, or grant coding permissions. The product integrates immutable SQLite storage, authenticated HTTP routes and the main Planning screen. InMemoryPlanningRepository remains available for isolated tests.
 
 ## Entry points
 
 - `server/planning/index.ts`: `parsePlanningDraft`, `approvalIssues`, `serializePlanningDraft`, `InMemoryPlanningRepository`, `PlanningRepository`, `PlanningError`, `toTaskDrafts`.
 - `web/planning/index.tsx`: `PlanningStudio`, `PlanningPreview`, `PlanningStudioProps`. Styles are scoped to `.planning-studio` and `.planning-preview`.
-- Planning domain types are imported from integration-owned `shared/parallel.ts`. That file is missing in this checkout; no duplicate contract was introduced.
+- Planning domain types are imported from integration-owned `shared/parallel.ts`. The shared contract is present; no private duplicate is used.
 
 ## Input grammar
 
@@ -15,8 +15,8 @@ Both formats have a 262,144-byte (256 KiB) UTF-8 limit. The parser returns field
 JSON uses the canonical `schema_version: "1.0"` schema in `docs/07-PROVIDER-NEUTRAL-CORE.md`. `requirements[].id` maps to `label`, `acceptance_criteria` to `acceptanceCriteria`, and `open_questions` to `openQuestions`. See `tests/fixtures/planning/valid.json`.
 
 - Required structural keys: `schema_version`, `title`, `goal`, `requirements`, `constraints`, `open_questions`.
-- `decisions` may be absent or empty. Nonempty decisions are explicitly rejected with `UNSUPPORTED_DECISIONS` because the mandated shared draft contract has no decision field. This avoids silent data loss; full decision support needs an integration-owned contract extension.
-- Optional source metadata accepts `kind`, `provider_id`, `external_url`. It is untrusted provenance, never authority. The parser's explicit `source: 'manual' | 'import'` determines the normalized source; URLs are never requested.
+- `decisions` is optional, with at most100 objects containing exactly string `topic`, `decision`, `rationale`. Blank fields save as incomplete drafts but prevent approval. Empty decisions normalize to absence for legacy hash compatibility.
+- Optional `source` metadata accepts `kind` (1–64 characters), `provider_id` (null/string up to128), `external_url` (null/HTTP(S) URL up to2048), `author` (up to200), and `references` (up to50 objects with `title` up to200 and `url` up to2048). URLs require a host and reject userinfo, backslashes, whitespace and controls; they are never requested or rendered as active links. Metadata is user-supplied attribution, never authority. The input envelope's `source: manual|import` remains separate. Both legacy default kinds `in_app_manual`/`file` with null provider/url and no author/references normalize to absence, preserving legacy cross-source reimport shapes.
 - Unknown keys, including approval/state/ID/hash/revision fields, are rejected. Old schema `0.2` is rejected, not migrated implicitly.
 - Requirement labels must be unique, use ASCII letters/digits/underscore/hyphen, start with a letter or digit, and be 1–64 characters.
 
@@ -36,11 +36,17 @@ Requirement description (multiple lines allowed).
 - A constraint
 ## Open questions
 - A question
+## Decisions
+### Storage
+#### Decision
+Use SQLite.
+#### Rationale
+Offline operation.
 ```
 
-Korean headings `목표`, `요구사항`, `인수 조건`, `제약`, `질문` are also accepted. Section headings may occur once; requirements may repeat with distinct labels. Lists accept `- ` or `* `. Unknown/duplicate headings, unsupported nesting and text outside the documented sections are rejected. This is not a general-purpose Markdown parser. Heading-looking lines in descriptions need to be written as plain text without a Markdown heading prefix. Empty documents and missing sections are valid incomplete drafts.
+Korean headings `목표`, `요구사항`, `인수 조건`, `제약`, `질문`, decision section `결정사항`/`결정 사항`/`결정`, and decision fields `결정`/`근거`/`이유` are also accepted. Section headings may occur once; requirements may repeat with distinct labels. Lists accept `- ` or `* `. Unknown/duplicate headings, unsupported nesting and text outside the documented sections are rejected. This is not a general-purpose Markdown parser. Heading-looking lines in descriptions need to be written as plain text without a Markdown heading prefix. Empty documents and missing sections are valid incomplete drafts.
 
-Saving permits structurally valid incomplete drafts. Approval requires a nonempty title and goal, at least one requirement, and nonempty descriptions and acceptance criteria for every requirement. Source metadata cannot supply approval.
+Saving permits structurally valid incomplete drafts. Approval requires a nonempty title and goal, at least one requirement, and nonempty descriptions and acceptance criteria for every requirement. Every supplied decision also requires nonempty topic, decision and rationale. Source metadata cannot supply approval.
 
 ## Repository behavior
 
@@ -59,9 +65,9 @@ Previously approved versions remain approved history and can still produce task 
 
 Returns are deep copies. `toTaskDrafts` additionally requires a genuine unchanged snapshot issued by this module; it derives state and task content from a separate private copy. Copies deserialized from browser JSON, forged approvals, changed objects and serialization hooks cannot become authority. HTTP handlers must call `repository.toTasks(projectId, versionId)` and never accept a browser version object for conversion.
 
-The repository retains original input and generated creation/approval times internally. These are not exposed by the fixed `PlanningVersion` contract. It does not currently expose an audit-history API, persistence, deletion, plan grouping metadata or a configurable retention limit. Project IDs are opaque 1–128-character ASCII identifiers (letters/digits, underscore, hyphen; first character alphanumeric), never filesystem paths. Project existence and session access belong to the integration layer.
+The repository retains original input privately. PlanningVersion exposes lineage and creation/approval metadata; Studio uses SQLite transactions, mutation receipts, metadata-only audit events and per-project storage quotas. Original input is not exposed by the normal read/export routes. Project IDs are opaque 1–128-character ASCII identifiers (letters/digits, underscore, hyphen; first character alphanumeric), never filesystem paths. Project existence and session access belong to the integration layer.
 
-Each requirement produces one `TaskDraft`; the result copies acceptance criteria and links the exact planning version and requirement label. It does not persist tasks or start runs. Constraints and questions stay on the linked plan.
+Each requirement produces one `TaskDraft`; the result copies acceptance criteria and links the exact planning version and requirement label. It does not persist tasks or start runs. Constraints, decisions and questions stay on the linked plan. Execution includes approved decisions and constraints, rejects unresolved questions/incomplete decisions and enforces its existing4000-character prompt limit. Attribution is excluded from execution prompts. Comparison displays decisions/provenance changes; only decisions affect all previous tasks.
 
 ## UI behavior and checks
 
@@ -78,4 +84,4 @@ npm.cmd test
 npm.cmd run build
 ```
 
-The focused UI smoke transforms the TSX and renders real React components on the server, including hostile text escaping. It does not exercise browser interaction, CSS layout, file selection or asynchronous callback races. The bundle check separately includes the standalone entrypoint; the default project build does not include it yet. See the results report for actual exit codes and blockers.
+The focused UI smoke transforms the TSX and renders real React components on the server, including hostile text escaping. It does not exercise browser interaction, CSS layout, file selection or asynchronous callback races. The product build includes the integrated Planning screen. See the results report for actual exit codes and blockers.

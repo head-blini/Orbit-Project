@@ -1,4 +1,4 @@
-import type { PlanningDraft, PlanningParseResult, PlanningSource } from '../../shared/parallel.ts';
+import type { PlanningDecision, PlanningDraft, PlanningParseResult, PlanningProvenance, PlanningSource } from '../../shared/parallel.ts';
 
 export const MAX_PLANNING_BYTES = 256 * 1024;
 export const PLANNING_EXPORT_MARKER = '<!-- orbit-planning-export:v1 -->';
@@ -41,14 +41,17 @@ function normalizeJsonDocument(value: unknown, source: PlanningSource): Planning
   if (typeof value.title !== 'string' || typeof value.goal !== 'string') return fail('document', 'INVALID_TEXT_FIELDS');
   if (!Array.isArray(value.requirements)) return fail('requirements', 'INVALID_REQUIREMENTS');
   if (!strings(value.constraints) || !strings(value.open_questions)) return fail('document', 'INVALID_LIST');
-  // v1 has decisions but the shared draft contract cannot represent them. Never silently discard them.
-  if (value.decisions !== undefined && (!Array.isArray(value.decisions) || value.decisions.length !== 0)) return fail('decisions', 'UNSUPPORTED_DECISIONS');
-  if (value.source !== undefined) {
-    const source = value.source;
-    if (!object(source) || !exactKeys(source, ['kind', 'provider_id', 'external_url']) || typeof source.kind !== 'string'
-      || (source.provider_id !== undefined && source.provider_id !== null && typeof source.provider_id !== 'string')
-      || (source.external_url !== undefined && source.external_url !== null && typeof source.external_url !== 'string')) return fail('source', 'INVALID_SOURCE_METADATA');
+  const decisions:PlanningDecision[]=[];
+  if (value.decisions !== undefined) {
+    if (!Array.isArray(value.decisions) || value.decisions.length > 100) return fail('decisions', 'INVALID_DECISIONS');
+    for (const [index, item] of value.decisions.entries()) {
+      if (!object(item) || !exactKeys(item, ['topic', 'decision', 'rationale']) || typeof item.topic !== 'string'
+        || typeof item.decision !== 'string' || typeof item.rationale !== 'string') return fail(`decisions.${index}`, 'INVALID_DECISION');
+      decisions.push({topic:item.topic.trim(),decision:item.decision.trim(),rationale:item.rationale.trim()});
+    }
   }
+  const provenance=value.source===undefined?undefined:normalizeProvenance(value.source);
+  if (provenance===false) return fail('source', 'INVALID_SOURCE_METADATA');
   const requirements: PlanningDraft['requirements'] = [];
   for (const [index, item] of value.requirements.entries()) {
     if (!object(item) || !exactKeys(item, ['id', 'description', 'acceptance_criteria'])
@@ -57,7 +60,46 @@ function normalizeJsonDocument(value: unknown, source: PlanningSource): Planning
   }
   const draft: PlanningDraft = { schemaVersion: '1.0', title: value.title.trim(), goal: value.goal.trim(), requirements,
     constraints: value.constraints.map(text => text.trim()), openQuestions: value.open_questions.map(text => text.trim()), source };
+  if (decisions.length) draft.decisions=decisions;
+  if (provenance) draft.provenance=provenance;
   return finish(draft);
+}
+
+const boundedText=(value:unknown,max:number):value is string=>typeof value==='string'&&value.trim().length<=max;
+
+function validSourceUrl(value:unknown):value is string {
+  if (!boundedText(value,2048)) return false;
+  const text=value.trim(),authority=/^https?:\/\/([^/?#]+)/i.exec(text)?.[1];
+  if (!authority || authority.includes('@') || /[\s\\\u0000-\u001f\u007f]/u.test(text)) return false;
+  try {
+    const url=new URL(text);
+    return (url.protocol==='http:'||url.protocol==='https:')&&Boolean(url.hostname)&&!url.username&&!url.password;
+  } catch { return false; }
+}
+
+function normalizeProvenance(value:unknown):PlanningProvenance|undefined|false {
+  if (!object(value) || !exactKeys(value,['kind','provider_id','external_url','author','references'])
+    || !boundedText(value.kind,64) || !value.kind.trim()
+    || (value.provider_id!==undefined&&value.provider_id!==null&&!boundedText(value.provider_id,128))
+    || (value.external_url!==undefined&&value.external_url!==null&&!validSourceUrl(value.external_url))
+    || (value.author!==undefined&&!boundedText(value.author,200))) return false;
+  const provenance:PlanningProvenance={kind:value.kind.trim(),providerId:typeof value.provider_id==='string'?value.provider_id.trim():null,
+    externalUrl:typeof value.external_url==='string'?value.external_url.trim():null};
+  if (typeof value.author==='string'&&value.author.trim()) provenance.author=value.author.trim();
+  if (value.references!==undefined) {
+    if (!Array.isArray(value.references)||value.references.length>50) return false;
+    const references:NonNullable<PlanningProvenance['references']>=[];
+    for (const reference of value.references) {
+      if (!object(reference)||!exactKeys(reference,['title','url'])||!boundedText(reference.title,200)||!validSourceUrl(reference.url)) return false;
+      references.push({title:reference.title.trim(),url:reference.url.trim()});
+    }
+    if (references.length) provenance.references=references;
+  }
+  // Both legacy defaults normalize away independent of the import channel, so
+  // reimporting a manual export as a file preserves the old exact draft shape.
+  if (['in_app_manual','file'].includes(provenance.kind)&&provenance.providerId===null&&provenance.externalUrl===null
+    &&provenance.author===undefined&&provenance.references===undefined) return undefined;
+  return provenance;
 }
 
 function finish(draft: PlanningDraft): PlanningParseResult {
@@ -72,9 +114,12 @@ function finish(draft: PlanningDraft): PlanningParseResult {
 
 function parseMarkdown(text: string, source: PlanningSource): PlanningParseResult {
   const draft: PlanningDraft = { schemaVersion: '1.0', title: '', goal: '', requirements: [], constraints: [], openQuestions: [], source };
-  const names: Record<string, string> = { goal: 'goal', '목표': 'goal', requirements: 'requirements', '요구사항': 'requirements', constraints: 'constraints', '제약': 'constraints', 'open questions': 'openQuestions', '질문': 'openQuestions' };
+  const names: Record<string, string> = { goal: 'goal', '목표': 'goal', requirements: 'requirements', '요구사항': 'requirements', constraints: 'constraints', '제약': 'constraints',
+    'open questions': 'openQuestions', '질문': 'openQuestions', decisions:'decisions', '결정사항':'decisions', '결정 사항':'decisions', '결정':'decisions' };
   let section = '', titleSeen = false, criteria = false;
   let requirement: PlanningDraft['requirements'][number] | undefined;
+  let decision:PlanningDecision|undefined,decisionField:'decision'|'rationale'|undefined;
+  const decisionFields=new Set<string>();
   const seen = new Set<string>();
   for (const [index, raw] of text.split(/\r?\n/).entries()) {
     const line = raw.trim();
@@ -88,17 +133,28 @@ function parseMarkdown(text: string, source: PlanningSource): PlanningParseResul
         const next = Object.hasOwn(names, label.toLowerCase()) ? names[label.toLowerCase()] : undefined;
         if (!next) return fail(field, 'UNKNOWN_SECTION');
         if (seen.has(next)) return fail(field, 'DUPLICATE_SECTION');
-        seen.add(next); section = next; requirement = undefined; criteria = false; continue;
+        seen.add(next); section = next; requirement = undefined; criteria = false; decision=undefined;decisionField=undefined;continue;
       }
       if (level === 3 && section === 'requirements') {
         requirement = { label, description: '', acceptanceCriteria: [] };
         draft.requirements.push(requirement); criteria = false; continue;
       }
       if (level === 4 && requirement && !criteria && ['acceptance criteria', '인수 조건'].includes(label.toLowerCase())) { criteria = true; continue; }
+      if (level===3&&section==='decisions') {
+        if ((draft.decisions?.length??0)>=100) return fail('decisions','INVALID_DECISIONS');
+        decision={topic:label,decision:'',rationale:''};
+        (draft.decisions??=[]).push(decision);decisionField=undefined;decisionFields.clear();continue;
+      }
+      if (level===4&&decision) {
+        const next=['decision','결정'].includes(label.toLowerCase())?'decision':['rationale','근거','이유'].includes(label.toLowerCase())?'rationale':undefined;
+        if (!next||decisionFields.has(next)) return fail(field,'INVALID_HEADING');
+        decisionFields.add(next);decisionField=next;continue;
+      }
       return fail(field, 'INVALID_HEADING');
     }
     if (section === 'goal') draft.goal += (draft.goal ? '\n' : '') + line;
     else if (section === 'requirements' && requirement && !criteria) requirement.description += (requirement.description ? '\n' : '') + line;
+    else if (section==='decisions'&&decision&&decisionField) decision[decisionField]+=(decision[decisionField]?'\n':'')+line;
     else {
       const bullet = /^[-*]\s+(.+)$/.exec(line);
       if (!bullet) return fail(field, 'EXPECTED_LIST_ITEM');
@@ -122,14 +178,22 @@ export function approvalIssues(draft: PlanningDraft): Issue[] {
     if (!requirement.description.trim()) issues.push({ field: `requirements.${index}.description`, code: 'REQUIRED' });
     if (!requirement.acceptanceCriteria.length || requirement.acceptanceCriteria.some(criterion => !criterion.trim())) issues.push({ field: `requirements.${index}.acceptanceCriteria`, code: 'REQUIRED' });
   });
+  draft.decisions?.forEach((decision,index)=>{
+    for (const field of ['topic','decision','rationale'] as const) {
+      if (!decision[field].trim()) issues.push({field:`decisions.${index}.${field}`,code:'REQUIRED'});
+    }
+  });
   return issues;
 }
 
 function planningDocument(draft: PlanningDraft) {
+  const provenance=draft.provenance;
   return { schema_version: '1.0', title: draft.title, goal: draft.goal,
     requirements: draft.requirements.map(requirement => ({ id: requirement.label, description: requirement.description, acceptance_criteria: requirement.acceptanceCriteria })),
-    constraints: draft.constraints, open_questions: draft.openQuestions, decisions: [],
-    source: { kind: draft.source === 'manual' ? 'in_app_manual' : 'file', provider_id: null, external_url: null } };
+    constraints: draft.constraints, open_questions: draft.openQuestions, decisions: draft.decisions??[],
+    source: provenance?{kind:provenance.kind,provider_id:provenance.providerId,external_url:provenance.externalUrl,
+      ...(provenance.author!==undefined?{author:provenance.author}:{}),...(provenance.references!==undefined?{references:provenance.references}:{})}:
+      { kind: draft.source === 'manual' ? 'in_app_manual' : 'file', provider_id: null, external_url: null } };
 }
 
 /**

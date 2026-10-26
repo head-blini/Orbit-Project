@@ -35,6 +35,11 @@ export function comparePlanningVersions(base:PlanningVersion,target:PlanningVers
   for(const field of ['title','goal','constraints','openQuestions','source'] as const){
     if(!isDeepStrictEqual(base.draft[field],target.draft[field]))fields.push({field,before:base.draft[field],after:target.draft[field]});
   }
+  // Render structured metadata as escaped text; attribution is never an action.
+  for(const field of ['decisions','provenance'] as const){
+    const before=base.draft[field]??null,after=target.draft[field]??null;
+    if(!isDeepStrictEqual(before,after))fields.push({field,before:before===null?'':JSON.stringify(before,null,2),after:after===null?'':JSON.stringify(after,null,2)});
+  }
   const beforeOrder=base.draft.requirements.map(requirement=>requirement.label);
   const afterOrder=target.draft.requirements.map(requirement=>requirement.label);
   if(!isDeepStrictEqual(beforeOrder,afterOrder))fields.push({field:'requirementOrder',before:beforeOrder,after:afterOrder});
@@ -52,7 +57,7 @@ export function comparePlanningVersions(base:PlanningVersion,target:PlanningVers
 
   const changedLabels=new Set(requirements.filter(requirement=>requirement.status==='changed').map(requirement=>requirement.label));
   const removedLabels=new Set(requirements.filter(requirement=>requirement.status==='removed').map(requirement=>requirement.label));
-  const contextChanged=fields.some(change=>change.field==='goal'||change.field==='constraints'||change.field==='openQuestions');
+  const contextChanged=fields.some(change=>change.field==='goal'||change.field==='constraints'||change.field==='openQuestions'||change.field==='decisions');
   const affectedTasks:PlanningTaskImpact[]=[];
   for(const task of tasks){
     if(task.projectId!==base.projectId||task.planningVersionId!==base.id)continue;

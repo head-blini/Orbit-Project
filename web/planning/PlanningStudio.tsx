@@ -20,7 +20,7 @@ export interface PlanningStudioProps {
   onReplan?:PlanningComparisonProps['onReplan'];
 }
 
-const starter = '# 새 기획안\n\n## Goal\n\n## Requirements\n### REQ-01\n\n#### Acceptance criteria\n\n## Constraints\n\n## Open questions\n';
+const starter = '# 새 기획안\n\n## Goal\n\n## Requirements\n### REQ-01\n\n#### Acceptance criteria\n\n## Constraints\n\n## Decisions\n\n## Open questions\n';
 
 /** Callbacks must call the server; UI state is never an approval credential. */
 export function PlanningStudio(props: PlanningStudioProps) {
@@ -140,6 +140,13 @@ function PlanningProject(props: PlanningStudioProps) {
         <label className="planning-editor">기획안 원문<textarea value={input.text} disabled={busy} maxLength={MAX_PLANNING_BYTES + 1} spellCheck={false}
           onChange={event => edit({ ...input, text: event.target.value })} /></label>
         <p>최대 256 KiB UTF-8. Markdown 구역명: Goal, Requirements (### 식별자 / #### Acceptance criteria), Constraints, Open questions. 목록은 “- ”로 작성하세요.</p>
+        <details className="planning-metadata-help"><summary>결정 사항과 출처 입력 안내</summary>
+          <p>선택 구역 Decisions에는 주제마다 결정과 근거를 기록합니다. 작성한 결정 사항은 주제·결정·근거를 모두 채워야 승인할 수 있습니다.</p>
+          <pre>{'## Decisions\n### 결정 주제\n#### Decision\n선택한 설계나 방식을 작성하세요.\n#### Rationale\n선택한 이유를 작성하세요.'}</pre>
+          <p>JSON v1의 source에는 사용자 제공 출처 정보를 기록할 수 있습니다. 제공자·작성자·URL의 신원과 내용은 검증하지 않습니다. URL은 텍스트로 표시됩니다.</p>
+          <pre>{'"source": {\n  "kind": "external",\n  "provider_id": "사용자 입력 제공자",\n  "external_url": "https://example.com/planning",\n  "author": "작성자 표기",\n  "references": [\n    {"title": "참고 자료", "url": "https://example.com/reference"}\n  ]\n}'}</pre>
+          <p>출처 URL은 HTTP(S) 주소를 사용하세요. 제공자와 원문 URL이 없으면 null로 입력하고, 작성자와 참고 자료는 생략할 수 있습니다.</p>
+        </details>
       </div>
       <div aria-label="기획안 미리보기">
         <h3>미리보기</h3>
@@ -188,7 +195,23 @@ export function PlanningPreview({ draft }: { draft: PlanningDraft }) {
     {draft.requirements.map(requirement => <article key={requirement.label}><h5>{requirement.label}</h5><p>{requirement.description}</p>
       <ul>{requirement.acceptanceCriteria.map((criterion, index) => <li key={index}>{criterion}</li>)}</ul></article>)}
     <h4>제약 사항</h4><ul>{draft.constraints.map((constraint, index) => <li key={index}>{constraint}</li>)}</ul>
+    {!!draft.decisions?.length && <section aria-label="기획 결정 사항"><h4>결정 사항</h4>
+      {draft.decisions.map((item,index) => <article key={index}><h5>{item.topic || '주제 미입력'}</h5>
+        <dl className="planning-metadata-values"><dt>결정</dt><dd>{item.decision || '결정 미입력'}</dd><dt>근거</dt><dd>{item.rationale || '근거 미입력'}</dd></dl>
+      </article>)}
+    </section>}
     <h4>미결정 사항</h4><ul>{draft.openQuestions.map((question, index) => <li key={index}>{question}</li>)}</ul>
+    {draft.provenance && <section aria-label="사용자 제공 출처 정보"><h4>사용자 제공 출처 정보 · 미검증</h4>
+      <p>사용자가 입력한 표기입니다. 제공자·작성자·URL의 신원과 내용은 검증하지 않았으며 기획 승인 근거가 아닙니다.</p>
+      <dl className="planning-metadata-values"><dt>출처 유형</dt><dd>{draft.provenance.kind}</dd>
+        <dt>제공자 표기</dt><dd>{draft.provenance.providerId ?? '미기재'}</dd>
+        <dt>외부 원문 URL</dt><dd>{draft.provenance.externalUrl ?? '미기재'}</dd>
+        {draft.provenance.author !== undefined && <><dt>작성자 표기</dt><dd>{draft.provenance.author}</dd></>}
+      </dl>
+      {!!draft.provenance.references?.length && <><h5>참고 자료</h5><ul>{draft.provenance.references.map((reference,index) => <li key={index}>
+        <p>{reference.title}</p><p>{reference.url}</p>
+      </li>)}</ul></>}
+    </section>}
     {issues.length > 0 && <p>초안에 필요한 항목: {issues.map(issue => issue.field).join(', ')}. 저장할 수 있지만 승인하려면 해당 항목을 채워야 합니다.</p>}
   </div>;
 }

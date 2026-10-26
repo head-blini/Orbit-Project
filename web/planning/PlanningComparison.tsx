@@ -133,7 +133,7 @@ function PlanningComparisonSession({base,...props}:PlanningComparisonProps&{base
   </div>;
 }
 
-const fieldTitles={title:'제목',goal:'목표',constraints:'제약 사항',openQuestions:'미결정 사항',source:'출처',requirementOrder:'요구사항 순서'};
+const fieldTitles={title:'제목',goal:'목표',constraints:'제약 사항',openQuestions:'미결정 사항',source:'출처',requirementOrder:'요구사항 순서',decisions:'결정 사항',provenance:'사용자 제공 출처 정보 · 미검증'};
 const changeTitles={added:'추가',removed:'삭제',changed:'변경',unchanged:'동일'};
 const reasonTitles={requirement_changed:'요구사항 변경',requirement_removed:'요구사항 삭제',plan_context_changed:'기획 맥락 변경'};
 function FieldValue({value}:{value:string|string[]}){
@@ -148,6 +148,7 @@ export function PlanningComparisonPreview({comparison,selectedLabels,consent,dis
   return <div className="planning-comparison-preview">
     <h4>r{comparison.base.revision} → r{comparison.target.revision} 변경 내용</h4>
     <p>{comparison.targetCurrent?'현재 기획 버전':'과거 기획 버전'} · {comparison.target.state}. {comparison.canReplan?'선택 후 별도 동의로 후속 Task 초안을 만들 수 있습니다.':'현재 승인된 기획과 미결정 사항을 확인하세요. 이 비교에서는 후속 Task를 만들 수 없습니다.'}</p>
+    {comparison.fields.some(change=>change.field==='provenance')&&<p>출처 정보는 사용자 제공 표기입니다. 제공자·작성자·URL의 신원과 내용은 검증하지 않았으며 기획 승인 근거가 아닙니다.</p>}
     {comparison.fields.length?<div className="planning-comparison-table"><table><caption>기획 필드 변경</caption><thead><tr><th>항목</th><th>이전</th><th>이후</th></tr></thead>
       <tbody>{comparison.fields.map(change=><tr key={change.field}><th scope="row">{fieldTitles[change.field]}</th><td><FieldValue value={change.before}/></td><td><FieldValue value={change.after}/></td></tr>)}</tbody></table></div>:<p>기획 필드 변경 없음</p>}
     <div className="planning-comparison-table"><table><caption>요구사항 변경</caption><thead><tr><th>식별자 · 상태</th><th>이전</th><th>이후</th></tr></thead>

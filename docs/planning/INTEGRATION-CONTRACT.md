@@ -4,9 +4,9 @@ Integration update (2026-10-25): shared contracts, SQLite, HTTP and product UI w
 
 ## Required shared contract
 
-The integration owner must distribute `shared/parallel.ts` and `tests/parallel-contracts.test.ts` per `.local/parallel/CONTRACT.md`. Planning imports exactly the documented `PlanningSource`, `PlanningDraft`, `PlanningParseResult`, `PlanningVersion`, `TaskDraft` types. No private replacement of those shared types was created. Until distribution, TypeScript checking is blocked and the module is not integration-ready.
+The integration owner must distribute `shared/parallel.ts` and `tests/parallel-contracts.test.ts` per `.local/parallel/CONTRACT.md`. Planning imports exactly the documented `PlanningSource`, `PlanningDraft`, `PlanningParseResult`, `PlanningVersion`, `TaskDraft` types. No private replacement of those shared types was created. These types are now distributed and used by the integrated product.
 
-The common contract cannot represent nonempty canonical v1 `decisions` or full source provenance. Current behavior rejects nonempty decisions and normalizes source to manual/import while retaining the original input privately. If complete v1 decision/provenance round-tripping is required, extend the common contract first and add preservation tests. Creation/approval timestamps and lineage IDs also need an agreed audit/read contract before exposure to the UI.
+2026-10-26: shared PlanningDraft has optional `decisions` and `provenance`, retaining architecture decisions and user-supplied attribution through import/storage/export/preview. Empty decisions and uninformative legacy source defaults normalize to absence so existing stored content hashes remain unchanged. PlanningVersion exposes creation/approval metadata and lineage. Exact grammar and bounds are in README.md; original input remains private.
 
 ## Server adapter
 
@@ -46,7 +46,7 @@ Before integration acceptance, distribute common types; rerun typecheck, all tes
 
 ## Planning download and reimport (2026-10-26)
 
-`serializePlanningExport(draft, format)` in `server/planning/export.ts` returns `{text, mime, extension}` for `json` or `markdown`. It accepts the saved normalized `PlanningDraft`; it never exports raw original import input or adds version/project/approval authority fields. JSON uses the existing canonical schema **1.0**, including empty `decisions` and normalized source metadata. The HTTP/service owner must authorize the saved project/version and bind download metadata to its immutable revision/hash. Historical versions remain exportable; download does not approve, revise, create Tasks or execute an agent.
+`serializePlanningExport(draft, format)` in `server/planning/export.ts` returns `{text, mime, extension}` for `json` or `markdown`. It accepts the saved normalized `PlanningDraft`; it never exports raw original import input or adds version/project/approval authority fields. JSON uses the existing canonical schema **1.0**, including supported decisions and complete normalized source metadata. The HTTP/service owner must authorize the saved project/version and bind download metadata to its immutable revision/hash. Historical versions remain exportable; download does not approve, revise, create Tasks or execute an agent.
 
 Readable Markdown is emitted only when importing it produces the same complete draft. Content that ordinary Markdown cannot preserve (including blank list items, blank lines and embedded headings/fences) instead uses exactly this single envelope, with the canonical JSON replacing the placeholder:
 
@@ -57,6 +57,12 @@ Readable Markdown is emitted only when importing it produces the same complete d
 ```
 ~~~~
 
-The marker must be the first line after an optional BOM. One JSON block and an optional final newline are allowed, including CRLF line endings; extra prose or a second block fails parsing. The pure browser-compatible parser delegates this envelope to the same JSON schema validation, so unknown authority fields and unsupported decisions remain rejected. `PlanningInput.source` supplied by the import action is authoritative: imported source metadata cannot restore `manual` authority or approval. This preserves all fields of the current normalized shared draft, not unsupported original provenance/decisions. Reimport is a separate new draft action; existing approvals and Tasks are immutable.
+The marker must be the first line after an optional BOM. One JSON block and an optional final newline are allowed, including CRLF line endings; extra prose or a second block fails parsing. The pure browser-compatible parser delegates this envelope to the same JSON schema validation, so unknown authority fields and malformed decisions/metadata remain rejected. `PlanningInput.source` supplied by the import action is authoritative: imported source metadata cannot restore `manual` authority or approval. This preserves all supported normalized draft fields, including decisions, provider attribution, author and reference URLs. Reimport is a separate new draft action; existing approvals and Tasks are immutable.
 
 The final decoded download text, including its envelope, must fit the existing UTF-8 **256 KiB** importer cap. No content is truncated. Oversize output throws fixed `AppError('PLANNING_EXPORT_TOO_LARGE', 413)`. Known credential patterns, `inspectOutbound` personal-data findings, forbidden C0/DEL control characters, or a draft that cannot roundtrip without normalization throw fixed `AppError('PLANNING_EXPORT_BLOCKED', 422)`. Content is rejected without masking or mutation, and no raw content is returned in errors. Detection is heuristic; users must review downloads before manually sharing them elsewhere. This serializer performs no external calls, URL navigation, HTML rendering or Markdown preview execution.
+
+## Decisions and source boundaries (2026-10-26)
+
+- `normalizeStoredPlanningDraft` validates stored structure without applying the external256KiB input limit to expanded JSON. Execution and comparison require exact normalized shape and original SHA256; no legacy migration rewrites hashes.
+- Decision changes produce `plan_context_changed` impacts. Attribution-only changes remain visible but do not affect tasks. Execution includes decisions and excludes provenance. Both use saved authoritative versions.
+- Preview renders metadata as escaped text without anchors, images or URL requests. Export privacy checks cover every decoded decision/source/reference string before returning bytes. Incomplete decisions save but cannot approve; metadata cannot supply authority.

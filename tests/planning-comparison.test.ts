@@ -228,3 +228,19 @@ test('saved Markdown remains comparable when JSON escaping expands beyond the ex
   assert.deepEqual(parsePlanningDraft({format:'markdown',text:text+'xx',source:'manual'}),
     {ok:false,issues:[{field:'text',code:'INPUT_TOO_LARGE'}]});
 });
+
+test('decisions change global task context while source attribution changes only the displayed metadata',()=>{
+  const {base,target,tasks}=fixture();
+  target.draft.provenance={kind:'external_web',providerId:'manual-reference',externalUrl:'https://example.invalid/reference',author:'Fixture Author'};
+  target.contentHash=hash(target.draft);
+  const attribution=comparePlanningVersions(base,target,tasks);
+  assert.deepEqual(attribution.fields.map(item=>item.field),['provenance']);assert.equal(attribution.affectedTasks.length,0);
+  assert.match(String(attribution.fields[0].after),/Fixture Author/);
+  target.draft.decisions=[{topic:'Storage',decision:'Use SQLite',rationale:'Offline support'}];target.contentHash=hash(target.draft);
+  const changed=comparePlanningVersions(base,target,tasks);
+  assert.deepEqual(changed.fields.map(item=>item.field),['decisions','provenance']);
+  assert.equal(changed.affectedTasks.length,3);assert.ok(changed.affectedTasks.every(task=>task.reasons.length===1&&task.reasons[0]==='plan_context_changed'));
+  assert.match(String(changed.fields[0].after),/Offline support/);
+  const before=structuredClone({base,target,tasks});changed.fields[0].after='tampered';assert.deepEqual({base,target,tasks},before);
+  target.draft.provenance.author='Tampered';assert.throws(()=>comparePlanningVersions(base,target,tasks),/PLANNING_VERSION_INVALID/);
+});
