@@ -2,6 +2,8 @@ import { createHash,randomUUID } from 'node:crypto';
 import { validateMermaid,validateArchitecture,parseMermaidDocument } from '../../web/visualization/mermaid.ts';
 import { validatePresentationDocument } from '../../web/visualization/presentation.ts';
 import { layoutSequence } from '../../web/visualization/sequence-layout.ts';
+import { parseC4 } from '../../web/visualization/c4.ts';
+import { layoutC4 } from '../../web/visualization/c4-layout.ts';
 import type { DatabaseSync } from 'node:sqlite';
 import type { ArtifactInput,ArtifactRecord } from '../../shared/parallel.ts';
 
@@ -19,6 +21,7 @@ export function validateArtifactInput(input:Input) {
     const document=parseMermaidDocument(input.source);
     if(document.kind==='sequence')layoutSequence(document); // A saved source must fit the same preview/export budgets.
   }
+  else if(input.kind==='c4')layoutC4(parseC4(input.source));
   else {
     let value:unknown;try {value=JSON.parse(input.source);} catch {return invalid();}
     if(input.kind==='architecture' ? !validateArchitecture(value).ok : input.kind==='presentation' ? !validatePresentationDocument(value) : true) return invalid();

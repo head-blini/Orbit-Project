@@ -14,11 +14,9 @@ export interface SequenceDiagram {
 }
 export const SEQUENCE_LIMITS=Object.freeze({participants:10,events:120,notes:24,fragments:16,depth:4,activationDepth:4,lines:1024,text:160,sourceBytes:256*1024,issues:32});
 
-/** Fixed primitives shared by SVG preview and native editable PPTX. Coordinates are points. */
-export type SequencePrimitive =
-  | {type:'box';id:string;x:number;y:number;width:number;height:number;geometry:'rect'|'ellipse';fill:'none'|'paper'|'blue'|'note';stroke:'none'|'solid'}
-  | {type:'line';id:string;x1:number;y1:number;x2:number;y2:number;dash:'solid'|'dash';arrow:'none'|'triangle'}
-  | {type:'label';id:string;x:number;y:number;width:number;height:number;text:string;fontSize:number;align:'left'|'center'};
-export interface SequenceSlide {id:string;width:number;height:number;elements:SequencePrimitive[]}
+/** Compatibility names preserve the existing sequence format and geometry. */
+import type { CanvasPrimitive,CanvasSlide } from './canvas.ts';
+export type SequencePrimitive=CanvasPrimitive;
+export type SequenceSlide=CanvasSlide;
 export interface SequencePresentationDocument {format:'sequence-v1';slides:SequenceSlide[]}
-export const SEQUENCE_CANVAS_LIMITS=Object.freeze({width:3600,height:1200,pages:32,elementsPerPage:800,elements:8000,bytes:1024*1024});
+export {CANVAS_LIMITS as SEQUENCE_CANVAS_LIMITS} from './canvas.ts';

@@ -4,7 +4,7 @@ Current implementation contract (2026-10-26). Studio and timeline are mounted in
 
 ## Inert diagram inputs
 
-`ArtifactInput` / `ArtifactRecord` are defined in `shared/parallel.ts`. Artifact kinds remain `mermaid`, `architecture`, and `presentation`. All stored source is capped at 256 KiB UTF-8. No Mermaid runtime, raw markup, network renderer, scripts, links or arbitrary SVG paths execute.
+`ArtifactInput` / `ArtifactRecord` are defined in `shared/parallel.ts`. Artifact kinds are `mermaid`, `architecture`, `presentation`, and the additive `c4`. All stored source is capped at 256 KiB UTF-8. No Mermaid runtime, raw markup, network renderer, scripts, links or arbitrary SVG paths execute.
 
 - `parseMermaid(source)` preserves its original flowchart-only return `{nodes,edges,direction}` and throws `INVALID_MERMAID` on invalid input.
 - `parseMermaidDocument(source)` adds dispatch: `{kind:'flowchart',graph}` or the `SequenceDiagram` contract from `shared/sequence.ts`.
@@ -36,9 +36,17 @@ Limits: 10 participants, 120 normalized events (shorthand adds an activation eve
 
 ## Presentation and real file output
 
+### C4 source contract (Task23 integration in progress)
+
+`shared/c4.ts` defines `C4Diagram`: `{format:'c4-v1',title,view,scope,elements,relationships}`. `view` is `context`, `container` or `component`; `scope` references the focus system/container. `parseC4` validates raw JSON size and returns the typed model; `validateC4` also validates direct objects. Each element has `id,kind,name,description,parentId,technology`; each relationship has `id,from,to,description,technology`. Parent/technology use explicit null when absent. Containers/components require technology; relationships between container leaves require technology too.
+
+Context contains people/systems and a focus system leaf. Container expands its focus system into a boundary around direct containers. Component expands the focus container and its parent system into nested boundaries, includes direct components and may include sibling containers in the parent system. External people/systems remain outside. Endpoints may reference only visible leaves; expanded boundaries and self relationships are rejected. Parent containment never creates an inferred edge. Empty relationships/disconnected draft elements are allowed; other views and arbitrary group boundaries are unsupported.
+
+Limits:12elements including boundaries,24relationships,ASCII identifiers up to64characters,80Unicode codepoints for title/name/technology,160for descriptions. Fields/references/enums/arrays are strict; text is inert and bounded. Authored C4 never claims repository/source verification. `layoutC4` returns one complete `canvas-v1` overview or throws `C4_LAYOUT_LIMIT`; server persistence must run it before saving. Exact source and immutable revisions use the existing lifecycle. Full verification remains recorded separately in MASTER-RESULTS.
+
 `toPresentationDocument(graph)` retains the legacy single-slide model: editable `shape`, `text`, and endpoint-linked `connector` elements. `validatePresentationDocument` preserves its 800-element / 256 KiB / 160 UTF-16 text contract. `serializePresentation` produces an actual deterministic PPTX ZIP with DrawingML, internal relationships, editable text/shapes/connectors and no raster images, external relationships or macros. Legacy diagrams retain 16:9 scaling.
 
-The additive `format:'sequence-v1'` model uses native point coordinates with `box` (rect/ellipse), `line` (fixed solid/dash stroke and none/triangle arrow), and `label` primitives. Element order is retained. Every page shares dimensions; minimum 72 points per axis meets OOXML slide-size bounds, maximum 3600×1200 points. Positive boxes/segments have at least a one-point extent. Label font size is 17–48 points; wrapped labels allow 512 UTF-16 units. Limits: 32 pages, 800 elements/page, 8000 total elements, 1 MiB generated JSON. These generated limits do not increase the stored-source budget. SVG and PPTX consume the same page geometry.
+The additive `format:'sequence-v1'` and `format:'canvas-v1'` models use native point coordinates with `box` (rect/ellipse), `line` (fixed solid/dash stroke and none/triangle arrow), and `label` primitives from `shared/canvas.ts`. Sequence type aliases and serialized bytes remain compatible. Element order is retained. Every page shares dimensions; minimum 72 points per axis meets OOXML slide-size bounds, maximum 3600×1200 points. Positive boxes/segments have at least a one-point extent. Label font size is 17–48 points; wrapped labels allow 512 UTF-16 units. Limits: 32 pages, 800 elements/page, 8000 total elements, 1 MiB generated JSON. These generated limits do not increase the stored-source budget. SVG and PPTX consume the same page geometry.
 
 ## Studio and persistence
 
@@ -47,7 +55,7 @@ The additive `format:'sequence-v1'` model uses native point coordinates with `bo
 - `onSave({id?,expectedRevision?,kind,source,metadata})` creates or revises using optimistic concurrency.
 - `onHistory(id)` retrieves immutable revisions in ascending order.
 - `onExportArtifact(record,'pptx'|'markdown')` downloads the exact selected saved revision. Dirty source must be saved first.
-- Optional `onExportPresentation(document)` supports an embedding host's exporter and accepts legacy or sequence presentation documents.
+- Optional `onExportPresentation(document)` supports an embedding host's exporter and accepts legacy, sequence or generic canvas presentation documents.
 
 Editor state is keyed by project; foreign records are filtered. The sequence sample is a local editable example, never an agent invocation. Source remains exact; a new-Artifact action detaches history while retaining source. Errors use fixed diagnostics or generic messages.
 
@@ -67,4 +75,4 @@ HTTP retains session/origin/CSRF checks, registered project ownership, quotas, e
 
 Run `npm run verify` with Node 24. Focused sequence parser/layout/PPTX/Studio tests supplement existing malicious-input, project-isolation, immutable revision, rollback and legacy export coverage. Actual browser and PPTX import/render checks are recorded separately with their real results.
 
-C4, other UML forms and PDF export remain separate incomplete requirements. Supporting this inert subset does not imply support for full Mermaid syntax or the Mermaid layout engine. PowerPoint/Google Slides manual round-trip evidence must be reported separately from package inspection and the bundled importer.
+C4 Task23 is in integration; other UML forms and PDF export remain separate incomplete requirements. Supporting this inert subset does not imply support for full Mermaid syntax or the Mermaid layout engine. PowerPoint/Google Slides manual round-trip evidence must be reported separately from package inspection and the bundled importer.

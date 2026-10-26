@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { Store } from '../server/store.ts';
 import { createHttpServer } from '../server/http.ts';
 import type { Controller } from '../server/controller.ts';
+import {c4Samples} from '../web/visualization/c4-samples.ts';
 
 const input={format:'markdown',source:'manual',text:'# Product\n## Goal\nShip safely\n## Requirements\n### REQ-1\nSave a plan\n#### Acceptance criteria\n- Reload preserves it\n## Constraints\n- No execution\n## Open questions\n'};
 const artifact={kind:'mermaid',source:'flowchart TD\na["Browser"]\nb["Server"]\na --> b',metadata:{title:'Architecture'}};
@@ -24,6 +25,57 @@ async function fixture(path=':memory:'){
   return {store,origin,headers,get,post,close:async()=>{server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));store.close();}};
 }
 const plans='/api/projects/project-a/plans',artifacts='/api/projects/project-a/artifacts';
+
+test('C4 Artifact preserves exact source, project ownership and editable historical exports through restart',async()=>{
+  const path=join(mkdtempSync(join(tmpdir(),'orbit-c4-')),'test.sqlite');let f=await fixture(path);
+  const source=JSON.stringify(c4Samples.container,null,2)+'\n';
+  try{
+    const response=await f.post(artifacts,{requestId:randomUUID(),input:{kind:'c4',source,metadata:{title:'C4'}}});assert.equal(response.status,200);
+    const first=await response.json() as any;assert.equal(first.source,source);assert.equal(first.kind,'c4');
+    const url=`${artifacts}/${first.id}/export?revision=1&hash=${first.contentHash}&format=pptx`;
+    const exported=await f.get(url);assert.equal(exported.status,200);const bytes=Buffer.from(await exported.arrayBuffer());
+    assert.equal(bytes.subarray(0,4).toString('hex'),'504b0304');assert.match(bytes.toString(),/로컬 서버/);assert.match(bytes.toString(),/<p:cxnSp>/);assert.doesNotMatch(bytes.toString(),/<p:pic|TargetMode="External"/);
+    assert.ok((await (await f.get(url.replace('format=pptx','format=markdown'))).text()).includes('```json\n'+source+'\n```'));
+    assert.equal((await f.get(url.replace('project-a','project-b'))).status,404);
+    assert.equal((await f.get(url.replace(first.contentHash,'0'.repeat(64)))).status,409);
+    const revisedSource=source.replace('프로젝트 요청','승인된 프로젝트 요청');
+    const revised=await f.post(`${artifacts}/${first.id}/revisions`,{requestId:randomUUID(),expectedRevision:1,input:{kind:'c4',source:revisedSource,metadata:{title:'C4 revised'}}});assert.equal(revised.status,200);
+    const changedKind=await f.post(`${artifacts}/${first.id}/revisions`,{requestId:randomUUID(),expectedRevision:2,input:artifact});assert.equal(changedKind.status,400);
+    await f.close();f=await fixture(path);
+    assert.deepEqual(Buffer.from(await (await f.get(url)).arrayBuffer()),bytes);
+    const history=await (await f.get(`${artifacts}/${first.id}/history`)).json() as any[];assert.deepEqual(history.map(r=>r.source),[source,revisedSource]);
+    assert.equal(f.store.runs().length,0);
+    f.store.db.prepare('UPDATE artifacts SET body=? WHERE project_id=? AND id=? AND revision=1').run(JSON.stringify({...first,source:source.replace('로컬 서버','변조된 서버')}),'project-a',first.id);
+    const corrupt=await f.get(url);assert.equal(corrupt.status,409);assert.deepEqual(await corrupt.json(),{error:'ARTIFACT_INTEGRITY'});
+  }finally{await f.close();}
+});
+
+test('C4 invalid boundaries, self relationships and unsafe text cannot create an artifact or event',async()=>{
+  const f=await fixture();try{
+    const edits:((d:any)=>void)[]=[d=>d.relationships[0].to='orbit',d=>d.elements[2].parentId='codex',
+      d=>d.relationships[0].to='user',d=>d.elements[2].name='<script>',d=>d.view='deployment',d=>d.extra=true];
+    const seq=f.store.lastSeq();
+    for(const edit of edits){const diagram=structuredClone(c4Samples.container);edit(diagram);
+      assert.equal((await f.post(artifacts,{requestId:randomUUID(),input:{kind:'c4',source:JSON.stringify(diagram),metadata:{}}})).status,400);
+    }
+    assert.equal(f.store.lastSeq(),seq);assert.deepEqual(await (await f.get(artifacts)).json(),[]);assert.equal(f.store.runs().length,0);
+  }finally{await f.close();}
+});
+
+test('C4 layout overflow leaves existing revisions and audit sequence untouched',async()=>{
+  const f=await fixture();try{
+    const created=await f.post(artifacts,{requestId:randomUUID(),input:{kind:'c4',source:JSON.stringify(c4Samples.context),metadata:{}}});assert.equal(created.status,200);
+    const saved=await created.json() as any;
+    const source=JSON.stringify({format:'c4-v1',title:'한'.repeat(80),view:'context',scope:'s0',
+      elements:Array.from({length:12},(_,i)=>({id:`s${i}`,kind:'system',name:'한'.repeat(80),description:'설'.repeat(160),parentId:null,technology:null})),
+      relationships:Array.from({length:24},(_,i)=>({id:`r${i}`,from:`s${i%12}`,to:`s${(i+1+Math.floor(i/12))%12}`,description:'관'.repeat(160),technology:'기'.repeat(80)}))});
+    const seq=f.store.lastSeq(),input={kind:'c4',source,metadata:{}};
+    for(const [url,body] of [[artifacts,{requestId:randomUUID(),input}],[`${artifacts}/${saved.id}/revisions`,{requestId:randomUUID(),expectedRevision:1,input}]] as const){
+      const response=await f.post(url,body);assert.equal(response.status,422);assert.deepEqual(await response.json(),{error:'C4_LAYOUT_LIMIT'});
+    }
+    assert.equal(f.store.lastSeq(),seq);assert.deepEqual(await (await f.get(`${artifacts}/${saved.id}/history`)).json(),[saved]);assert.deepEqual(await (await f.get(artifacts)).json(),[saved]);
+  }finally{await f.close();}
+});
 
 test('saved Artifact exports real PPTX and exact Markdown with immutable revision and ownership gates',async()=>{
   const f=await fixture();try{

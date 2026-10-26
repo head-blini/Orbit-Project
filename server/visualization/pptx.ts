@@ -1,6 +1,6 @@
 import { validatePresentationDocument } from '../../web/visualization/presentation.ts';
 import type { toPresentationDocument,PresentationDocument } from '../../web/visualization/presentation.ts';
-import type { SequenceSlide } from '../../shared/sequence.ts';
+import type { CanvasSlide } from '../../shared/canvas.ts';
 
 type Presentation=ReturnType<typeof toPresentationDocument>;
 type Element=Presentation['slides'][number]['elements'][number];
@@ -79,12 +79,12 @@ function theme():string {
 }
 
 /** Native editable shapes/text and connectors; no images, external parts or macros.
- * Legacy single-slide diagrams keep their old sizing; sequence pages retain point coordinates.
+ * Legacy single-slide diagrams keep their old sizing; fixed canvas pages retain point coordinates.
  * Pure byte generation: no filesystem, process, network or authentication access.
  */
 export function serializePresentation(value:unknown):Uint8Array {
   const doc=checked(value);
-  if('format' in doc)return packageSlides(doc.slides.map(slide=>({id:slide.id,contents:sequenceContents(slide)})),Math.round(doc.slides[0].width*12700),Math.round(doc.slides[0].height*12700));
+  if('format' in doc)return packageSlides(doc.slides.map(slide=>({id:slide.id,contents:canvasContents(slide)})),Math.round(doc.slides[0].width*12700),Math.round(doc.slides[0].height*12700));
   const slide=doc.slides[0];
   const scale=Math.min(WIDTH/slide.width,HEIGHT/slide.height);
   const padX=(WIDTH-slide.width*scale)/2,padY=(HEIGHT-slide.height*scale)/2;
@@ -122,7 +122,7 @@ export function serializePresentation(value:unknown):Uint8Array {
   return packageSlides([{id:slide.id,contents}],WIDTH,HEIGHT);
 }
 
-function sequenceContents(slide:SequenceSlide):string {
+function canvasContents(slide:CanvasSlide):string {
   const point=(n:number)=>Math.round(n*12700);
   const transform=(x:number,y:number,w:number,h:number,extra='')=>`<a:xfrm${extra}><a:off x="${point(x)}" y="${point(y)}"/><a:ext cx="${point(w)}" cy="${point(h)}"/></a:xfrm>`;
   const fills={none:'<a:noFill/>',paper:'<a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill>',blue:'<a:solidFill><a:srgbClr val="EDF5FF"/></a:solidFill>',note:'<a:solidFill><a:srgbClr val="FFF2CC"/></a:solidFill>'};

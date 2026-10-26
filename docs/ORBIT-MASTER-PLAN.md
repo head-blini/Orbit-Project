@@ -28,7 +28,7 @@
 | B Planning | Markdown/JSON 무손실 import/export, SQLite 버전·승인, Task→실제 Codex brief, 개발 증거 수동 피드백, 버전 diff·영향 Task·선택 후속 Task 생성, 결정·출처 보존과 실행 명세 연결, 선택형 Codex 기획 제안·명시적 새 초안 저장 | 실제 Codex 기획 호출·선택형 다른 제공자 검증 |
 | C Agent Center | Codex App Server prompt/stream/interrupt/reconnect | Task 역할·handoff, 선택형 CLI 진단/adapter, 내장 병렬 기능 연결 |
 | D Development | 격리 patch worktree·diff, 실제검증·중단·복구·리뷰승인; source 보존·별도 승인 ff 병합; JS/TS 소스 graph/잠재영향·탐색·재시작 검증 | 별도 읽기 전용 native 리뷰 연결·로컬 계약 검증 완료; 실제 AI 리뷰/다른 언어 분석 미검증 |
-| E Visualization | 제한 Mermaid flowchart·sequence/SVG, architecture, Artifact 이력·source staleness, 실제 editable 다중 페이지 PPTX/MD·브라우저 저장/복구·파일 편집 검증 | PDF, C4, 기타 UML |
+| E Visualization | 제한 Mermaid flowchart·sequence/SVG, C4 context/container/component, architecture, Artifact 이력·source staleness, 실제 editable PPTX/MD·브라우저 저장/복구·파일 편집 검증 | PDF, 기타 UML |
 | F Automation | 로컬 고정 명령 workflow/template 버전·DAG·명시 실행·실패 중단·재시도·lost 복구, 실제 Node·Windows browser 검증 | 예약·외부 서비스 단계 미연결 |
 | G Model Hub | 5종 HTTP 호환 + 공식 AWS CLI 2 Bedrock text adapter·명시 진단/전송·중단·unknown usage/cost·복구; 7종 상태, mock/미설치 E2E | 실제 AWS/외부 실서비스 인증·호환 검증, 고급 라우팅/비용 집계 |
 | H Extensions | 공식 Codex 읽기 전용 metadata inventory·캐시·UI·fake RPC/HTTP 계약, Mac Chrome 2시나리오·독립 리뷰 | Windows 37단계 통합 재검증, profile/source·권한 preview/backup/restore·실제 native 조회 |
@@ -65,6 +65,10 @@
 - [x] Task 19 로컬 수직기능: decisions/provenance import·저장·export·실행 brief·diff·UI 연결. legacy shape/hash 보존, 불완전 결정 승인 차단, 출처 비실행·export 개인정보 검사. 전체539pass/1 Windows-only skip/0fail·type/build0, 독립 리뷰 추가 지적 없음. Chrome3JPEG·실제JSON813B 내용 일치·restart metadata/Task 보존·AI/CLI/외부0·cleanup 완료. Windows/전체 E2E 별도. 계획: docs/superpowers/plans/2026-10-26-planning-metadata.md.
 
 - [x] Task 20 로컬 수직기능: 공식 `turn/start outputSchema` 기반 선택형 Codex 기획 제안. 정확한 전송 preview·별도 동의·읽기 전용/ephemeral/provider/workspace attestation·최종 구조화 응답 검증·명시적 새 초안 저장·receipt·재시작/저장실패 격리·상호 배제 구현. 최종599pass/1 Windows-only skip/0fail·type/build0. 독립 리뷰의 프로세스 종료·영속화 실패·동일 버전 승인 회귀 수정, Chrome4JPEG·저장/dirty보존/승인receipt/restart/interrupt/lost복구·console0·source보존·cleanup완료. 실제 모델 호출과 전체/Windows E2E는 별도 미검증. 계획: docs/superpowers/plans/2026-10-26-native-planning.md.
+
+- [x] Task 21 로컬 수직기능: 프로젝트별 관찰 사용량·실행 통계·모델별 검증 결과·페이지 조회. 최종644total/643pass/1 Windows-only skip/0fail·type/build0, Chrome 전용 검증·source 보존·cleanup 완료. 관찰되지 않은 토큰·비용·재시도는 unknown 유지. 검증 커밋 `ff99b88`; 계획: docs/superpowers/plans/2026-10-26-project-analytics.md.
+- [x] Task 22 로컬 수직기능: 제한 Mermaid 시퀀스·grapheme 보존·페이지 분할·실제 editable PPTX·저장 원문/SQL revision 무결성. 최종684total/683pass/1 Windows-only skip/0fail·type/build0, 독립 리뷰 추가 지적 없음, 실제2페이지 PPTX import/render/별도 텍스트 재편집·Chrome 저장/이력/다운로드/재시작 검증·cleanup 완료. 검증 커밋 `6957fb5`; 계획: docs/superpowers/plans/2026-10-26-sequence-diagrams.md.
+- [x] Task 23 로컬 수직기능: C4 context/container/component JSON·경계·방향 관계·공통 canvas-v1·editable export. 최종734total/733pass/1 Windows-only skip/0fail·type/build0, 독립 리뷰 추가 지적 없음. 실제PPTX3종 import/render/별도편집, Chrome7JPEG·저장/이력/다운로드4개/재시작·source보존·cleanup 확인. Native Review의 opaque ID 개인정보 오탐은 불필요한 모델 전송 제거와 로컬 승인 결속 유지로 보완했다. 기타 UML/PDF·전체/Windows 최종 gate는 남아 있다. 계획: docs/superpowers/plans/2026-10-26-c4-diagrams.md.
 
 ## 검토 초점
 

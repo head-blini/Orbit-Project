@@ -29,7 +29,7 @@ export interface ArchitectureGraph {
   nodes:{id:string;label:string;kind:string}[];
   edges:{from:string;to:string;label?:string}[];
 }
-export interface ArtifactInput {kind:'mermaid'|'architecture'|'presentation';source:string;metadata:Record<string,string>}
+export interface ArtifactInput {kind:'mermaid'|'architecture'|'presentation'|'c4';source:string;metadata:Record<string,string>}
 export interface ArtifactRecord extends ArtifactInput {id:string;projectId:string;revision:number;contentHash:string;createdAt:string}
 export interface TimelineView {
   lastSeq:number; workspaceKey:string;

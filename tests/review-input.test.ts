@@ -18,7 +18,7 @@ test('builds a fixed sanitized-diff review for modified/deleted/untracked files 
   assert.deepEqual(result.files,input.files.map(({path,status,patch})=>({path,status,bytes:Buffer.byteLength(patch!)})));
   assert.equal(result.patchBytes,input.files.reduce((sum,value)=>sum+Buffer.byteLength(value.patch!),0));
   assert.equal(result.inputDigest,createHash('sha256').update(result.instructions).digest('hex'));
-  assert.ok(result.instructions.includes(workspaceId)&&result.instructions.includes(baseSha));
+  assert.ok(!result.instructions.includes(workspaceId)&&!result.instructions.includes(baseSha));
   assert.match(result.instructions,/untrusted data/i);assert.match(result.instructions,/do not use tools/i);assert.match(result.instructions,/priority/i);
   assert.match(result.instructions,/no findings/i);assert.match(result.scope,/sanitized diff/i);assert.match(result.scope,/test|verification/i);
   assert.ok(result.instructions.length<=64000&&Buffer.byteLength(result.instructions)<=128*1024);
@@ -31,8 +31,27 @@ test('result is deeply frozen, detached, deterministic and preserves declaration
   assert.throws(()=>{(result.files as unknown as {path:string}[])[0].path='changed';},TypeError);
   input.files[0].patch='changed';input.files[0].path='changed.ts';input.files.push(file('extra.ts'));
   assert.deepEqual(result.files.map(value=>value.path),['src/code.ts','a.ts']);assert.equal(result.instructions,buildReviewInput(before).instructions);
-  assert.notEqual(buildReviewInput({...before,baseSha:'b'.repeat(40)}).inputDigest,result.inputDigest);
+  assert.equal(buildReviewInput({...before,baseSha:'b'.repeat(40)}).inputDigest,result.inputDigest,'source identity is bound by the local preview digest, not transmitted');
   assert.notEqual(buildReviewInput({...before,files:[...before.files].reverse()}).inputDigest,result.inputDigest);
+});
+
+test('opaque source identifiers stay local even when canonical UUID or Git hashes contain PII-shaped digits',()=>{
+  const expected=buildReviewInput(diff());
+  for(const identifiers of [
+    {workspaceId:'aaaaaaaa-bbbb-4ccc-8ddd-01012345678a',baseSha},
+    {workspaceId,baseSha:'a01012345678'+'b'.repeat(28)},
+    {workspaceId,baseSha:'a9001011234567'+'b'.repeat(26)},
+    {workspaceId,baseSha:'a01012345678'+'b'.repeat(52)},
+  ]){
+    const result=buildReviewInput({...diff(),...identifiers});
+    assert.equal(result.instructions,expected.instructions);assert.equal(result.inputDigest,expected.inputDigest);
+    const payload=JSON.parse(/BEGIN_ORBIT_REVIEW_DATA_JSON\n([\s\S]*)\nEND_ORBIT_REVIEW_DATA_JSON$/.exec(result.instructions)![1]);
+    assert.deepEqual(Object.keys(payload),['files']);
+    rejects({...diff(),...identifiers,files:[file('safe.ts','010-1234-5678')]},'REVIEW_OUTBOUND_DENIED',403);
+    const piiShaped=identifiers.workspaceId!==workspaceId?identifiers.workspaceId:identifiers.baseSha;
+    rejects({...diff(),files:[file('safe.ts',piiShaped)]},'REVIEW_OUTBOUND_DENIED',403);
+    rejects({...diff(),files:[file('src/'+piiShaped+'.ts')]},'REVIEW_OUTBOUND_DENIED',403);
+  }
 });
 
 test('embedded fences, delimiters, HTML and prompt injection remain JSON string data, including normal redaction tokens',()=>{

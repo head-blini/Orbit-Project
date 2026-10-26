@@ -323,3 +323,27 @@
 - 실제 Chrome CUA `.local/ui-e2e/mac-task22-hO4d5B/result.json`: 예제 저장v1, 긴 원문 수정v2/2페이지, dirty export disabled, 이전 버전 exact 원문 복원, 다른 프로젝트에 Artifact 없음, 새 서버 프로세스+같은DB+reload 후 원문·페이지·이력·내보낸 bytes 동일, 위험 문법 save/export disabled 및 SVG 없음 확인. Downloads의v1/v2 PPTX·MD4개를 서버 export와 byte-for-byte 비교했고 각각 SHA256을 `download-checks.json`에 보존했다.
 - 브라우저 download-event 대기1회가 timeout되어 CUA kernel이 초기화되었다. fresh UI와 알려진 파일 경로에서 실제 성공을 확인했으므로 성공/실패를 추정하지 않았다. 실제 JPEG5개를 저장했고 console warn/error0, native factory0·실제AI/CLI0·Run0, fixture원본HEAD/status/README 동일이다. 서버PID67969/68105 종료exit0·loopback50234 닫힘, Chrome423251671 종료, cleanupComplete true.
 - 전용 Mac 기능 시나리오이며 Windows 최종 gate/전체37단계/실서비스 검증을 대신하지 않는다. C4/기타 UML/PDF와 전체 A–K Goal은 계속 미완료다.
+
+- Task22 검증 변경은 로컬 커밋 `6957fb5`로 보존했다. 원격 push는 하지 않았다.
+
+## Task23 C4 구조 뷰 (2026-10-26, 진행 중)
+
+- 공식 C4 정의와 기존 코드 재사용 가능성을 독립 조사했다. Context/system, container/system boundary, component/container+parent system boundary 및 sibling container 포함 규칙을 고정했다. 새 `c4-v1` 원문·`c4` Artifact kind로 수동 작성 모델을 보존하고 소스 코드 검증으로 표시하지 않는다.
+- root가 공유 타입·Studio/HTTP·presentation을 소유하고 parser/layout 에이전트가 독립 모듈을 담당한다. 새 패키지/외부 렌더러/실제 모델 실행 없이 기존 SVG/PPTX 고정 도형을 `canvas-v1`으로 재사용한다.
+- generic canvas 지원 RED(1fail/1pass) 후 관련 PPTX14/14 GREEN. 공통 SVG RED2 이후 새 SSR2+기존 시퀀스14=16/16 GREEN. C4 HTTP 최초 RED는 기대200에 실제400이며 아직 최종 통합 검증 전이다.
+- 기존 Task22 최종 제품 PPTX를 현재 코드로 다시 생성해 byte-for-byte 비교했다:85808bytes, SHA256 `fc01db94def1ff35ef93be3a507df21a6b8c88e96d49da552300b916c9bef7c5`, 동일함. 공통 도형 추출이 기존 시퀀스 파일 bytes를 변경하지 않았다.
+
+
+### Task23 최종 로컬 검증
+
+- context/container/component 입력 검사26개와 배치/UI12개, generic canvas2개, 공통 SVG4개, Studio HTTP3개 회귀를 추가했다. 최대12요소/24관계/256KiB, exact fields·부모/범위/leaf endpoint·형식/Unicode/숨은 제어문자 검증을 저장 전에 적용한다. 관계의 서로 다른 포트와 경로를 보존하고 collinear 공유 구간을 금지한다. 수직 교차는 연결이 아님을 범례에 명시한다.
+- 36개 배치 후보에 걸친750,000 work-unit 예산과3600×1200point 상한을 사용한다. 짧은12요소/24관계와 역방향 밀집 입력은 약5.3–5.5ms에서 명시적 `C4_LAYOUT_LIMIT`으로 거절했고, 세 예제는약3.4–4.1ms에 전체 배치됐다. 지원 문법이어도 전체 내용을 배치할 수 없으면 부분 SVG/저장/이벤트를 만들지 않는다. 이는 모든 기기에서의 실행 시간 보장은 아니다.
+- 독립 리뷰 수정: sibling container의 선택 범위 밖 색상, 공유 직선 구간의 방향 모호성, Cf 숨은 제어문자,48pt 라벨의22px 고정 줄간격, legacy 문서의 고정 canvas renderer 오진입을 회귀 재현 후 보완했다. 최종 C4 리뷰 추가 지적 없음. reviewer 별도88tests pass/exit0,36개 geometry probe 중34개 완전 배치·2개 명시 한도 거절·assertion 실패0. 메모리 SQLite rollback/history/project isolation도 확인했다. reviewer의 HTTP 실행은 loopback EPERM으로 제한됐으며 root 전체 gate와 브라우저에서 검증했다.
+- 첫 동결 전체검사 `.local/verification/c4-frozen-verify.log`:731total/729pass/1fail/1skip, type0, build 미실행. 기존 `E2E mock native review requires a sixth exact grant...`의 첫 review preview가403이었다. 단독 재실행은 통과했다. 원래 실패의 UUID/SHA가 보존되지 않아 그 표본의 원인을 단정하지 않는다. 별도 결정적 probe에서는 정규 UUID/Git 해시의 숫자 구간이 전화번호/식별번호로 오탐되어 같은403이 발생함을 확인했다.
+- Native Review 보완: 모델에 필요 없는 workspaceId/baseSha를 outbound JSON에서 제외했다. UUID/SHA 형식 검증, 실제 전송 files의 경로/status/patch 개별·결합 검사, 로컬 previewDigest의 project/workspace/run/base/source/input 결속은 유지한다. RED4fail→관련34pass/exit0. 동일 숫자 문자열이 path/patch에 있으면 계속403이며, 동일 diff의 다른 workspace 또는 변경된 base에 이전 승인을 재사용하면 STALE·runner0이다. 개인정보 패턴의 전역 예외나 검사 제거는 없다.
+- 첫 수정 후 `.local/verification/c4-final-verify.log`:733total/732pass/1 Windows-only skip/0fail, type0·build0·exit0,24.3초. 교차 workspace 회귀를 포함한 최종 `.local/verification/c4-reviewed-verify.log`: **734total / 733pass / 1 Windows-only skip / 0fail**, type0·build0·exit0,24.5초. 추가 독립 보안 리뷰19pass/exit0·추가 지적 없음.
+- 실제 제품 PPTX 세 종류 `.local/verification/c4-qa/output/v2/{context,container,component}/c4-qa.pptx`를 생성했다. 각각1페이지이며 context29416bytes/SHA256 `f6132e4a5a23fba8351d977eb7a33595c962a309f8ec96103cad7382bad65871`, container48012bytes/`e06ff6e6becc6c48ef4fa14f31c85b37ba5c280049694e3faf6179ff9ec5e948`, component52771bytes/`75f69b5554ca743ea0e7f5b788d0456b11cd20335fbba34629bd074133fac933`이다. bundled package/geometry finding0·warnings0, import/render 성공, 최종PNG3개를 시각 확인했다.
+- editable textbox/native line은 각각14/14,31/20,35/25개다. 각 별도 복사본의 Orbit 텍스트를 수정→PPTX 재출력→재가져오기하여 변경 보존을 확인했다. 원본 제품 PPTX는 변경하지 않았다. 증거 `.local/verification/c4-qa/build/v2/*/{validation,editability}.json`. PowerPoint/Google Slides 자체 실행은 미검증이다.
+- Chrome CUA `.local/ui-e2e/mac-task23-6LFusp/result.json` 및7JPEG: 세 예제 preview, container v1저장→원문 수정v2, dirty export 차단, v1 exact 원문 복원, Boreal 프로젝트 격리, 새 서버/같은DB/reload 후 v2 원문·이력·export bytes 동일, self/expanded-boundary/HTML 입력 및 dense layout 한도 차단, 방향키 가로·세로 스크롤을 확인했다. 제품 버튼으로 받은 Downloads의PPTX/MD4개가 서버 export와 byte-for-byte 일치하며 `download-checks.json`에SHA256을 기록했다.
+- 브라우저 warning/error0, native factory0·실제AI/CLI0·Run0. 두 fixture의HEAD/status/README 동일, 소유 서버PID6159/6272 exit0·loopback51778 닫힘·Chrome423251675 종료·cleanupComplete true/errors0. 인증정보나 실제 프로젝트 DB는 사용하지 않았다.
+- 전용 Mac 기능 검증이며 전체37단계/Windows 최종 gate를 대체하지 않는다. authored C4의 실제 코드 일치 여부, 기타 UML/PDF 및 나머지 A–K 기능은 계속 미완료다. 전체 Goal은 active다.

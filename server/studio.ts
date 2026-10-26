@@ -13,6 +13,7 @@ import { serializePresentation } from './visualization/pptx.ts';
 import { parseMermaidDocument } from '../web/visualization/mermaid.ts';
 import { toPresentationDocument } from '../web/visualization/presentation.ts';
 import { layoutSequence } from '../web/visualization/sequence-layout.ts';
+import { layoutC4 } from '../web/visualization/c4-layout.ts';
 
 export function exact(data:Record<string,unknown>,keys:string[]){
   if(Object.keys(data).sort().join(',')!==keys.sort().join(','))throw new AppError('INVALID_FIELDS',400);
@@ -121,7 +122,7 @@ export class Studio {
       return {bytes:Buffer.from(text,'utf8'),mime:'text/markdown; charset=utf-8',filename:filename+'.md'};
     }
     const parsed=record.kind==='mermaid'?parseMermaidDocument(record.source):JSON.parse(record.source);
-    const document=record.kind==='presentation'?parsed:record.kind==='mermaid'?(parsed.kind==='sequence'?layoutSequence(parsed):toPresentationDocument({nodes:parsed.graph.nodes,edges:parsed.graph.edges})):toPresentationDocument(parsed);
+    const document=record.kind==='presentation'?parsed:record.kind==='c4'?layoutC4(parsed):record.kind==='mermaid'?(parsed.kind==='sequence'?layoutSequence(parsed):toPresentationDocument({nodes:parsed.graph.nodes,edges:parsed.graph.edges})):toPresentationDocument(parsed);
     return {bytes:Buffer.from(serializePresentation(document)),mime:'application/vnd.openxmlformats-officedocument.presentationml.presentation',filename:filename+'.pptx'};
   }
   mutate(projectId:string,kind:string,id:string|undefined,action:string|undefined,data:Record<string,unknown>):unknown {
@@ -168,6 +169,6 @@ export class Studio {
 
 export function studioError(error:unknown):AppError|undefined {
   const code=error instanceof PlanningError?error.code:error instanceof Error?error.message:'';
-  const statuses:Record<string,number>={INVALID_ID:400,INVALID_DRAFT:400,INVALID_PROJECT:400,INVALID_ARTIFACT:400,INVALID_PRESENTATION:422,SEQUENCE_LAYOUT_LIMIT:422,ARTIFACT_INTEGRITY:409,ARTIFACT_KIND_IMMUTABLE:400,VERSION_NOT_FOUND:404,ARTIFACT_NOT_FOUND:404,REVISION_CONFLICT:409,NOT_APPROVED:422,INCOMPLETE_DRAFT:422};
+  const statuses:Record<string,number>={INVALID_ID:400,INVALID_DRAFT:400,INVALID_PROJECT:400,INVALID_ARTIFACT:400,INVALID_C4:400,INVALID_PRESENTATION:422,SEQUENCE_LAYOUT_LIMIT:422,C4_LAYOUT_LIMIT:422,ARTIFACT_INTEGRITY:409,ARTIFACT_KIND_IMMUTABLE:400,VERSION_NOT_FOUND:404,ARTIFACT_NOT_FOUND:404,REVISION_CONFLICT:409,NOT_APPROVED:422,INCOMPLETE_DRAFT:422};
   return statuses[code]?new AppError(code,statuses[code]):undefined;
 }

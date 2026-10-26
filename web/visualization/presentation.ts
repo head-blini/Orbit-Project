@@ -1,8 +1,9 @@
 import { validateArchitecture } from './mermaid.ts';
-import { SEQUENCE_CANVAS_LIMITS } from '../../shared/sequence.ts';
+import { CANVAS_LIMITS } from '../../shared/canvas.ts';
+import type { CanvasPresentationDocument } from '../../shared/canvas.ts';
 import type { SequencePresentationDocument } from '../../shared/sequence.ts';
 
-export type PresentationDocument=ReturnType<typeof toPresentationDocument>|SequencePresentationDocument;
+export type PresentationDocument=ReturnType<typeof toPresentationDocument>|SequencePresentationDocument|CanvasPresentationDocument;
 
 // Implementation-local element model; shared/parallel.ts remains integration-owned.
 type Element =
@@ -41,9 +42,9 @@ function xmlText(value:string):boolean {
 }
 const validId=(value:unknown):value is string=>typeof value==='string'&&value.trim().length>0&&value.length<=160&&xmlText(value);
 
-function validateSequencePresentation(doc:Record<string,unknown>):boolean {
-  const limit=SEQUENCE_CANVAS_LIMITS;
-  if(Object.keys(doc).some(k=>!['format','slides'].includes(k))||doc.format!=='sequence-v1'||!Array.isArray(doc.slides)||doc.slides.length<1||doc.slides.length>limit.pages)return false;
+function validateCanvasPresentation(doc:Record<string,unknown>):boolean {
+  const limit=CANVAS_LIMITS;
+  if(Object.keys(doc).some(k=>!['format','slides'].includes(k))||(doc.format!=='sequence-v1'&&doc.format!=='canvas-v1')||!Array.isArray(doc.slides)||doc.slides.length<1||doc.slides.length>limit.pages)return false;
   const object=(v:unknown):v is Record<string,any>=>!!v&&typeof v==='object'&&!Array.isArray(v);
   const exact=(v:Record<string,unknown>,keys:string[])=>Object.keys(v).length===keys.length&&Object.keys(v).every(k=>keys.includes(k));
   const finite=(n:unknown):n is number=>typeof n==='number'&&Number.isFinite(n)&&n>=0;
@@ -73,7 +74,7 @@ function validateSequencePresentation(doc:Record<string,unknown>):boolean {
 export function validatePresentationDocument(value:unknown):boolean {
   if(!value || typeof value!=='object' || Array.isArray(value)) return false;
   const doc=value as Record<string,unknown>;
-  if('format' in doc)return validateSequencePresentation(doc);
+  if('format' in doc)return validateCanvasPresentation(doc);
   if(Object.keys(doc).some(k=>k!=='slides') || !Array.isArray(doc.slides) || doc.slides.length!==1) return false;
   const slide=doc.slides[0];
   if(!slide || typeof slide!=='object' || Object.keys(slide).some(k=>!['id','width','height','elements'].includes(k)) || !validId(slide.id) || !Array.isArray(slide.elements) || slide.elements.length>800) return false;

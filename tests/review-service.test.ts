@@ -7,8 +7,8 @@ import type {WorkspaceDiff} from '../shared/types.ts';
 import type {NativeReviewResult,runCodexReview} from '../server/codex-review.ts';
 import {ReviewService} from '../server/review-service.ts';
 
-function fixture(){
-  const store=new Store(':memory:'),p=randomUUID(),w=randomUUID();let source='a'.repeat(64),busy=false,calls=0;
+function fixture(w=randomUUID(),p=randomUUID()){
+  const store=new Store(':memory:');let source='a'.repeat(64),busy=false,calls=0;
   const path=process.platform==='win32'?'C:\\Projects\\ReviewFixture':'/projects/review-fixture';
   store.saveProject({id:p,name:'Review fixture',path,createdAt:'',writeEnabled:true});store.saveWorkspace({id:w,projectId:p,path,branch:'orbit/review',baseSha:'b'.repeat(40),createdAt:'',status:'ready'});
   const diff:WorkspaceDiff={workspaceId:w,baseSha:'b'.repeat(40),files:[{path:'index.ts',status:'modified',patch:'diff --git a/index.ts b/index.ts\n--- a/index.ts\n+++ b/index.ts\n@@ -1 +1 @@\n-export const value = 1;\n+export const value = 2;\n'}]};
@@ -40,6 +40,30 @@ test('stale previews, changed diffs, unknown fields and busy state block before 
     assert.throws(()=>f.service.start({...f.input(),instructions:'override'} as any),/INVALID_FIELDS/);
     f.setBusy(true);assert.throws(()=>f.service.preview(f.w,null),/REVIEW_BUSY/);assert.equal(f.calls,0);
   }finally{await f.service.close();f.store.close();}
+});
+
+test('source identity remains in local preview binding when the outbound diff payload omits identifiers',async()=>{
+  const f=fixture();try{
+    const input=f.input(),before=f.service.preview(f.w,null);
+    const baseSha='a01012345678'+'b'.repeat(28);
+    f.store.saveWorkspace({...f.store.workspaces()[0],baseSha});f.diff.baseSha=baseSha;
+    const after=f.service.preview(f.w,null);
+    assert.equal(after.baseSha,baseSha);assert.equal(after.workspaceId,f.w);
+    assert.equal(after.inputDigest,before.inputDigest);assert.equal(after.instructions,before.instructions);
+    assert.notEqual(after.previewDigest,before.previewDigest);
+    assert.ok(!after.instructions.includes(baseSha)&&!after.instructions.includes(f.w));
+    assert.throws(()=>f.service.start(input),/REVIEW_PREVIEW_STALE/);assert.equal(f.calls,0);
+  }finally{await f.service.close();f.store.close();}
+});
+
+test('identical outbound diffs cannot reuse approval across two workspaces in the same project',async()=>{
+  const a=fixture(),b=fixture(randomUUID(),a.p);try{
+    const first=a.service.preview(a.w,null),second=b.service.preview(b.w,null);
+    assert.equal(first.projectId,second.projectId);assert.equal(first.baseSha,second.baseSha);assert.equal(first.sourceDigest,second.sourceDigest);
+    assert.equal(first.inputDigest,second.inputDigest);assert.notEqual(first.previewDigest,second.previewDigest);
+    assert.throws(()=>b.service.start({...b.input(),expectedPreviewDigest:first.previewDigest}),/REVIEW_PREVIEW_STALE/);
+    assert.equal(a.calls,0);assert.equal(b.calls,0);
+  }finally{await a.service.close();await b.service.close();a.store.close();b.store.close();}
 });
 
 test('source changes during review become stale and unknown process closure quarantines without replay',async()=>{

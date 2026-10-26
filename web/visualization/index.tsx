@@ -4,4 +4,7 @@ export { buildTimeline } from './timeline.ts';
 export { validateMermaid,parseMermaid,parseMermaidDocument,validateArchitecture,generateArchitectureMermaid } from './mermaid.ts';
 export { SequencePreview } from './SequencePreview.tsx';
 export { layoutSequence } from './sequence-layout.ts';
+export {C4Preview} from './C4Preview.tsx';
+export {parseC4,validateC4} from './c4.ts';
+export {layoutC4} from './c4-layout.ts';
 export { toPresentationDocument,exportPresentation,validatePresentationDocument } from './presentation.ts';
