@@ -25,6 +25,7 @@
 - [x] 기존 Recovery 순수계약 독립 감사 및19개 계약 테스트 확인. 실제 collector/OS qualification/release 구현과 구분해 보존했다.
 - [x] Task27: Solo 시작 전 manager/session/generation과 상태 변경 이력을 Run/event와 함께 원자 저장. 과거 Run은 legacy unknown, 인증된 조회·Agent Center 상세·재시작 보존 완료. 전체854/853pass/1skip/0fail, 독립 리뷰·Mac Chrome 검증. OS 종료 증거나 release 권한은 아니다.
 - [x] Task28: 실제 소유 ChildProcess의 시작/종료 관찰을 연결 intent·session과 원자 저장하고 Run 상세에서 구분 표시. 미완료 관찰 journal의 재시작 차단, known pre-spawn 거부와 unknown factory 오류 분리. 전체872/871pass/1skip/0fail·type/build0, 독립 리뷰 및 실제 Node 자식/Chrome 재시작 검증. 하위/원격 작업 종료·release 권한은 아니다.
+- [x] Task29 기반: common Git 디렉터리를 공유하는 영속 repository authority, manager/fencing·operation intent/CAS·미실행 취소, 실제2프로세스 경쟁 및 소유 프로세스 강제 종료 후 잔류 검증. 전체885/884pass/1skip/0fail·type/build0. 생산 dispatch에는 미연결이며 기존 사용자 저장소에 활성화하지 않았다. V4-03 완료는 아니다.
 - [ ] 다음: runtime/policy/OS qualification과 하위·원격 작업 종료 사실 수집, 공통 resource ownership·persisted recovery 연결과 안전한 수동 해제. 이후 신뢰된 수용 판정 및 원클릭 실행 연결. 종료 증거와 공통 소유권이 검증되기 전 새 실행으로 우회하지 않는다.
 
 재개 branch `codex/orbit-mac-handoff-2026-10-26`, 시작 HEAD `faba903bb9e6856e26166600cbcc413058fef553`. 기존 dirty Goal/Control Plane/Recovery 파일을 보존한다. 아래 과거 Windows 경로·branch는 역사 기록이며 현재 경로는 Mac의 `Orbit_Project/Orbit-Project`다.

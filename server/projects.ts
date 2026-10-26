@@ -8,6 +8,8 @@ import { AppError } from './errors.ts';
 import { safeText } from './privacy.ts';
 import { fingerprintWorkspace,readWorkspaceSourceSnapshot,readWorkspaceSnapshot } from './workspace-fingerprint.ts';
 import { trustedGit } from './git-process.ts';
+import {repositoryIdentity} from './repository-resource.ts';
+import type {RepositoryResource} from '../shared/repository-authority.ts';
 
 const same=(a:string,b:string)=>process.platform==='win32'?a.toLowerCase()===b.toLowerCase():a===b;
 const inside=(parent:string,child:string)=>{const r=relative(parent,child);return !!r&&!r.startsWith('..')&&!isAbsolute(r);};
@@ -65,6 +67,10 @@ export class Projects {
     if(!same(resolve(w.path,git(w.path,['rev-parse','--git-common-dir']).trim()),join(p.path,'.git'))||git(w.path,['branch','--show-current']).trim()!==w.branch||git(w.path,['rev-parse','HEAD']).trim()!==w.baseSha)throw new AppError('WORKSPACE_CHANGED');return w;
   }
   writable(id:string){const w=this.validate(id);if(!this.project(w.projectId).writeEnabled)throw new AppError('WRITES_DISABLED',403);return w;}
+  repositoryResource(id:string):RepositoryResource {
+    const workspace=this.writable(id),project=this.project(workspace.projectId);
+    return {...repositoryIdentity(join(project.path,'.git')),worktreePath:canonical(workspace.path),targetBranch:workspace.branch,baseRevision:workspace.baseSha};
+  }
   private manifest(workspace:Workspace) {
     const tracked=git(workspace.path,['ls-files','--stage','-z']).split('\0').filter(Boolean).map(entry=>{
       const match=/^([0-9]{6}) [a-f0-9]{40,64} ([0-3])\t([\s\S]+)$/.exec(entry);
