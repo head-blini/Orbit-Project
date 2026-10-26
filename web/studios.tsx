@@ -1,4 +1,5 @@
 import { useEffect,useMemo,useRef,useState } from 'react';
+import type {DevelopmentSelection} from '../shared/development-results.ts';
 import type { Snapshot } from '../shared/types.ts';
 import { terminal } from '../shared/types.ts';
 import type { ArtifactRecord,SavedTask } from '../shared/parallel.ts';
@@ -10,7 +11,7 @@ import { createStudioMutator,mergeStudioRecords } from './studio-client.ts';
 import './studios.css';
 type Post=(path:string,data:object)=>Promise<any>;
 type StudioPageId='planning'|'visualization';
-type TaskActions={state?:Snapshot|null;busy?:boolean;canRunTask?:boolean;onRunTask?:(task:SavedTask)=>Promise<void>};
+type TaskActions={state?:Snapshot|null;busy?:boolean;canRunTask?:boolean;onRunTask?:(task:SavedTask)=>Promise<void>;onResult?:(selection:DevelopmentSelection)=>void};
 async function get<T>(path:string):Promise<T>{const response=await fetch(path);if(!response.ok)throw new Error('LOAD_FAILED');return response.json() as Promise<T>;}
 function downloadStudioBlob(blob:Blob,filename:string){
   const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=filename;
@@ -19,7 +20,7 @@ function downloadStudioBlob(blob:Blob,filename:string){
 export function StudioPage({projectId,page,post,online,...taskActions}:{projectId:string;page:StudioPageId;post:Post;online:boolean}&TaskActions) {
  return <fieldset className="studio-page" disabled={!online}>{projectId?<ProjectStudio key={projectId} projectId={projectId} page={page} post={post} online={online} {...taskActions}/>:<div className="empty-state"><h2>프로젝트를 먼저 등록하세요</h2><p>기획과 시각화는 Codex 연결 없이 사용할 수 있습니다.</p><a className="button-link" href="#/projects">프로젝트 등록으로 이동</a></div>}</fieldset>;
 }
-function ProjectStudio({projectId,page,post,online,state,busy,canRunTask,onRunTask}:{projectId:string;page:StudioPageId;post:Post;online:boolean}&TaskActions){
+function ProjectStudio({projectId,page,post,online,state,busy,canRunTask,onRunTask,onResult}:{projectId:string;page:StudioPageId;post:Post;online:boolean}&TaskActions){
   const [artifacts,setArtifacts]=useState<ArtifactRecord[]>([]),[tasks,setTasks]=useState<SavedTask[]>([]),[error,setError]=useState(''),[loading,setLoading]=useState(true);
   const alive=useRef(false),postRef=useRef(post);postRef.current=post;
   const mutate=useMemo(()=>{let storage:Storage|undefined;try{storage=typeof window==='undefined'?undefined:window.sessionStorage;}catch{/* Retain requests in memory if browser storage is unavailable. */}return createStudioMutator((path,data)=>postRef.current(path,data),storage);},[]);
@@ -51,7 +52,7 @@ function ProjectStudio({projectId,page,post,online,state,busy,canRunTask,onRunTa
         toTasks={async(_project,id)=>{const saved:SavedTask[]=await post(`${root}/plans/${id}/task-drafts`,{});if(alive.current)setTasks(old=>[...old.filter(task=>task.planningVersionId!==id),...saved]);return saved;}}/>
       <section className="saved-tasks" aria-label="저장된 Task 초안"><h3>저장된 Task 초안</h3><p>현재 승인된 기획의 목표·인수조건·제약으로 실행합니다. 미결정 질문이 있으면 실행을 차단합니다.</p>
         {onRunTask&&!canRunTask&&<p>프로젝트의 작업 공간을 선택하고 에이전트 센터에서 Codex를 연결하세요. 진행 중이거나 결과가 불확실한 요청이 있으면 먼저 확인하세요.</p>}
-        {!loading&&!tasks.length&&<p className="subtle">저장된 Task 초안이 없습니다. 기획안을 승인한 뒤 Task 초안을 생성하세요.</p>}{tasks.map(task=>{const run=state?.runs.filter(run=>run.taskId===task.id).at(-1);return <article key={task.id}><h4>{task.title}</h4><p>{task.description}</p><ul>{task.acceptanceCriteria.map((criterion,i)=><li key={i}>{criterion}</li>)}</ul><small>기획 {task.planningVersionId} · {run?run.execution:'실행 전'} · {run?'검증은 개발 화면에서 확인':'검증 미실행'}</small>{onRunTask&&<button disabled={!canRunTask} onClick={()=>void onRunTask(task)}>이 Task를 Codex로 실행</button>}</article>;})}
+        {!loading&&!tasks.length&&<p className="subtle">저장된 Task 초안이 없습니다. 기획안을 승인한 뒤 Task 초안을 생성하세요.</p>}{tasks.map(task=>{const run=taskResultRun(projectId,task,state);return <article key={task.id}><h4>{task.title}</h4><p>{task.description}</p><ul>{task.acceptanceCriteria.map((criterion,i)=><li key={i}>{criterion}</li>)}</ul><small>기획 {task.planningVersionId} · {run?run.execution:'현재 작업 공간의 연결 실행 없음'} · {run?'검증은 개발 화면에서 확인':'다른 작업 공간 기록은 여기서 조회하지 않습니다'}</small>{onRunTask&&<button disabled={!canRunTask} onClick={()=>void onRunTask(task)}>이 Task를 Codex로 실행</button>}{run?.workspaceId&&onResult&&<button onClick={()=>onResult({workspaceId:run.workspaceId!,runId:run.id})}>현재 작업 공간 결과 확인</button>}</article>;})}
       </section>
       <PlanningTaskProvenance tasks={tasks}/>
       <PlanningFeedbackPanel projectId={projectId} tasks={tasks} state={state}
@@ -88,4 +89,9 @@ export function MockProviders({connections,post}:{connections:Snapshot['connecti
     <button disabled={busy||!text.trim()} onClick={async()=>{setBusy(true);setMessage('');try{const result=await post('/api/providers/mock/send',{providerId,text});setMessage(result.text);}catch(error){setMessage(error instanceof Error?error.message:'요청 실패');}finally{setBusy(false);}}}>모의 정책 검사</button>
     <p role="status">{message}</p><p>이메일·전화번호·식별번호 패턴과 인증정보 패턴을 차단합니다. 검출은 휴리스틱이며 실제 개인정보를 넣지 마세요.</p>
   </section>;
+}
+
+export function taskResultRun(projectId:string,task:SavedTask,state:Snapshot|null|undefined){
+  if(task.projectId!==projectId||!state?.workspaces?.some(workspace=>workspace.id===state.selectedWorkspaceId&&workspace.projectId===projectId))return null;
+  return state.runs.filter(run=>run.workspaceId===state.selectedWorkspaceId&&run.taskId===task.id&&run.planningVersionId===task.planningVersionId).at(-1)??null;
 }

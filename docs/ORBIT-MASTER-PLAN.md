@@ -13,7 +13,7 @@
 | 새 단계 | 기존 작업 연결 | 실제 상태와 다음 요구 |
 |---|---|---|
 | Phase 0 기준선 | Task0–24, V4-00 | Mac 검증 기록 있음. 이번 기준선은 미완성 Goal UI 타입 오류로 실패 후 Task25에서 수정 |
-| Phase 1 원클릭 E2E | Planning Agent, Task, Verification, V4-02–06 | 부분 구현. Task30 정적 HTML/CSS/JS 앱 미리보기 구현·Mac Chrome 검증. 자동 연결·빌드/백엔드 미리보기·신뢰된 수용 판정 미완료 |
+| Phase 1 원클릭 E2E | Planning Agent, Task, Verification, V4-02–06 | 부분 구현. Task30 정적 HTML/CSS/JS 앱 미리보기 및 Task31 Task→선택 Run→Check→같은 소스 결과 탐색 구현·Mac Chrome 검증. 자동 연결·빌드/백엔드 미리보기·신뢰된 수용 판정 미완료 |
 | Phase 2 실행기/모델 | Model Hub, V4-07 | text transport와 coding runtime 분리. OpenCode+API/로컬 모델 코딩, 단계별 자동 선택 미구현. 외부 실서비스 미검증 |
 | Phase 3 협업/장기 실행 | 6모드, V4-02/03/05/08 | Solo 외 executor, 공통 소유권/복구/예산, 인계·자동 수정 미완료. 불명확한 종료 뒤 중복 실행 차단 우선 |
 | Phase 4 도구 번들 | Extensions, V4-09 | inventory 부분 구현. 공식 출처/라이선스/버전 검증, profiles/install/rollback 미완료 |
@@ -27,7 +27,8 @@
 - [x] Task28: 실제 소유 ChildProcess의 시작/종료 관찰을 연결 intent·session과 원자 저장하고 Run 상세에서 구분 표시. 미완료 관찰 journal의 재시작 차단, known pre-spawn 거부와 unknown factory 오류 분리. 전체872/871pass/1skip/0fail·type/build0, 독립 리뷰 및 실제 Node 자식/Chrome 재시작 검증. 하위/원격 작업 종료·release 권한은 아니다.
 - [x] Task29 기반: common Git 디렉터리를 공유하는 영속 repository authority, manager/fencing·operation intent/CAS·미실행 취소, 실제2프로세스 경쟁 및 소유 프로세스 강제 종료 후 잔류 검증. 전체885/884pass/1skip/0fail·type/build0. 생산 dispatch에는 미연결이며 기존 사용자 저장소에 활성화하지 않았다. V4-03 완료는 아니다.
 - [x] Task30: 기존 snapshot과 Development를 연결해 별도 loopback origin의 정적 앱 미리보기 구현. 상대 CSS/ES module·버튼 동작, immutable bytes, stale/expiry/작업공간 폐기·재시작 안내, Chrome 경계 검증 완료. 최종898/897pass/1Windows skip/0fail·type/build0. 실제 AI0이며 전체 원클릭 성공을 뜻하지 않는다.
-- [ ] 다음 Phase1 수직 작업: 승인 기획 Task→Run→Check→미리보기의 workspace/source 기준을 결과 화면에 결합하고, 실제 검증·미검증·소스 변경 상태를 구분한다. 자동 실행 자격과 별도로 기존 수동 흐름의 결과 탐색을 연결한다.
+- [x] Task31: 승인 기획 Task→선택 Run→Check→미리보기의 workspace/source 근거를 결과 화면에 결합. Agent Center/Task 카드 결과 이동, 이전 실행 선택 유지, 과거 증거·소스 변경·미검증 구분, 지연 응답 격리·재시작 복원. 최종922/921pass/1Windows skip/0fail·type/build0, Chrome과 실제 로컬 Check exit0/9 확인. AI Run은 합성이며 자동 실행 완료를 뜻하지 않는다.
+- [ ] 다음 Phase1 수직 작업: 기획 Task 인수조건을 변경되지 않는 검증 기준과 결합하고, 원클릭 실행에 필요한 검증 명령 설정·승인·실행 연결을 구현한다. 기존 환경변수 명령 설정과 수동 검증 흐름을 재사용하고 실제 native runtime qualification·ownership/Recovery 요구를 유지한다.
 - [ ] 유지되는 필수 기반: runtime/policy/OS qualification과 하위·원격 작업 종료 사실 수집, 공통 resource ownership·persisted recovery 연결과 안전한 수동 해제, 신뢰된 수용 판정 및 원클릭 실행 연결. 종료 증거와 공통 소유권이 검증되기 전 새 실행으로 우회하지 않는다.
 
 재개 branch `codex/orbit-mac-handoff-2026-10-26`, 시작 HEAD `faba903bb9e6856e26166600cbcc413058fef553`. 기존 dirty Goal/Control Plane/Recovery 파일을 보존한다. 아래 과거 Windows 경로·branch는 역사 기록이며 현재 경로는 Mac의 `Orbit_Project/Orbit-Project`다.

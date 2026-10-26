@@ -1,4 +1,5 @@
 import {useEffect,useRef,useState} from 'react';
+import type {DevelopmentResultView} from '../shared/development-results.ts';
 import type {AppPreview,AppPreviewCatalog} from '../shared/app-preview.ts';
 
 export function previewOriginMatches(url:string,allowedOrigin:string){
@@ -9,7 +10,7 @@ const messages:Record<string,string>={APP_PREVIEW_STALE:'파일이 바뀌었습�
 export function AppPreviewFrame({preview}:{preview:AppPreview}){
   return <iframe className="app-preview-frame" title="생성된 웹앱 미리보기" src={preview.url} sandbox="allow-scripts" referrerPolicy="no-referrer"/>;
 }
-export function AppPreviewPanel({workspaceId,online,locked,refreshKey,post}:{workspaceId:string;online:boolean;locked:boolean;refreshKey:string;post:(path:string,body:object)=>Promise<unknown>}){
+export function AppPreviewPanel({workspaceId,online,locked,refreshKey,post,evidence=null}:{workspaceId:string;online:boolean;locked:boolean;refreshKey:string;post:(path:string,body:object)=>Promise<unknown>;evidence?:DevelopmentResultView|null}){
   const [catalog,setCatalog]=useState<AppPreviewCatalog|null>(null),[entry,setEntry]=useState(''),[preview,setPreview]=useState<AppPreview|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState(''),[expired,setExpired]=useState(false);
   const [allowedOrigin]=useState(()=>typeof document==='undefined'?'':document.querySelector('meta[name="orbit-preview-origin"]')?.getAttribute('content')??'');
   const [reloadRequired,setReloadRequired]=useState(false);
@@ -50,7 +51,12 @@ export function AppPreviewPanel({workspaceId,online,locked,refreshKey,post}:{wor
     {online&&catalog?.entries.length===0&&<p className="hint">정적 HTML 결과가 없습니다. HTML 결과물을 만들거나, 빌드가 필요한 프로젝트인지 확인해 주세요.</p>}
     <div className="app-preview-controls"><label>미리볼 HTML<select aria-label="미리볼 HTML" disabled={!online||busy||!catalog?.entries.length} value={entry} onChange={event=>{setEntry(event.target.value);setPreview(null);}}><option value="" disabled>HTML 파일 선택</option>{catalog?.entries.map(path=><option key={path} value={path}>{path}</option>)}</select></label>
       <button className="primary" disabled={!online||locked||busy||!entry} onClick={()=>void open()}>{busy?'파일 확인 중…':preview?'최신 파일로 다시 열기':'미리보기 열기'}</button>{preview&&<button onClick={()=>{generation.current++;setBusy(false);setPreview(null);}}>미리보기 닫기</button>}</div>
-    {preview&&<><p className="subtle">{preview.entryPath} · {new Date(preview.createdAt).toLocaleString('ko-KR')} · 소스 {preview.sourceDigest.slice(0,12)} · {preview.fileCount}개 파일</p>
+    {preview&&<><PreviewVerificationEvidence preview={preview} evidence={evidence}/><p className="subtle">{preview.entryPath} · {new Date(preview.createdAt).toLocaleString('ko-KR')} · 소스 {preview.sourceDigest.slice(0,12)} · {preview.fileCount}개 파일</p>
       {locked?<p role="status">작업이 진행 중이거나 복구 확인이 필요합니다. 작업 상태가 확인되면 최신 파일로 다시 열어 주세요.</p>:expired?<p role="status">미리보기가 만료되었습니다. 최신 파일로 다시 열어 주세요.</p>:stale?<p role="status">소스가 변경됐거나 현재 상태를 확인할 수 없습니다. 최신 파일로 다시 열어 주세요.</p>:<AppPreviewFrame key={preview.id} preview={preview}/>}</>}
   </section>;
+}
+
+export function PreviewVerificationEvidence({preview,evidence}:{preview:Pick<AppPreview,'workspaceId'|'sourceDigest'>;evidence:DevelopmentResultView|null}){
+  const matches=!!evidence?.run&&evidence.workspaceId===preview.workspaceId&&evidence.sourceDigest===preview.sourceDigest;
+  return <p className="subtle" role="status">{!evidence?.run?'선택 실행의 검증 근거가 없습니다.':!matches?'미리보기와 검증 조회의 소스가 다르거나 확인되지 않았습니다. 결과 상태를 새로 확인하세요.':evidence.verification?.available&&evidence.verification.canApprove&&!evidence.verification.quarantined?'이 미리보기와 같은 소스에서 등록된 검증 명령이 모두 통과했습니다.':'같은 소스의 조회 기록입니다. 검증 통과 여부는 위 실행 결과에서 확인하세요.'}</p>;
 }

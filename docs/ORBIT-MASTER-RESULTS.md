@@ -1,5 +1,20 @@
 # Orbit 전체 구현·검증 증거
 
+## Task31 — 기획·실행·검증·미리보기 결과 탐색 (2026-10-27)
+
+- 시작 HEAD `46ff568`, branch `codex/orbit-mac-handoff-2026-10-26`, clean 단일 worktree, macOS Darwin arm64/Node24.22.1. 목표 파일 전체와 기존 계획·실제 연결 지점을 재확인했다. 이전 구간은 Task30 구현·검증·커밋으로 progress다. 전체 A–K와 실제 AI 시나리오 A–E는 계속 미완료다.
+- `shared/development-results.ts`, `server/development-results.ts`, Controller/HTTP: 인증된 `GET /api/workspaces/:id/result?runId=...`는 선택 작업공간의 Run·Task·기획·Check를 authoritative 저장 기록으로 결합한다. 다른 workspace는409, 외부/없는 Run은404, 중복·알 수 없는 query는400. 기획 현재 head·hash/연결, 실제 source 재조회, 등록 명령별 최신 Check/config/base/source/finished digest를 확인한다. 기존 VerificationService.canApprove와 busy/복구 gate를 재사용하며 승인 권한을 새로 부여하지 않는다. 원문 prompt/response/check output·request ID·명령 인자는 응답에 포함하지 않는다.
+- 최대100 Check 표시에서 현재 등록 명령의 최신 근거가 누락되면 성공을 추론하지 않는다. source 조회 실패/조회 중 변경, newer fail, config/base 변경, lost Run, 미설정 검사는 현재 통과를 만들지 않는다. free prompt와 Task 연결 누락을 구분하며 이전 기획의 역사 조회에 새 실행 gate를 사용하지 않는다. 새 DB 테이블·AI/명령 dispatch·승인 mutation은 추가하지 않았다.
+- `web/development-results.tsx`, `web/pages.tsx`, `web/main.tsx`: 실행 선택·기획/실행/검증 요약·최근 검사 내역과 조회 시각을 추가했다. 명시적으로 선택한 이전 Run은 새 SSE Run이 와도 유지한다. Review/Verification/Merge는 같은 선택 Run을 사용하고 active Run 선택은 과거 종료 Run으로 대체하지 않는다. 작업공간/프로젝트 변경은 선택을 초기화하며 지연 응답과 offline의 이전 성공 근거는 표시하지 않는다. `web/agent-center.tsx`, `web/studios.tsx`의 결과 버튼은 정확한 workspace/task/planning 연결을 전달한다. Task 목록에서 현재 workspace에 없는 기록을 전역 미실행으로 부르지 않는다.
+- `web/app-preview.tsx`: preview와 조회 결과의 workspace/source digest가 일치하고 현재 검사 근거가 유효할 때만 같은 소스의 등록 명령 통과를 표시한다. 미리보기는 현재 작업공간 사본이며 해당 Run이 모든 파일을 작성했다는 인과·과거 파일 복원·요구사항 전체 수용 판정을 주장하지 않는다. 기존 iframe/CSP 정책과 명시적 실행·승인 경계는 유지했다.
+- 실패/검증: UI module 부재 RED4→UI4pass(탐색 추가 포함 최종5pass). HTTP route 부재404 RED1→외부Run404 은닉 계약에 맞춰 기대409 수정→통합 통과. 서버 projection 부재 RED11→기본11pass, 실제 Node pass→fail/config 변경과 lost Run 회귀를 추가했다. `.local/verification/development-results-focused.log`32total/31pass/1fail은 병행 추가한 lost Run RED이며 명시 lost 억제 후 서버13/13pass·type0 확인. async actual-TSX generic hooks 테스트5/5는 지연 응답·offline/workspace 첫 렌더 제거·15초 polling·unmount cleanup을 검증했다. 처음부터 통과했으며 결함 재현으로 표시하지 않는다.
+- 독립 전체 변경 read-only review: 재현 가능한 P1/P2 없음. 제안된 async 검증 보강은 원래 계획의 지연 응답 요건으로 이미 추가했다. 별도 수정하지 않은 중요 지적 없음. `git diff --check` 통과.
+- 첫 전체 `.local/verification/development-results-full.log`:917total/916pass/1skip/0fail·type/build0. 최종 `.local/verification/development-results-final.log`: **922total /921pass /0fail /1 Windows-only skip, type0/build0/exit0**,29.63초. 실제 AI·외부 API를 사용하지 않은 테스트다.
+- 실제 Chrome CUA `.local/ui-e2e/development-results-20261027`: 제품 Controller/HTTP/Projects/Store, 실제 임시 Git worktree, 합성 AI Run3개 및 실제 로컬 Node Check2건(exit0/9). Agent Center의 이전 실행 선택→기획 연결/통과→같은 source preview→할 일 추가0/2, 새 Run 도착 후 선택 유지, 미검증 실행 전환에서 성공 제거, Planning Task 결과 링크, source 변경 SSE→stale 미리보기 숨김/통과 제거, 실제 재검사 실패와 과거 통과 분리, 다른 workspace 격리, 새 서버 프로세스/같은DB 재시작 후 기록 복원 확인.
+- 소스 변경 직후 기존 VerificationPanel의 15초 조회 전 옛 digest로 누른 첫 요청은 서버에서 거절됐다. 기록에 새 Check가 없음을 화면에서 확인하고 상태 재조회·명시적 요청 잠금 해제 후 최신 소스로 다시 검사했다. 자동 재시도가 아니며 실제 명령 실행은 총2개다. 이 거절·잠금 UX는 기존 동작이다.
+- `server.mjs`, `seed.json`, `state.json`, `browser-checks.json`, `result.json`, JPEG5개, `shutdown-{9437,11020}.json` 보존. 두 서버 모두 exit0, native factory0/실제AI0/외부API0. 두 shutdown의 Run 수3·Check ID/verdict/exit 전체 일치, 초기 main/preview 포트 ECONNREFUSED, 사용한 탭 닫음. 작업 중 root console warn/error0. 사용자 DB/인증/개인 설정 미접근.
+- 현재 사용: 기획 Task 또는 에이전트 대화의 결과 버튼 → 개발 화면에서 실행 선택 → 연결 기획/조회 당시 실제 검사/현재 정적 앱 확인. 미완료: 자동 기획·코딩·검증, 빌드/backend preview, 신뢰된 수용 기준, 공통 authority production dispatch와 qualified recovery, 실제 AI 시나리오·Windows 최종 E2E. 다음은 기존 검증 명령 설정과 기획 인수조건을 신뢰된 기준으로 결합해 원클릭 실행 경로를 잇는 작업이다. 이 branch 최신 local commit과 계획 `2026-10-27-development-results.md`에서 재개한다. 원격 push/배포/신규 의존성·과금·권한 변경 없음.
+
 ## Task30 — 작업공간의 정적 앱 결과 미리보기 (2026-10-27)
 
 - 시작 HEAD `5f99f68`, branch `codex/orbit-mac-handoff-2026-10-26`, 단일 clean checkout, macOS Darwin arm64/Node24.22.1. 목표 파일을 다시 읽고 Phase1의 생성 결과 화면을 연결했다. Task29 ownership/qualification 미완료 요구는 유지하며 독립적으로 가능한 사용자 기능을 구현했다.

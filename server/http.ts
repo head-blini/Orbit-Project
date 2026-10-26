@@ -351,6 +351,8 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
         json(res,200,studio.read(studioRoute[1],studioRoute[2],studioRoute[3]));return;
       }
       if(req.method==='GET'&&appPreviewRoute){if(url.search)throw new AppError('INVALID_FIELDS',400);json(res,200,appPreview.catalog(appPreviewRoute[1]));return;}
+      const resultRoute=url.pathname.match(/^\/api\/workspaces\/([a-f0-9-]{36})\/result$/);
+      if(req.method==='GET'&&resultRoute){const keys=[...url.searchParams.keys()],runId=url.searchParams.get('runId');if(keys.some(key=>key!=='runId')||keys.length>1||(keys.length===1&&(!runId||!(/^[a-f0-9-]{36}$/).test(runId))))throw new AppError('INVALID_FIELDS',400);json(res,200,controller.developmentResult(resultRoute[1],runId));return;}
       if(req.method==='GET'&&url.pathname==='/api/state'){json(res,200,controller.snapshot());return;}
       const diff=url.pathname.match(/^\/api\/workspaces\/([a-f0-9-]{36})\/diff$/);
       if(req.method==='GET'&&diff){json(res,200,controller.workspaceDiff(diff[1]));return;}

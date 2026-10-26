@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Snapshot, AppEvent, Run } from '../shared/types.ts';
+import type {DevelopmentSelection} from '../shared/development-results.ts';
 import type { SavedTask } from '../shared/parallel.ts';
 import { terminal } from '../shared/types.ts';
 import './style.css';
@@ -24,6 +25,7 @@ import { GoalTrackingPanel } from './goals.tsx';
 
 const errors:Record<string,string>={STATE_PERSISTENCE_FAILED:'실행 상태를 저장하지 못해 새 실행을 차단했습니다. 기록을 보존한 상태로 저장 공간과 오류를 확인하세요.',SOLO_RECOVERY_REQUIRED:'종료를 확인하지 못한 실행이 있어 새 실행을 차단했습니다. 기록 조회는 가능하며 안전한 복구 기능은 준비 중입니다.',PERSONAL_DATA_BLOCKED:'개인정보 패턴이 감지되어 전송을 차단했습니다. 실제 개인정보를 입력하지 마세요.',DESTINATION_BLOCKED:'현재 목적지의 반출 정책으로 차단됐습니다.',CHATGPT_LOGIN_REQUIRED:'터미널에서 codex login으로 ChatGPT 계정에 로그인하세요.',CODEX_NOT_INSTALLED:'Codex 실행 파일을 찾지 못했습니다. README의 AICC_CODEX_BIN 설정을 확인하세요.',CONNECTION_FAILED:'Codex에 연결하지 못했습니다. CLI 로그인과 정상 사용자 환경을 확인한 뒤 다시 연결하세요.',SUBMIT_UNCERTAIN:'전송 결과를 확인하지 못했습니다. 자동으로 재전송하지 않습니다.',RUN_ACTIVE:'다른 실행이 진행 중입니다.',CREDENTIAL_LIKE_INPUT:'인증정보로 보이는 내용은 전송할 수 없습니다.',CSRF_REJECTED:'웹 연결이 만료됐습니다. 새로고침하세요.',NOT_CONNECTED:'먼저 Codex를 연결하세요.',POLICY_MISMATCH:'읽기 전용·네트워크·승인 정책이 일치하지 않아 연결을 차단했습니다.',MCP_ISOLATION_REQUIRED:'MCP 도구 격리를 확인하지 못해 연결을 차단했습니다. README의 MCP 격리 안내를 확인하세요.',THREAD_STILL_ACTIVE:'저장된 세션이 아직 실행 중입니다. 기존 실행 상태를 확인하세요.'};
 export function App(){
+  const [developmentSelection,setDevelopmentSelection]=useState<DevelopmentSelection|null>(null);
   const [page,setPage]=useState<PageId>(()=>parsePage(window.location.hash));
   const [visited,setVisited]=useState<Set<PageId>>(()=>new Set([parsePage(window.location.hash)]));
   const [preferredProject,setPreferredProject]=useState(()=>{try{return readPreference(window.localStorage,projectPreferenceKey);}catch{return '';}});
@@ -105,8 +107,10 @@ export function App(){
   const promptKey=projectId+':'+(matches?state?.selectedWorkspaceId??'readonly':'no-workspace');
   const prompt=promptDrafts[promptKey]??'';
   function setPrompt(value:string){setPromptDrafts(old=>({...old,[promptKey]:value}));}
+  useEffect(()=>{setDevelopmentSelection(null);},[projectId,state?.selectedWorkspaceId]);
+  function openResult(selection:DevelopmentSelection){if(matches&&state?.selectedWorkspaceId===selection.workspaceId&&state.runs.some(run=>run.id===selection.runId&&run.workspaceId===selection.workspaceId)){setDevelopmentSelection(selection);navigate('development');}}
   const currentPage=pages.find(item=>item.id===page)!;
-  const agent=<AgentCenter state={state} online={online} busy={busy||!!state?.soloRecoveryRequired||!!state?.verificationBusy||!!state?.modelHubBusy||!!state?.mergeBusy||!!state?.workflowBusy||!!state?.planningBusy||!!state?.reviewBusy||!!state?.extensionBusy} matches={matches} prompt={prompt} setPrompt={setPrompt} pending={pending} connect={connect} submit={submit} interrupt={interrupt} clearPending={()=>{try{sessionStorage.removeItem('aicc.pending');}catch{}setPending(null);}} onProjects={()=>navigate('projects')} onActiveSession={()=>selectProject(state?.workspaces?.find(workspace=>workspace.id===state.selectedWorkspaceId)?.projectId??'')} issueMessage={state?.issue?errors[state.issue]??'연결이 종료됐습니다. 세션 이어받기로 다시 연결하세요.':''}/>;
+  const agent=<AgentCenter state={state} online={online} busy={busy||!!state?.soloRecoveryRequired||!!state?.verificationBusy||!!state?.modelHubBusy||!!state?.mergeBusy||!!state?.workflowBusy||!!state?.planningBusy||!!state?.reviewBusy||!!state?.extensionBusy} matches={matches} prompt={prompt} setPrompt={setPrompt} pending={pending} connect={connect} submit={submit} interrupt={interrupt} clearPending={()=>{try{sessionStorage.removeItem('aicc.pending');}catch{}setPending(null);}} onProjects={()=>navigate('projects')} onActiveSession={()=>selectProject(state?.workspaces?.find(workspace=>workspace.id===state.selectedWorkspaceId)?.projectId??'')} onResult={openResult} issueMessage={state?.issue?errors[state.issue]??'연결이 종료됐습니다. 세션 이어받기로 다시 연결하세요.':''}/>;
   return <div className="shell">
     <a className="skip-link" href="#page-content" onClick={event=>{event.preventDefault();document.getElementById('page-content')?.focus();}}>본문으로 이동</a>
     <Navigation page={page} open={sidebarOpen} onNavigate={navigate} onClose={()=>setSidebarOpen(false)}/>
@@ -118,10 +122,10 @@ export function App(){
       {error&&<div className="banner error" role="alert">{error}</div>}
       {page==='dashboard'&&<Dashboard key={projectId} state={state} projectId={projectId} onNavigate={navigate}/>}
       {page==='projects'&&<WorkspacePanel state={state} projectId={projectId} onProject={selectProject} locked={!online||locked} action={workspaceAction} post={post}/>}
-      {(['planning','visualization'] as const).map(studio=>visited.has(studio)&&<div key={studio} hidden={page!==studio}><StudioPage projectId={projectId} page={studio} post={post} online={online} busy={busy} state={state} canRunTask={online&&!locked&&!pending&&matches&&state?.provider==='ready'&&!!state.selectedWorkspaceId} onRunTask={runTask}/></div>)}
+      {(['planning','visualization'] as const).map(studio=>visited.has(studio)&&<div key={studio} hidden={page!==studio}><StudioPage projectId={projectId} page={studio} post={post} online={online} busy={busy} state={state} canRunTask={online&&!locked&&!pending&&matches&&state?.provider==='ready'&&!!state.selectedWorkspaceId} onRunTask={runTask} onResult={openResult}/></div>)}
       {page==='agents'&&<><ExecutionModes/>{agent}{matches&&anchor&&state&&(anchor.selectedWorkspaceId??null)===(state.selectedWorkspaceId??null)&&<RunTimeline view={buildTimeline(anchor,events)} snapshot={state} onReload={()=>reload.current()}/>}
       <details className="events"><summary>최근 작업 이벤트 <span>{state?.lastSeq??0}개 보존</span></summary>{events.length?events.map(event=><div key={event.seq}><code>#{event.seq}</code> {event.kind}<time>{new Date(event.at).toLocaleTimeString('ko-KR')}</time></div>):<p>현재 연결 이후 발생한 이벤트가 표시됩니다. 이전 실행 기록은 대화에 복원됩니다.</p>}</details></>}
-      {page==='development'&&<Development state={state} projectId={projectId} onProjects={()=>navigate('projects')} onVisualize={()=>navigate('visualization')} online={online} post={post}/>}
+      {page==='development'&&<Development state={state} projectId={projectId} onProjects={()=>navigate('projects')} onVisualize={()=>navigate('visualization')} selection={developmentSelection} onSelectRun={setDevelopmentSelection} online={online} post={post}/>}
       {page==='providers'&&<><section className="surface"><div className="section-heading"><div><h2>Codex</h2><p>공식 CLI · 기존 ChatGPT 로그인 사용</p></div><span className="badge">{state?providerLabels[state.provider]:'상태 확인 중'}</span></div><button onClick={()=>navigate('agents')}>에이전트 센터에서 연결 관리 →</button></section><ModelHubPanel projectId={projectId} online={online} nativeBusy={busy||!!state?.soloRecoveryRequired||!!active||!!state?.verificationBusy||!!state?.mergeBusy||!!state?.workflowBusy||!!state?.planningBusy||!!state?.reviewBusy||!!state?.extensionBusy||state?.provider==='connecting'} post={post}/><CapabilityPanel online={online} status={state?.provider} post={post}/><fieldset className="studio-page" disabled={!online}><MockProviders connections={state?.connections} post={post}/></fieldset></>}
       {page==='extensions'&&<><ExtensionsPanel workspaceId={state?.selectedWorkspaceId??null} matches={matches} online={online} status={state?.provider} busy={locked} post={post}/><CapabilityPanel online={online} status={state?.provider} post={post} extensionsOnly/><section className="notice"><b>확장 설치·프로필 변경은 미연결입니다</b><p>출처·버전·실행 권한 검토와 격리 실험을 마친 뒤에만 도입합니다. 현재 실행 정책은 유지됩니다.</p></section></>}
       {page==='security'&&<PrivacySecurity state={state}/>}
