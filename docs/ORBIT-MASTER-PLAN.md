@@ -13,7 +13,7 @@
 | 새 단계 | 기존 작업 연결 | 실제 상태와 다음 요구 |
 |---|---|---|
 | Phase 0 기준선 | Task0–24, V4-00 | Mac 검증 기록 있음. 이번 기준선은 미완성 Goal UI 타입 오류로 실패 후 Task25에서 수정 |
-| Phase 1 원클릭 E2E | Planning Agent, Task, Verification, V4-02–06 | 부분 구현. Task30 정적 앱 미리보기, Task31 결과 탐색, Task32 실행 전 인수조건·명령·선택 테스트 고정 및 변경 차단 구현·Mac Chrome 검증. 실제 AI 전체 경로·자동 연결·초보자 명령 설정·빌드/백엔드 미리보기·완전한 수용 판정 미완료 |
+| Phase 1 원클릭 E2E | Planning Agent, Task, Verification, V4-02–06 | 부분 구현. Task30–32 미리보기·결과 탐색·실행 전 기준 고정 완료. Task33 실제 Mac Codex 기획→코딩→고정 검사→브라우저 실패 수정→미리보기·graph/MD/PPTX·재시작 검증. 수동 설정·검토·단계별 실행이 필요하며 자동 연결·초보자 명령 설정·빌드/백엔드 미리보기·완전한 수용 판정 미완료 |
 | Phase 2 실행기/모델 | Model Hub, V4-07 | text transport와 coding runtime 분리. OpenCode+API/로컬 모델 코딩, 단계별 자동 선택 미구현. 외부 실서비스 미검증 |
 | Phase 3 협업/장기 실행 | 6모드, V4-02/03/05/08 | Solo 외 executor, 공통 소유권/복구/예산, 인계·자동 수정 미완료. 불명확한 종료 뒤 중복 실행 차단 우선 |
 | Phase 4 도구 번들 | Extensions, V4-09 | inventory 부분 구현. 공식 출처/라이선스/버전 검증, profiles/install/rollback 미완료 |
@@ -29,7 +29,8 @@
 - [x] Task30: 기존 snapshot과 Development를 연결해 별도 loopback origin의 정적 앱 미리보기 구현. 상대 CSS/ES module·버튼 동작, immutable bytes, stale/expiry/작업공간 폐기·재시작 안내, Chrome 경계 검증 완료. 최종898/897pass/1Windows skip/0fail·type/build0. 실제 AI0이며 전체 원클릭 성공을 뜻하지 않는다.
 - [x] Task31: 승인 기획 Task→선택 Run→Check→미리보기의 workspace/source 근거를 결과 화면에 결합. Agent Center/Task 카드 결과 이동, 이전 실행 선택 유지, 과거 증거·소스 변경·미검증 구분, 지연 응답 격리·재시작 복원. 최종922/921pass/1Windows skip/0fail·type/build0, Chrome과 실제 로컬 Check exit0/9 확인. AI Run은 합성이며 자동 실행 완료를 뜻하지 않는다.
 - [x] Task32: 호스트 명령의 protectedFiles와 승인 Task 인수조건을 실행 전에 preview/CAS로 고정하고 Run과 원자 저장. 변경된 테스트·기획·명령 및 기준 없는 Check의 승인 차단, 기존 이력 unbound 유지. 최종948/947pass/1Windows skip/0fail·type/build0, 실제 Node 검사와 Chrome 취소/확인/변경/재시작 검증. 합성 AI1이며 선택 파일 밖·실제 AI·전체 수용 판정은 미검증이다.
-- [ ] 다음 Phase1 수직 작업: 실제 Codex App Server를 기존 승인 Task→코딩→고정 기준 검사→정적 앱 미리보기 경로에 연결해 임시 저장소 시나리오를 수행하고 발견된 결함을 수정한다. 기존 정책 attestation·격리·승인·quarantine을 유지하며 통과하지 못한 native gate를 우회하지 않는다. 환경변수에 의존하는 검증 명령 설정을 초보자 온보딩으로 연결하는 요구도 유지한다.
+- [x] Task33: 실제 Mac Codex0.162.1/Node24.22.1 기획1+코딩2 turn. 고정 모델 검사 통과 후 실제 iframe의 form submit 실패를 발견하고 기획·코딩에 미리보기 capability 전달, 동일 프로젝트의 새 수정 Task로 해결했다. Chrome 클릭/Enter/완료/삭제/320px·실제 Node Check2개·source graph/MD/PPTX·재시작 무재실행·기록 보존 확인. 최종950/949pass/1Windows skip/0fail·type/build0, 독립 리뷰 완료. sandbox/CSP·과거 기준·고정 테스트 보존. 원클릭·자동 UI 판정·Windows 최종 시나리오 완료는 아니다.
+- [ ] Task34 다음 수직기능: 초보자 기본 작업 흐름에서 현재 단계·필요한 준비·다음 실행을 연결하고 검증 명령 준비를 기존 Planning/Task/Verification/Preview에 통합한다. 실제 Task33에서 드러난 수동 Git/검증 설정과 단계별 이동을 줄인다. 호스트 명령 실행 동의·고정 기준·불명확한 종료 차단을 유지하며 자동 실행 범위와 완료 판정은 별도로 검증한다.
 - [ ] 유지되는 필수 기반: runtime/policy/OS qualification과 하위·원격 작업 종료 사실 수집, 공통 resource ownership·persisted recovery 연결과 안전한 수동 해제, 신뢰된 수용 판정 및 원클릭 실행 연결. 종료 증거와 공통 소유권이 검증되기 전 새 실행으로 우회하지 않는다.
 
 재개 branch `codex/orbit-mac-handoff-2026-10-26`, 시작 HEAD `faba903bb9e6856e26166600cbcc413058fef553`. 기존 dirty Goal/Control Plane/Recovery 파일을 보존한다. 아래 과거 Windows 경로·branch는 역사 기록이며 현재 경로는 Mac의 `Orbit_Project/Orbit-Project`다.

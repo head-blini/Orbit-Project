@@ -45,7 +45,7 @@ export function AppPreviewPanel({workspaceId,online,locked,refreshKey,post,evide
   return <section className="surface app-preview-panel" aria-busy={busy}>
     <div className="section-heading"><h2>결과 미리보기</h2><button disabled={!online||busy} onClick={()=>void load()}>파일 상태 확인</button></div>
     <p>작업 공간의 HTML과 상대 경로의 CSS·JavaScript를 실행합니다. 표시 시점의 파일 사본이며, 테스트 통과 여부는 아래 검증 결과에서 확인하세요.</p>
-    <details><summary>지원 범위와 제한</summary><p>빌드·개발 서버·백엔드는 실행하지 않습니다. Git에서 제외한 dist·node_modules, TSX, /로 시작하거나 ?가 붙은 자산 경로와 여러 HTML 사이의 이동은 지원하지 않습니다. API 통신·브라우저 저장소·팝업·파일 다운로드가 제한됩니다. 화면의 새로고침은 입력한 내용을 초기화합니다.</p><p>현재 브라우저의 격리 기능을 사용합니다. 미리보기 안에 비밀정보를 입력하거나 개인 파일을 선택하지 마세요. 최대 10분 동안 유지되며 작업 공간 변경·Orbit 재시작 시 폐기됩니다.</p></details>
+    <details><summary>지원 범위와 제한</summary><p>빌드·개발 서버·백엔드는 실행하지 않습니다. Git에서 제외한 dist·node_modules, TSX, /로 시작하거나 ?가 붙은 자산 경로와 여러 HTML 사이의 이동은 지원하지 않습니다. API 통신·브라우저 저장소·팝업·파일 다운로드가 제한됩니다. 폼 제출과 이에 따른 submit 이벤트는 동작하지 않으므로 버튼 클릭·Enter 키 입력으로 화면 동작을 연결해야 합니다. 화면의 새로고침은 입력한 내용을 초기화합니다.</p><p>현재 브라우저의 격리 기능을 사용합니다. 미리보기 안에 비밀정보를 입력하거나 개인 파일을 선택하지 마세요. 최대 10분 동안 유지되며 작업 공간 변경·Orbit 재시작 시 폐기됩니다.</p></details>
     {!online&&<p role="status">서버 연결 후 미리보기를 열 수 있습니다.</p>}
     {reloadRequired?<p role="alert">Orbit 재시작으로 미리보기 주소가 바뀌었습니다. 다른 화면의 작성 내용을 저장한 뒤 화면을 다시 불러와 주세요. <button onClick={()=>window.location.reload()}>Orbit 화면 다시 불러오기</button></p>:error&&<p role="alert">{error}</p>}
     {online&&catalog?.entries.length===0&&<p className="hint">정적 HTML 결과가 없습니다. HTML 결과물을 만들거나, 빌드가 필요한 프로젝트인지 확인해 주세요.</p>}

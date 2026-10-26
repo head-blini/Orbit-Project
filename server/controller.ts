@@ -27,6 +27,7 @@ import type { ExtensionInventory } from '../shared/extensions.ts';
 import {projectAnalytics} from './project-analytics.ts';
 import {RunTelemetry} from './run-telemetry.ts';
 import {getDevelopmentResult} from './development-results.ts';
+import {staticAppPreviewCapability} from './app-preview-policy.ts';
 export { AppError } from './errors.ts';
 export class Controller {
   store:Store;workspace:string;private factory:(workspace:string,write:boolean)=>RpcPort;private rpc:RpcPort|null=null;
@@ -228,7 +229,7 @@ export class Controller {
       }catch{throw new Error('MCP_ISOLATION_REQUIRED');}
       if(this.workspaceId)config.sandbox_workspace_write={writable_roots:[],network_access:false,exclude_tmpdir_env_var:true,exclude_slash_tmp:true};
       const id=this.thread();
-      const params={cwd:this.workspace,config,sandbox:this.workspaceId?'workspace-write':'read-only',approvalPolicy:this.approvalPolicy(),approvalsReviewer:'user',developerInstructions:this.workspaceId?'Orbit isolated coding workspace. Edit ordinary source files only within the current worktree using apply_patch. Do not access other projects, credentials, user settings, network, .git, .codex, .agents, or links. Do not run shell commands, install software, commit, checkout, merge, or delete the workspace. Approval requests are denied. Report inability honestly; completion is not verification.':'This is a read-only text-only test session. Do not use tools, access files, credentials, network, or other projects. Answer only from user-provided text.'};
+      const params={cwd:this.workspace,config,sandbox:this.workspaceId?'workspace-write':'read-only',approvalPolicy:this.approvalPolicy(),approvalsReviewer:'user',developerInstructions:this.workspaceId?'Orbit isolated coding workspace. Edit ordinary source files only within the current worktree using apply_patch. Do not access other projects, credentials, user settings, network, .git, .codex, .agents, or links. Do not run shell commands, install software, commit, checkout, merge, or delete the workspace. Approval requests are denied. Report inability honestly; completion is not verification.\n'+staticAppPreviewCapability:'This is a read-only text-only test session. Do not use tools, access files, credentials, network, or other projects. Answer only from user-provided text.'};
       const t=await rpc.request(id?'thread/resume':'thread/start',id?{...params,threadId:id,excludeTurns:true}:params);
       if(typeof t.thread?.id!=='string' || (id && t.thread.id!==id))throw new Error('THREAD_MISMATCH');
       try{this.store.bindNativeSession(this.ownerIncarnation,generation,t.thread.id);}catch{observationFailed=true;this.soloLost=true;throw new Error('STATE_PERSISTENCE_FAILED');}

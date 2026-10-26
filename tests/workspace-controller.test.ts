@@ -23,6 +23,22 @@ class Fake extends EventEmitter {
   }
 }
 function setup(){const dir=mkdtempSync(join(tmpdir(),'orbit-controller-'));const root=join(dir,'project');mkdirSync(root);const git=(...args:string[])=>execFileSync('git',args,{cwd:root,stdio:'pipe',windowsHide:true});git('init','-q','-b','main');writeFileSync(join(root,'code.ts'),'original\n');git('add','.');git('-c','user.name=Test','-c','user.email=test@example.invalid','commit','-qm','initial');const store=new Store(':memory:');const projects=new Projects(store,join(dir,'managed'),[root]);const project=projects.register(root);const a=projects.create(project.id),b=projects.create(project.id);const rpc=new Fake();const cwd:string[]=[];const c=new Controller(store,createWorkspace(dir),path=>{cwd.push(path);return rpc;},projects);return {store,projects,c,rpc,a,b,cwd,root};}
+test('coding start and resume receive conditional static preview interaction constraints without weakening execution policy',async()=>{
+  const {store,c,rpc,a}=setup();try{
+    await c.selectWorkspace(a.id);await c.connect();await c.close();await c.connect();
+    for(const method of ['thread/start','thread/resume']){
+      const params=rpc.calls.find(call=>call.method===method)?.params;assert.ok(params,method);
+      assert.match(params.developerInstructions,/If .*Orbit.*static HTML preview/);
+      assert.match(params.developerInstructions,/sandbox="allow-scripts"/);
+      assert.match(params.developerInstructions,/form submissions.*blocked before submit events/i);
+      assert.match(params.developerInstructions,/type="button".*click.*Enter.*keydown/);
+      assert.match(params.developerInstructions,/do not convert other requested project types into static apps/i);
+      assert.equal(params.sandbox,'workspace-write');assert.equal(params.approvalPolicy,'on-request');
+      assert.deepEqual(params.config.mcp_servers,{local:{enabled:false}});assert.equal(params.config.sandbox_workspace_write.network_access,false);
+    }
+    assert.equal(rpc.calls.some(call=>call.method==='turn/start'),false);
+  }finally{await c.close();store.close();}
+});
 test('only selected workspace reaches Codex; runs and threads scoped, active switch denied, transport loss preserves edits',async()=>{
   const {store,c,rpc,a,b,cwd,root}=setup();try{
     await c.selectWorkspace(a.id);await c.connect();assert.deepEqual(cwd,[a.path]);

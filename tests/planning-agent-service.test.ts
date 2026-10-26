@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {randomUUID} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {Store} from '../server/store.ts';
 import {Studio} from '../server/studio.ts';
 import type {Projects} from '../server/projects.ts';
@@ -18,6 +18,20 @@ function fixture(){
   const service=make(),text='PRIVATE_REQUEST_MARKER Plan an offline workspace',input=()=>({requestId:randomUUID(),workspaceId:w,text,expectedPreviewDigest:service.preview(p,{workspaceId:w,text}).previewDigest,confirmed:true});
   return {store,service,make,p,w,text,input,success,get calls(){return calls;},setBusy:(v:boolean)=>{busy=v;},setRun:(v:typeof run)=>{run=v;}};
 }
+test('planning preview hashes and launches conditional preview capabilities with the approved instructions',async()=>{
+  const f=fixture();try{
+    const preview=f.service.preview(f.p,{workspaceId:f.w,text:f.text});
+    assert.match(preview.instructions,/If .*Orbit.*static HTML preview/);
+    assert.match(preview.instructions,/form submissions.*blocked before submit events/i);
+    assert.match(preview.instructions,/type="button".*click.*Enter.*keydown/);
+    assert.match(preview.instructions,/Relative ES modules/);
+    assert.match(preview.instructions,/do not convert other requested project types into static apps/i);
+    assert.equal(preview.inputDigest,createHash('sha256').update(preview.instructions).digest('hex'));
+    let dispatched='';f.setRun(async input=>{dispatched=input.instructions;return f.success();});
+    const record=f.service.start(f.p,{requestId:randomUUID(),workspaceId:f.w,text:f.text,expectedPreviewDigest:preview.previewDigest,confirmed:true});
+    await f.service.settle();assert.equal(dispatched,preview.instructions);assert.equal(f.service.record(record.id).inputDigest,preview.inputDigest);assert.equal(f.calls,1);
+  }finally{await f.service.close();f.store.close();}
+});
 test('preview is inert, launch receipt does not repeat inference, and proposal save separately creates one unapproved draft',async()=>{
   const f=fixture();try{
     const input=f.input();assert.equal(f.calls,0);assert.throws(()=>f.service.start(f.p,{...input,confirmed:false}),/PLANNING_CONFIRMATION_REQUIRED/);
