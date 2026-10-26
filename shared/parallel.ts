@@ -17,6 +17,7 @@ export interface TaskDraft {
 }
 export interface SavedTask extends TaskDraft {
   id:string; projectId:string; state:'draft'; verification:'not_run'; createdAt:string;
+  replannedFrom?:{planningVersionId:string;taskIds:string[]};
 }
 export interface ArchitectureGraph {
   nodes:{id:string;label:string;kind:string}[];

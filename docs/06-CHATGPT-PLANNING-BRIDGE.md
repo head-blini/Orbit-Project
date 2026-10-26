@@ -2,7 +2,13 @@
 
 작성일: 2026-10-25 · 상태: **설계 및 일부 구현**
 
-2026-10-26 구현 범위: 직접 편집·Markdown/JSON v1 가져오기·버전·승인·Task 실행, 저장 버전 내보내기 및 Task/Run 기반 수동 피드백을 제공한다. 아래 schema 0.2 예시는 초기 설계이며 현재 가져오기는 `server/planning/parser.ts`의 schema 1.0 계약을 따른다. decisions와 전체 출처 metadata, 버전 diff·영향 Task 재계획, ChatGPT 원격 MCP는 아직 구현하지 않았다. 피드백은 원시 로그·코드·명령·모델 응답을 제외하고 구조화된 실제 기록만 제공한다. 자동 외부 전송이나 기존 승인본 변경은 없다. 최신 검증 결과는 ORBIT-MASTER-RESULTS.md를 참조한다.
+2026-10-26 구현 범위: 직접 편집·Markdown/JSON v1 가져오기·버전·승인·Task 실행, 저장 버전 내보내기, Task/Run 기반 수동 피드백, 저장 버전 diff·영향 Task 표시·선택한 후속 Task 생성을 제공한다. 아래 schema 0.2 예시는 초기 설계이며 현재 가져오기는 `server/planning/parser.ts`의 schema 1.0 계약을 따른다. decisions와 전체 출처 metadata, ChatGPT 원격 MCP는 아직 구현하지 않았다. 피드백은 원시 로그·코드·명령·모델 응답을 제외하고 구조화된 실제 기록만 제공한다. 자동 외부 전송이나 기존 승인본 변경은 없다. 최신 검증 결과는 ORBIT-MASTER-RESULTS.md를 참조한다.
+
+### 구현된 버전 비교와 후속 Task
+
+- 같은 프로젝트·lineage의 이전 저장 버전과 목표 버전을 비교한다. 요구사항 label을 기준으로 추가·삭제·내용·완료 조건 변화와 영향받는 이전 Task를 표시한다.
+- `GET /api/projects/:projectId/plans/:targetId/diff?baseVersionId=...`는 읽기 전용이다. 현재 승인된 head이고 미결정 질문이 없을 때, 사용자가1–100개 label과 별도 동의를 선택하여 `POST /api/projects/:projectId/plans/:targetId/replan`을 호출한다. 최신 preview digest·세션·CSRF를 검증한다.
+- 이전 Task/Run/승인은 불변이다. 새 Task 초안에 이전 버전과 Task 식별자를 연결하며, 후속 실행은 별도 사용자 동작이다. 삭제된 요구사항에는 새 Task를 만들지 않는다. 부분 생성 후 전체 Task 생성은 누락된 요구사항만 채우고 기존 ID와 연결을 보존한다.
 
 > 이 문서는 `07-PROVIDER-NEUTRAL-CORE.md`의 공급자 중립 기획 구조에 **ChatGPT 웹을 연결하는 방법만** 설명한다. 시스템의 필수 시작 경로는 내장 편집기 + 제공자 중립 import다.
 

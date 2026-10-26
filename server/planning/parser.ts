@@ -30,6 +30,11 @@ export function parsePlanningDraft(input: PlanningInput): PlanningParseResult {
   if (input.format !== 'json') return fail('format', 'INVALID_FORMAT');
   let value: unknown;
   try { value = JSON.parse(input.text.replace(/^\uFEFF/, '')); } catch { return fail('text', 'INVALID_JSON'); }
+  return normalizeJsonDocument(value, input.source);
+}
+
+function normalizeJsonDocument(value: unknown, source: PlanningSource): PlanningParseResult {
+  if (source !== 'manual' && source !== 'import') return fail('source', 'INVALID_SOURCE');
   if (!object(value)) return fail('document', 'INVALID_DOCUMENT');
   if (value.schema_version !== '1.0') return fail('schema_version', 'UNSUPPORTED_SCHEMA');
   if (!exactKeys(value, ['schema_version', 'title', 'goal', 'requirements', 'constraints', 'open_questions', 'decisions', 'source'])) return fail('document', 'UNKNOWN_FIELD');
@@ -51,7 +56,7 @@ export function parsePlanningDraft(input: PlanningInput): PlanningParseResult {
     requirements.push({ label: item.id.trim(), description: item.description.trim(), acceptanceCriteria: item.acceptance_criteria.map(text => text.trim()) });
   }
   const draft: PlanningDraft = { schemaVersion: '1.0', title: value.title.trim(), goal: value.goal.trim(), requirements,
-    constraints: value.constraints.map(text => text.trim()), openQuestions: value.open_questions.map(text => text.trim()), source: input.source };
+    constraints: value.constraints.map(text => text.trim()), openQuestions: value.open_questions.map(text => text.trim()), source };
   return finish(draft);
 }
 
@@ -120,10 +125,24 @@ export function approvalIssues(draft: PlanningDraft): Issue[] {
   return issues;
 }
 
-/** Editable canonical JSON, containing no authority-bearing version fields. */
-export function serializePlanningDraft(draft: PlanningDraft): string {
-  return JSON.stringify({ schema_version: '1.0', title: draft.title, goal: draft.goal,
+function planningDocument(draft: PlanningDraft) {
+  return { schema_version: '1.0', title: draft.title, goal: draft.goal,
     requirements: draft.requirements.map(requirement => ({ id: requirement.label, description: requirement.description, acceptance_criteria: requirement.acceptanceCriteria })),
     constraints: draft.constraints, open_questions: draft.openQuestions, decisions: [],
-    source: { kind: draft.source === 'manual' ? 'in_app_manual' : 'file', provider_id: null, external_url: null } }, null, 2);
+    source: { kind: draft.source === 'manual' ? 'in_app_manual' : 'file', provider_id: null, external_url: null } };
+}
+
+/**
+ * Revalidate authoritative stored content with the same JSON schema. The input
+ * byte cap belongs to parsePlanningDraft: formatting and escaping can expand a
+ * legitimately saved draft. Callers must still compare the normalized result
+ * with the exact stored shape and verify its content hash.
+ */
+export function normalizeStoredPlanningDraft(draft: PlanningDraft): PlanningParseResult {
+  return normalizeJsonDocument(planningDocument(draft), draft.source);
+}
+
+/** Editable canonical JSON, containing no authority-bearing version fields. */
+export function serializePlanningDraft(draft: PlanningDraft): string {
+  return JSON.stringify(planningDocument(draft), null, 2);
 }

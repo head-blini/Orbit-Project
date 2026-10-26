@@ -51,7 +51,7 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
     }
     if(url.pathname.startsWith('/api/')){
       if(!session||session.expires<=Date.now())throw new AppError('SESSION_REQUIRED',401);
-      const studioRoute=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/(plans|artifacts|tasks)(?:\/([a-f0-9-]{36})\/(revisions|approve|task-drafts|history))?$/);
+      const studioRoute=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/(plans|artifacts|tasks)(?:\/([a-f0-9-]{36})\/(revisions|approve|task-drafts|history|diff|replan))?$/);
       if(req.method==='POST'){
         const token=req.headers['x-csrf-token'];
         if(req.headers.origin!==origin||typeof token!=='string'||token.length!==64||!timingSafeEqual(Buffer.from(token),Buffer.from(session.csrf)))throw new AppError('CSRF_REJECTED',403);
@@ -167,6 +167,7 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
           }
         }
         if(studioRoute&&studioRoute[2]!=='tasks'){
+          if((studioRoute[4]==='replan'||studioRoute[4]==='diff')&&url.search)throw new AppError('INVALID_FIELDS',400);
           json(res,200,studio.mutate(studioRoute[1],studioRoute[2],studioRoute[3],studioRoute[4],data));return;
         }
         const taskRun=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/tasks\/([a-f0-9-]{36})\/run$/);
@@ -273,6 +274,11 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
         if(fields!=='format,hash,revision'||!/^\d+$/.test(revision)||!Number.isSafeInteger(Number(revision))||Number(revision)<1||!/^[a-f0-9]{64}$/.test(hash)||(format!=='pptx'&&format!=='markdown'))throw new AppError('INVALID_FIELDS',400);
         const exported=studio.exportArtifact(exportArtifact[1],exportArtifact[2],Number(revision),hash,format);
         res.writeHead(200,{'Content-Type':exported.mime,'Content-Disposition':`attachment; filename="${exported.filename}"`,'Content-Length':exported.bytes.length});res.end(exported.bytes);return;
+      }
+      if(req.method==='GET'&&studioRoute?.[2]==='plans'&&studioRoute[4]==='diff'){
+        const baseId=url.searchParams.get('baseVersionId')??'';
+        if([...url.searchParams.keys()].join(',')!=='baseVersionId'||!/^[a-f0-9-]{36}$/.test(baseId))throw new AppError('INVALID_FIELDS',400);
+        json(res,200,studio.comparePlanning(studioRoute[1],studioRoute[3],baseId));return;
       }
       if(req.method==='GET'&&studioRoute&&(!studioRoute[3]||(studioRoute[2]==='artifacts'&&studioRoute[4]==='history'))){
         json(res,200,studio.read(studioRoute[1],studioRoute[2],studioRoute[3]));return;

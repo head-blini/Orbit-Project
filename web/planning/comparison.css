@@ -1,0 +1,18 @@
+.planning-comparison { margin-top: 1.5rem; padding-top: 1.25rem; border-top: 1px solid var(--border, #2b3946); min-width: 0; }
+.planning-comparison > label { max-width: 55rem; margin: 1rem 0; }
+.planning-comparison select { width: 100%; min-width: 0; }
+.planning-comparison-preview { margin-top: 1rem; }
+.planning-comparison-table { overflow-x: auto; margin: 1rem 0; }
+.planning-comparison-table table { width: 100%; border-collapse: collapse; table-layout: fixed; min-width: 32rem; }
+.planning-comparison-table caption { text-align: left; font-weight: 600; margin-bottom: .5rem; }
+.planning-comparison-table th, .planning-comparison-table td { border-bottom: 1px solid var(--border, #2b3946); padding: .7rem; vertical-align: top; text-align: left; overflow-wrap: anywhere; white-space: pre-wrap; }
+.planning-comparison-table thead th { background: var(--bg, #101923); }
+.planning-comparison-table td p { margin: 0; }
+.planning-comparison-table ul, .planning-comparison-table ol { margin: .5rem 0 0; padding-left: 1.25rem; }
+.planning-comparison-selection { display: flex; flex-wrap: wrap; gap: .75rem 1.25rem; margin: 1rem 0; padding: 1rem; border: 1px solid var(--border, #2b3946); border-radius: .4rem; }
+.planning-comparison-selection legend { padding: 0 .25rem; }
+.planning-comparison .planning-comparison-selection label, .planning-comparison .planning-comparison-consent { display: flex; flex-direction: row; align-items: flex-start; gap: .5rem; overflow-wrap: anywhere; }
+.planning-comparison .planning-comparison-consent { margin: 1rem 0; }
+.planning-comparison input[type=checkbox] { flex: 0 0 auto; margin: .2rem 0 0; accent-color: #79b8ff; }
+.planning-comparison fieldset:disabled, .planning-comparison input:disabled { opacity: .6; }
+.planning-comparison p { overflow-wrap: anywhere; }

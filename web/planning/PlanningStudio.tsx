@@ -3,6 +3,8 @@ import type { PlanningDraft, PlanningVersion, TaskDraft } from '../../shared/par
 import { approvalIssues, MAX_PLANNING_BYTES, parsePlanningDraft, serializePlanningDraft } from '../../server/planning/parser.ts';
 import type { PlanningInput } from '../../server/planning/parser.ts';
 import type { PlanningExportFormat } from '../../shared/planning-handoff.ts';
+import type { PlanningComparisonProps } from '../../shared/planning-revisions.ts';
+import { PlanningComparisonPanel } from './PlanningComparison.tsx';
 import './planning.css';
 
 export interface PlanningStudioProps {
@@ -14,6 +16,8 @@ export interface PlanningStudioProps {
   approve(projectId: string, versionId: string, expectedRevision: number): Promise<PlanningVersion>;
   toTasks(projectId: string, versionId: string): Promise<TaskDraft[]>;
   onExport?(projectId: string, version: PlanningVersion, format: PlanningExportFormat): Promise<void>;
+  onCompare?:PlanningComparisonProps['onCompare'];
+  onReplan?:PlanningComparisonProps['onReplan'];
 }
 
 const starter = '# 새 기획안\n\n## Goal\n\n## Requirements\n### REQ-01\n\n#### Acceptance criteria\n\n## Constraints\n\n## Open questions\n';
@@ -159,6 +163,7 @@ function PlanningProject(props: PlanningStudioProps) {
         });
       }}>Task 초안 생성</button>
     </div>
+    {props.onCompare&&props.onReplan&&<PlanningComparisonPanel projectId={props.projectId} versions={versions} selected={selected} dirty={dirty} busy={busy} onCompare={props.onCompare} onReplan={props.onReplan}/>}
     {props.showTaskPreview !== false && tasks.length > 0 && <section aria-label="Task 초안"><h3>Task 초안</h3>{tasks.map((task, index) => <article key={index}>
       <h4>{task.title}</h4><p>{task.description}</p><ul>{task.acceptanceCriteria.map((criterion, i) => <li key={i}>{criterion}</li>)}</ul>
       <small>기획 버전: {task.planningVersionId}</small>

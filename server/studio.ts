@@ -4,8 +4,10 @@ import { AppError } from './errors.ts';
 import { SqlitePlanningRepository,PlanningError } from './planning/repository.ts';
 import type { PlanningInput } from './planning/parser.ts';
 import { SqliteArtifactRepository } from './visualization/artifacts.ts';
-import type { ArtifactInput,ArtifactRecord,PlanningVersion,SavedTask } from '../shared/parallel.ts';
+import type { ArtifactInput,ArtifactRecord,PlanningVersion,SavedTask,TaskDraft } from '../shared/parallel.ts';
+import type { PlanningComparison } from '../shared/planning-revisions.ts';
 import { buildExecutionBrief } from './planning/execution.ts';
+import { comparePlanningVersions } from './planning/comparison.ts';
 import { serializePlanningExport } from './planning/export.ts';
 import { serializePresentation } from './visualization/pptx.ts';
 import { parseMermaid } from '../web/visualization/mermaid.ts';
@@ -66,6 +68,37 @@ export class Studio {
     if(head?.version_id!==version.id)throw new AppError('PLANNING_VERSION_STALE',409);
     return {...buildExecutionBrief(task,version),taskId:task.id};
   }
+  comparePlanning(projectId:string,targetId:string,baseId:string):PlanningComparison {
+    this.project(projectId);
+    const versions=this.planning.list(projectId),base=versions.find(v=>v.id===baseId),target=versions.find(v=>v.id===targetId);
+    if(!base||!target)throw new AppError('VERSION_NOT_FOUND',404);
+    const tasks=this.read(projectId,'tasks') as SavedTask[],comparison=comparePlanningVersions(base,target,tasks);
+    const head=this.store.db.prepare('SELECT version_id FROM planning_heads WHERE lineage_id=?').get(target.lineageId!);
+    const targetCurrent=head?.version_id===target.id,availableLabels=target.draft.requirements.map(r=>r.label);
+    const targetTasks=tasks.filter(t=>t.planningVersionId===target.id);
+    const existingLabels=availableLabels.filter(label=>targetTasks.some(task=>task.requirementLabels.includes(label)));
+    const view={...comparison,targetCurrent,canReplan:targetCurrent&&target.state==='approved'&&!target.draft.openQuestions.length,availableLabels,existingLabels};
+    // Both predecessor and target tasks are bound, even when an unchanged
+    // requirement has no impact row. New provenance requires a fresh preview.
+    const taskIdentities=tasks.filter(t=>t.planningVersionId===base.id||t.planningVersionId===target.id).map(t=>({id:t.id,planningVersionId:t.planningVersionId,requirementLabels:t.requirementLabels}));
+    const previewDigest=createHash('sha256').update(JSON.stringify({view,head:head?.version_id??null,taskIdentities})).digest('hex');
+    return {...view,previewDigest};
+  }
+  private saveTasks(projectId:string,id:string,drafts:TaskDraft[],baseId?:string):SavedTask[] {
+    const row=this.store.db.prepare('SELECT body FROM planning_tasks WHERE project_id=? AND version_id=?').get(projectId,id);
+    const existing:SavedTask[]=row?JSON.parse(row.body as string):[],all=[...existing];
+    const predecessors=baseId?(this.read(projectId,'tasks') as SavedTask[]).filter(task=>task.planningVersionId===baseId):[];
+    const result=drafts.map(draft=>{
+      const previous=existing.find(task=>task.requirementLabels.length===1&&task.requirementLabels[0]===draft.requirementLabels[0]);
+      if(previous)return previous;
+      const task:SavedTask={...draft,id:randomUUID(),projectId,state:'draft',verification:'not_run',createdAt:new Date().toISOString(),
+        ...(baseId?{replannedFrom:{planningVersionId:baseId,taskIds:predecessors.filter(old=>old.requirementLabels.some(label=>draft.requirementLabels.includes(label))).map(old=>old.id)}}:{})};
+      all.push(task);return task;
+    });
+    if(!row)this.store.db.prepare('INSERT INTO planning_tasks VALUES(?,?,?)').run(projectId,id,JSON.stringify(all));
+    else if(all.length!==existing.length)this.store.db.prepare('UPDATE planning_tasks SET body=? WHERE project_id=? AND version_id=?').run(JSON.stringify(all),projectId,id);
+    return result;
+  }
   exportPlanning(projectId:string,id:string,revision:number,hash:string,format:'json'|'markdown'){
     this.project(projectId);
     const record=this.planning.list(projectId).find(version=>version.id===id);
@@ -103,10 +136,27 @@ export class Studio {
     if(kind==='plans'&&action==='task-drafts'){
       exact(data,[]);return this.change(projectId,'planning.tasks_created',{id},()=>{
         const drafts=this.planning.toTasks(projectId,id);
-        const previous=this.store.db.prepare('SELECT body FROM planning_tasks WHERE project_id=? AND version_id=?').get(projectId,id);
-        if(previous)return JSON.parse(previous.body as string) as SavedTask[];
-        const tasks:SavedTask[]=drafts.map(draft=>({...draft,id:randomUUID(),projectId,state:'draft',verification:'not_run',createdAt:new Date().toISOString()}));
-        this.store.db.prepare('INSERT INTO planning_tasks VALUES(?,?,?)').run(projectId,id,JSON.stringify(tasks));return tasks;
+        return this.saveTasks(projectId,id,drafts);
+      });
+    }
+    if(kind==='plans'&&action==='replan'){
+      exact(data,['requestId','baseVersionId','expectedPreviewDigest','requirementLabels']);
+      if(typeof data.requestId!=='string'||typeof data.baseVersionId!=='string'||!/^[a-f0-9-]{36}$/.test(data.baseVersionId)
+        ||typeof data.expectedPreviewDigest!=='string'||!/^[a-f0-9]{64}$/.test(data.expectedPreviewDigest)
+        ||!Array.isArray(data.requirementLabels)||data.requirementLabels.length<1||data.requirementLabels.length>100
+        ||!data.requirementLabels.every(value=>typeof value==='string'&&/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value))
+        ||new Set(data.requirementLabels).size!==data.requirementLabels.length)throw new AppError('INVALID_FIELDS',400);
+      const baseId=data.baseVersionId,labels=(data.requirementLabels as string[]).slice().sort();
+      // Canonical fields make property order and selection order irrelevant to a receipt.
+      return this.change(projectId,'planning.replanned',{requestId:data.requestId,baseVersionId:baseId,expectedPreviewDigest:data.expectedPreviewDigest,requirementLabels:labels,id},()=>{
+        const view=this.comparePlanning(projectId,id,baseId);
+        if(!view.targetCurrent)throw new AppError('PLANNING_VERSION_STALE',409);
+        if(view.target.state!=='approved')throw new AppError('NOT_APPROVED',422);
+        if(!view.canReplan)throw new AppError('UNRESOLVED_QUESTIONS',422);
+        if(view.previewDigest!==data.expectedPreviewDigest)throw new AppError('PLANNING_PREVIEW_STALE',409);
+        if(labels.some(label=>!view.availableLabels.includes(label)))throw new AppError('INVALID_REQUIREMENT_SELECTION',400);
+        const drafts=this.planning.toTasks(projectId,id).filter(draft=>labels.includes(draft.requirementLabels[0]));
+        return this.saveTasks(projectId,id,drafts,baseId);
       });
     }
     throw new AppError('NOT_FOUND',404);

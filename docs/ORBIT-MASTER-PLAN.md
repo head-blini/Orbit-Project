@@ -18,14 +18,14 @@
 - 2026-10-25 추가 사용자 지시: 기존 전체 설계 완성이 최우선이며 현재 개발 범위의 빌드/테스트/브라우저 검증을 먼저 끝낸다. 그 후 Codex/Claude Code 공식 기능을 Capability Registry에 반영하고 Solo/Cross Review/Debate/Race/Cooperate/Goal 실행 모드를 설계·연결한다.
 - 경쟁 실행은 서로 다른 worktree, 동일한 승인 요구사항 버전·base SHA·명령·E2E 시나리오를 사용한다. 결과 비교는 agent 자기평가가 아닌 실제 검증 증거에 따른다. 구독 인증과 API 과금·권한·사용량 상한을 분리하고, 미지원/미설치/미검증을 ready로 표시하지 않는다.
 - Skills/MCP/Hooks/subagents/Goal/plan/verification 인터페이스는 공식 API/CLI 재사용이 우선. 서드파티는 출처 검토·격리 실험을 거치기 전 설치하거나 활성화하지 않는다. 추가 프레임워크 의존성 도입 없음.
-- 2026-10-26 Mac 재개: 인계 branch `codex/orbit-mac-handoff-2026-10-26`, HEAD `23a9296`의 깨끗한 clone에서 계속한다. Node 24.22.1을 공식 SHA-256 검증 후 ignored `.local/toolchains`에 준비했다. Mac native resolver/진단, canonical 임시 fixture, Bedrock 기본 임시 root, 프로세스 종료 관찰, Extensions 실패 unlock 수정 후 기본 병렬 `npm run verify` 479 pass/1 Windows-only skip/0 fail·type/build0. Task17 Chrome 검증과 전체 Goal은 진행 중이다.
+- 2026-10-26 Mac 재개: 인계 branch `codex/orbit-mac-handoff-2026-10-26`, HEAD `23a9296`의 깨끗한 clone에서 계속한다. Node 24.22.1을 공식 SHA-256 검증 후 ignored `.local/toolchains`에 준비했다. Mac native resolver/진단, canonical 임시 fixture, Bedrock 기본 임시 root, 프로세스 종료 관찰, Extensions 실패 unlock 수정 후 기본 병렬 `npm run verify` 479 pass/1 Windows-only skip/0 fail·type/build0. Task17 전용 Chrome 검증은 완료했으며 전체 Goal과 Windows 최종 gate는 진행 중이다.
 
 ## 요구사항 상태 (2026-10-26 갱신)
 
 | 영역 | 실제 구현 | 남은 구현/검증 |
 |---|---|---|
 | A Dashboard/Projects | 프로젝트 등록/전환, 격리 worktree, Task/run 연결·SSE·복구·검증 승인·병합 이력 | 프로젝트 관리 확장 |
-| B Planning | Markdown/JSON 무손실 import/export, SQLite 버전·승인, Task→실제 Codex brief, 개발 증거 수동 피드백 | 버전 diff/영향 Task 재계획, decisions/provenance 확장, 선택적 AI 기획 |
+| B Planning | Markdown/JSON 무손실 import/export, SQLite 버전·승인, Task→실제 Codex brief, 개발 증거 수동 피드백, 버전 diff·영향 Task·선택 후속 Task 생성 | decisions/provenance 확장, 선택적 AI 기획 |
 | C Agent Center | Codex App Server prompt/stream/interrupt/reconnect | Task 역할·handoff, 선택형 CLI 진단/adapter, 내장 병렬 기능 연결 |
 | D Development | 격리 patch worktree·diff, 실제검증·중단·복구·리뷰승인; source 보존·별도 승인 ff 병합; JS/TS 소스 graph/잠재영향·탐색·재시작 검증 | 별도 읽기 전용 native 리뷰 연결·로컬 계약 검증 완료; 실제 AI 리뷰/다른 언어 분석 미검증 |
 | E Visualization | 제한 Mermaid flowchart/SVG, architecture, Artifact 이력·source staleness, 실제 editable PPTX/MD·브라우저 저장 검증 | PDF, sequence/C4/UML |
@@ -60,6 +60,7 @@
 - [x] Task 16: 공식 Codex 별도 읽기 전용 Native Review. bounded 정제 Diff preview/동의·source/input 결합·단일 review/start·중단·lost 복구·독립 이력 구현. 전체445/445·type/build0·Windows35/35·43PNG 통과. 실제 AI 리뷰와 전체 Cross Review executor는 별도 미검증/미구현. 계획: docs/superpowers/plans/2026-10-26-native-review.md.
 
 - [x] Task 17 로컬 수직기능: 공식 Skills/Hooks/thread-scoped MCP inventory·실행 상호 배제·60초 캐시·세션 폐기·원문 비노출·null 읽기 전용 세션 UI. Mac 기본 전체479pass/1skip·type/build0, focused39/39, 독립 리뷰의 실패 unlock 수정 후 추가 지적 없음. exact7th fixture와 Chrome CUA 2시나리오·2JPEG에서 명시 수집/캐시/restart unknown·자동 조회0·source 보존 확인. 통합 스크립트는37단계/45PNG로 확장했으나 전체 실행 및 Windows 재검증은 남아 있다. 실제 native 목록 조회도 미검증. 계획: docs/superpowers/plans/2026-10-26-extension-inventory.md.
+- [x] Task 18 로컬 수직기능: 저장 기획 버전 비교·영향 Task·명시 승인 후 선택한 후속 Task 생성. 기존 이력 보존, head/preview digest·receipt·부분 생성 후 전체 생성 경계 구현. 독립 리뷰의 저장 문서 크기 재검증·이전 Task 없는 요구사항 표시 오류를 수정했다. 최종 전체515pass/1 Windows-only skip/0fail·type/build0. 전용 Chrome CUA 비교→승인→R1 선택 생성→전체 생성→reload/restart 검증,3JPEG·console0·AI/CLI/외부요청0·source 보존·cleanup 완료. Windows/전체 통합 E2E는 별도 미검증. 계획: docs/superpowers/plans/2026-10-26-planning-revisions.md.
 
 ## 검토 초점
 

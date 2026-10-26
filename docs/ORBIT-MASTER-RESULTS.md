@@ -232,3 +232,18 @@
 - `scripts/verify-orbit-ui.mjs`에 같은2단계 및 seventh grant·IPC counters·DB 원문 부재·기존 fixture 보존 검사를 추가했다. 총37단계/예정45PNG이며 구문·diff 공백 검사 exit0, 관련 **39/39 exit0** (`.local/verification/task17-final-focused.log`). 독립 최종 리뷰 추가 지적 없음, 리뷰어 focused3/3·구문0. **전체37단계 자동 브라우저·Windows 재검증·실제 native inventory는 미실행**이다. Mac 전용2시나리오를 전체 통합 pass로 집계하지 않는다.
 - 전체 Goal은 미완료다. 다음 수직기능은 기존 Planning 버전의 차이·영향 Task를 표시하고 명시 승인 후 후속 Task를 만드는 재계획 경로이다.
 - 보존 직전 기본 `npm run verify` 재실행도 **type0·479pass/1skip/0fail·build0**, exit0(22.3초)이었다. 로그 `.local/verification/mac-task17-final-verify.log`. CUA screenshot은 실제 JPEG bytes여서 최초 PNG signature assertion이 실패했으며 파일명을 `.jpg`로 정정하고 증거 hash를 기록했다. 픽셀 변환은 하지 않았다.
+- 검증된 Mac/Task17 변경은 로컬 커밋 `4c303ff`로 보존했다. 원격 push는 하지 않았다. Git이 현재 시스템 이름/호스트 기반 committer를 자동 설정했다는 안내를 출력했으며 전역 Git 설정이나 커밋 저자 정보를 변경하지 않았다.
+
+## Planning 버전 비교·후속 Task 진행 (2026-10-26)
+
+- 기존 불변 버전과 Studio transaction/receipt를 재사용한다. 같은 lineage의 저장된 이전 버전과 내용·요구사항·영향 Task를 비교하고, 현재 승인된 head와 preview digest가 일치할 때1–100개의 선택한 요구사항에만 후속 Task를 만든다. 기존 Task/Run/승인과 코드를 변경하거나 모델을 실행하지 않는다. 새 Task에는 이전 기획/Task 식별자만 연결한다.
+- 순수 비교17/17 RED→GREEN. Studio의 미구현 compare 경로4fail→4pass, HTTP404→1pass. 합계 **22/22 exit0**, `.local/verification/planning-revisions-focused.log`. draft/stale/foreign/질문/잘못된 선택 차단, 부분 생성 후 전체 생성의 ID·provenance 보존, 재시작 receipt·JSON/선택순서 멱등성, rollback과 audit 원문 미포함을 확인했다. UI·전체 검증·독립 리뷰는 진행 중이다.
+
+### Task18 최종 로컬 검증
+
+- 최종 `npm run verify` exit0: **516 total / 515 pass / 1 Windows-only skip / 0 fail**, type0·build0,22.5초. 로그 `.local/verification/planning-revisions-final-verify.log`. 이전 전체 실행도514pass/1skip/0fail이었다.
+- preview 이후 이전 Task가 추가되면 승인할 provenance가 달라지므로 base/target 전체 Task 식별자를 digest에 포함했다. 영향 없는 label도 stale preview를 거절하는 회귀 RED→GREEN. 선택 순서·JSON key 순서가 달라도 request receipt를 재사용한다.
+- 독립 리뷰 P2 두 건 수정: (1) 유효한256KiB 미만 입력이 저장 JSON 확장 후 외부 입력 크기 제한에 걸리던 오류는 저장 구조 정규화로 분리하고 exact canonical/hash 검증을 유지했다. compact JSON/escaped Markdown262143B 회귀2건 포함 parser/export/comparator44/44. (2) 이전 Task가 없다는 이유로 새 요구사항으로 표시하던 오류는 실제 Studio/SSR 회귀로 재현 후 “연결된 이전 Task 없음”으로 수정했다. UI/service/provenance16/16.
+- 전용 Chrome CUA 증거: `.local/ui-e2e/mac-task18-B9GhIA/result.json`, `screenshots/01-draft-comparison.jpg`, `02-selected-followup.jpg`, `03-restored-comparison.jpg`(실제JPEG3개·SHA256 기록). draft 생성 차단→승인 시 preview 초기화→재비교→R1만 선택+별도 동의→1개 후속 Task 생성→전체 생성으로 R3만 추가→reload/server restart 후4개 Task·기존 ID·predecessor 연결 보존을 확인했다. 재시작 후 consent 미복원·중복 생성 차단.
+- primary/source HEAD·index·digest 및 이전 Task 원본 동일, model/run/nativeCLI/외부요청0, console warning/error0. 소유 서버2개 exit0·loopback 포트 종료·탭 종료·cleanupComplete true·cleanupErrors0. 최초 브라우저 exact label 조회는 DOM의 combobox locator로 해결했고, ignored host의 중복 binding 구문 오류는 실행 전에 수정했다.
+- Task18 전용 Mac 검증이며 전체37단계 자동 E2E와 Windows 최종 gate를 대신하지 않는다. decisions/전체 가져오기 출처 metadata·선택적 AI 기획 등 전체 Goal 미완료 항목은 계속 진행한다.

@@ -43,11 +43,14 @@ function ProjectStudio({projectId,page,post,state,canRunTask,onRunTask}:{project
         create={(_project,input)=>mutate(root+'/plans',{input})}
         revise={(_project,id,expectedRevision,input)=>mutate(`${root}/plans/${id}/revisions`,{expectedRevision,input})}
         approve={(_project,id,expectedRevision)=>post(`${root}/plans/${id}/approve`,{expectedRevision})}
+        onCompare={(_project,targetId,baseId)=>get(`${root}/plans/${targetId}/diff?baseVersionId=${encodeURIComponent(baseId)}`)}
+        onReplan={async(_project,targetId,input)=>{const saved:SavedTask[]=await mutate(`${root}/plans/${targetId}/replan`,{...input});if(alive.current)setTasks(old=>mergeStudioRecords(old,saved));return saved;}}
         toTasks={async(_project,id)=>{const saved:SavedTask[]=await post(`${root}/plans/${id}/task-drafts`,{});if(alive.current)setTasks(old=>[...old.filter(task=>task.planningVersionId!==id),...saved]);return saved;}}/>
       <section className="saved-tasks" aria-label="저장된 Task 초안"><h3>저장된 Task 초안</h3><p>현재 승인된 기획의 목표·인수조건·제약으로 실행합니다. 미결정 질문이 있으면 실행을 차단합니다.</p>
         {onRunTask&&!canRunTask&&<p>프로젝트의 작업 공간을 선택하고 에이전트 센터에서 Codex를 연결하세요. 진행 중이거나 결과가 불확실한 요청이 있으면 먼저 확인하세요.</p>}
         {!loading&&!tasks.length&&<p className="subtle">저장된 Task 초안이 없습니다. 기획안을 승인한 뒤 Task 초안을 생성하세요.</p>}{tasks.map(task=>{const run=state?.runs.filter(run=>run.taskId===task.id).at(-1);return <article key={task.id}><h4>{task.title}</h4><p>{task.description}</p><ul>{task.acceptanceCriteria.map((criterion,i)=><li key={i}>{criterion}</li>)}</ul><small>기획 {task.planningVersionId} · {run?run.execution:'실행 전'} · {run?'검증은 개발 화면에서 확인':'검증 미실행'}</small>{onRunTask&&<button disabled={!canRunTask} onClick={()=>void onRunTask(task)}>이 Task를 Codex로 실행</button>}</article>;})}
       </section>
+      <PlanningTaskProvenance tasks={tasks}/>
       <PlanningFeedbackPanel projectId={projectId} tasks={tasks} state={state}
         onPreview={input=>post(root+'/planning-feedback',input) as Promise<PlanningFeedback>}
         onDownload={feedback=>{if(alive.current)downloadStudioBlob(new Blob([feedback.markdown],{type:'text/markdown; charset=utf-8'}),`orbit-planning-feedback-${feedback.run.id}.md`);}}/>
@@ -66,6 +69,11 @@ function ProjectStudio({projectId,page,post,state,canRunTask,onRunTask}:{project
   </>;
 }
 
+
+export function PlanningTaskProvenance({tasks}:{tasks:SavedTask[]}){
+  const linked=tasks.filter(task=>task.replannedFrom);
+  return linked.length?<section className="planning-task-provenance" aria-label="후속 Task 이력"><h3>후속 Task 이력</h3>{linked.map(task=><p key={task.id}>{task.title} · 이전 기획 {task.replannedFrom!.planningVersionId} · {task.replannedFrom!.taskIds.length?`이전 Task ${task.replannedFrom!.taskIds.join(', ')}`:'연결된 이전 Task 없음'}</p>)}</section>:null;
+}
 
 export function MockProviders({connections,post}:{connections:Snapshot['connections'];post:Post}){
   const [providerId,setProviderId]=useState('bedrock'),[text,setText]=useState('합성 기획 요청 테스트'),[message,setMessage]=useState(''),[busy,setBusy]=useState(false);
