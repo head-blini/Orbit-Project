@@ -1,15 +1,19 @@
-.planning-studio { padding: 1.25rem; color: #e7edf7; background: #101827; border: 1px solid #344256; border-radius: .75rem; font: 1rem/1.5 system-ui, sans-serif; }
+.planning-studio { padding: 1.25rem; color: #e7edf7; background: #131c25; border: 1px solid #2b3946; border-radius: .75rem; font: 13px/1.6 system-ui, sans-serif; }
 .planning-studio h2, .planning-studio h3, .planning-studio h4, .planning-studio h5 { margin: .5rem 0; }
 .planning-studio p { white-space: pre-wrap; overflow-wrap: anywhere; }
 .planning-toolbar { display: flex; flex-wrap: wrap; gap: .75rem; align-items: end; margin: 1rem 0; }
 .planning-studio label { display: flex; flex-direction: column; gap: .35rem; }
-.planning-studio button, .planning-studio select, .planning-studio textarea, .planning-studio input { font: inherit; color: inherit; background: #1b293c; border: 1px solid #73859c; border-radius: .3rem; padding: .5rem; max-width: 100%; }
+.planning-studio button, .planning-studio select, .planning-studio textarea, .planning-studio input { font: inherit; color: inherit; background: #0d151e; border: 1px solid #3a4b5a; border-radius: .3rem; padding: .5rem; max-width: 100%; }
 .planning-studio button { cursor: pointer; }
 .planning-studio button:disabled, .planning-studio select:disabled { opacity: .55; cursor: default; }
 .planning-studio :focus-visible { outline: 3px solid #79b8ff; outline-offset: 2px; }
 .planning-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1.5rem; }
 .planning-editor textarea { min-height: 26rem; resize: vertical; font-family: ui-monospace, monospace; }
-.planning-preview { padding: 1rem; background: #182438; border-radius: .4rem; }
-.planning-studio article { border-top: 1px solid #45556a; padding: .75rem 0; }
+.planning-preview { padding: 1rem; background: #101923; border-radius: .4rem; }
+.planning-studio article { border-top: 1px solid #2b3946; padding: .75rem 0; }
 .planning-studio li, .planning-studio small { white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (max-width: 850px) { .planning-columns { grid-template-columns: 1fr; } }
+
+.planning-studio header{display:block;margin-bottom:16px}.planning-studio header h2{font-size:18px}.planning-studio header p{color:#98aabb;font-size:13px}.planning-editor textarea{min-height:320px;width:100%}.planning-studio input[type=file]{width:100%}.planning-toolbar>label{min-width:0}.planning-studio .planning-columns{gap:24px}.planning-toolbar button{min-height:36px}.planning-columns>div{min-width:0}@media(max-width:1100px){.planning-columns{grid-template-columns:minmax(0,1fr)}}
+.planning-feedback-controls{display:grid;gap:8px;max-width:780px}.planning-feedback-controls select,.planning-feedback-controls textarea{width:100%;min-width:0}.planning-feedback-controls textarea{resize:vertical}.planning-feedback-preview{margin-top:20px}.planning-feedback-preview pre{max-height:480px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;padding:16px;border:1px solid var(--border,#2b3946);border-radius:8px;background:var(--bg,#101923)}.planning-feedback p,.planning-export-actions p{overflow-wrap:anywhere}.planning-export-actions p{flex-basis:100%;margin:0}
+.planning-feedback-checks{overflow-x:auto}.planning-feedback-checks table{width:100%;border-collapse:collapse}.planning-feedback-checks th,.planning-feedback-checks td{padding:8px;text-align:left;border-bottom:1px solid var(--border,#2b3946);overflow-wrap:anywhere}.planning-feedback-checks caption{text-align:left;margin-bottom:8px}

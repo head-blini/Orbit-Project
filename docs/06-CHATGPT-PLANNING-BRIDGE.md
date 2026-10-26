@@ -1,6 +1,8 @@
 # ChatGPT 웹 ↔ AI Coding Control Center : 기획 인계 설계 v0.3 (선택적 커넥터)
 
-작성일: 2026-10-25 · 상태: **설계안 / 미구현**
+작성일: 2026-10-25 · 상태: **설계 및 일부 구현**
+
+2026-10-26 구현 범위: 직접 편집·Markdown/JSON v1 가져오기·버전·승인·Task 실행, 저장 버전 내보내기 및 Task/Run 기반 수동 피드백을 제공한다. 아래 schema 0.2 예시는 초기 설계이며 현재 가져오기는 `server/planning/parser.ts`의 schema 1.0 계약을 따른다. decisions와 전체 출처 metadata, 버전 diff·영향 Task 재계획, ChatGPT 원격 MCP는 아직 구현하지 않았다. 피드백은 원시 로그·코드·명령·모델 응답을 제외하고 구조화된 실제 기록만 제공한다. 자동 외부 전송이나 기존 승인본 변경은 없다. 최신 검증 결과는 ORBIT-MASTER-RESULTS.md를 참조한다.
 
 > 이 문서는 `07-PROVIDER-NEUTRAL-CORE.md`의 공급자 중립 기획 구조에 **ChatGPT 웹을 연결하는 방법만** 설명한다. 시스템의 필수 시작 경로는 내장 편집기 + 제공자 중립 import다.
 

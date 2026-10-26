@@ -1,6 +1,7 @@
 import type { PlanningDraft, PlanningParseResult, PlanningSource } from '../../shared/parallel.ts';
 
 export const MAX_PLANNING_BYTES = 256 * 1024;
+export const PLANNING_EXPORT_MARKER = '<!-- orbit-planning-export:v1 -->';
 export interface PlanningInput { format: 'markdown' | 'json'; text: string; source: PlanningSource }
 type Issue = { field: string; code: string };
 const fail = (field: string, code: string): PlanningParseResult => ({ ok: false, issues: [{ field, code }] });
@@ -15,7 +16,17 @@ export function parsePlanningDraft(input: PlanningInput): PlanningParseResult {
   if (typeof input.text !== 'string') return fail('text', 'INVALID_TEXT');
   // The character check prevents allocating a large encoded buffer for obviously oversized input.
   if (input.text.length > MAX_PLANNING_BYTES || new TextEncoder().encode(input.text).length > MAX_PLANNING_BYTES) return fail('text', 'INPUT_TOO_LARGE');
-  if (input.format === 'markdown') return parseMarkdown(input.text.replace(/^\uFEFF/, ''), input.source);
+  if (input.format === 'markdown') {
+    const text = input.text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
+    if (text.startsWith(PLANNING_EXPORT_MARKER)) {
+      // Only one exact JSON envelope; no competing Markdown body or authority metadata.
+      const prefix = `${PLANNING_EXPORT_MARKER}\n\`\`\`json\n`;
+      const body = text.endsWith('\n') ? text.slice(0, -1) : text;
+      if (!body.startsWith(prefix) || !body.endsWith('\n```')) return fail('text', 'INVALID_EXPORT_ENVELOPE');
+      return parsePlanningDraft({format:'json', text:body.slice(prefix.length, -4), source:input.source});
+    }
+    return parseMarkdown(text, input.source);
+  }
   if (input.format !== 'json') return fail('format', 'INVALID_FORMAT');
   let value: unknown;
   try { value = JSON.parse(input.text.replace(/^\uFEFF/, '')); } catch { return fail('text', 'INVALID_JSON'); }

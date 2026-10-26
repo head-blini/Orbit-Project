@@ -7,17 +7,62 @@ import { request } from 'node:http';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { ProviderStatus } from '../shared/types.ts';
+import type { NativeProbeReport } from '../shared/capabilities.ts';
 
 async function fixture(){
-  const store=new Store(':memory:');let submissions=0;const projectCalls:unknown[]=[];
+  const store=new Store(':memory:');let submissions=0,probes=0;const projectCalls:unknown[]=[];
   const controller={store,snapshot:()=>({provider:'disconnected',issue:null,threadId:null,workspace:'fixture',readOnly:true,runs:store.runs(),lastSeq:store.lastSeq()}),connect:async()=>{},submit:async(input:any)=>{submissions++;return {id:'r',...input};},interrupt:async()=>{}} as unknown as Controller;
   Object.assign(controller,{registerProject:(path:string)=>{projectCalls.push(path);return {id:'project'};},createWorktree:(id:string)=>{projectCalls.push(id);return {id:'workspace'};},selectWorkspace:async(id:string)=>{projectCalls.push(id);},workspaceDiff:(id:string)=>({workspaceId:id,files:[]})});
   const assets=mkdtempSync(join(tmpdir(),'aicc-assets-'));writeFileSync(join(assets,'index.html'),'<!doctype html><title>Fixture</title>');
-  const server=createHttpServer(controller,assets);await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));
+  const probeReport={checkedAt:'2026-10-25T00:00:00.000Z',codex:{status:'found' as const,version:'0.164.0'},claude:{status:'not_found_on_path' as const,version:null}};
+  const server=createHttpServer(controller,assets,{nativeProbe:{get:()=>null,refresh:async()=>{probes++;return probeReport;}}});await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));
   const origin=`http://127.0.0.1:${(server.address() as any).port}`;
   const response=await fetch(origin+'/api/session');const cookie=response.headers.get('set-cookie')!.split(';')[0];const {csrfToken}=await response.json() as any;
-  return {origin,cookie,csrfToken,store,projectCalls,count:()=>submissions,close:async()=>{server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));store.close();}};
+  return {origin,cookie,csrfToken,store,projectCalls,probes:()=>probes,count:()=>submissions,close:async()=>{server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));store.close();}};
 }
+
+test('capability reads are inert; native version probes require exact body, session, Origin and CSRF',async()=>{
+  const f=await fixture();try{
+    assert.equal((await fetch(f.origin+'/api/capabilities')).status,401);
+    assert.equal((await fetch(f.origin+'/api/capabilities',{headers:{cookie:f.cookie,Origin:'http://evil.test'}})).status,403);
+    const response=await fetch(f.origin+'/api/capabilities',{headers:{cookie:f.cookie}});
+    assert.equal(response.status,200);
+    assert.equal((await response.json() as any).providers[0].capabilities[0].effective,'connection_required');
+    assert.equal(f.probes(),0);
+    const headers={cookie:f.cookie,Origin:f.origin,'Content-Type':'application/json','X-CSRF-Token':f.csrfToken};
+    assert.equal((await fetch(f.origin+'/api/capabilities/probe',{method:'POST',headers:{...headers,'X-CSRF-Token':''},body:'{}'})).status,403);
+    assert.equal((await fetch(f.origin+'/api/capabilities/probe',{method:'POST',headers,body:'{"command":"evil"}'})).status,400);
+    assert.equal(f.probes(),0);
+    const probe=await fetch(f.origin+'/api/capabilities/probe',{method:'POST',headers,body:'{}'});
+    assert.equal(probe.status,200);
+    const registry=await probe.json() as any;
+    assert.equal(registry.providers[0].nativeProbe.version,'0.164.0');
+    assert.equal(registry.providers[1].nativeProbe.status,'not_found_on_path');
+    assert.equal(registry.providers[1].authStatus,'unknown');
+    assert.equal(f.probes(),1);assert.equal(f.count(),0);
+  }finally{await f.close();}
+});
+
+test('capability probe reports current connection after awaiting version diagnosis',async()=>{
+  const store=new Store(':memory:');let provider:ProviderStatus='ready';
+  let finish!:(report:NativeProbeReport)=>void,started!:()=>void;
+  const began=new Promise<void>(resolve=>{started=resolve;});
+  const pending=new Promise<NativeProbeReport>(resolve=>{finish=resolve;});
+  const controller={store,snapshot:()=>({provider})} as unknown as Controller;
+  const server=createHttpServer(controller,'unused',{nativeProbe:{get:()=>null,refresh:()=>{started();return pending;}}});
+  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const origin='http://127.0.0.1:'+(server.address() as {port:number}).port;
+  try{
+    const session=await fetch(origin+'/api/session'),{csrfToken}=await session.json() as {csrfToken:string};
+    const result=fetch(origin+'/api/capabilities/probe',{method:'POST',headers:{Origin:origin,Cookie:session.headers.get('set-cookie')!.split(';')[0],'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:'{}'});
+    await began;provider='disconnected';
+    finish({checkedAt:'2026-10-25T00:00:00.000Z',codex:{status:'found',version:'0.164.0'},claude:{status:'unknown',version:null}});
+    const registry=await (await result).json() as any;
+    assert.equal(registry.providers[0].connection,'disconnected');
+    assert.equal(registry.providers[0].capabilities[0].effective,'connection_required');
+  }finally{server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));store.close();}
+});
 test('loopback API requires session and rejects cross-origin, forged Host and CSRF before mutation',async()=>{
   const f=await fixture();try{
     assert.equal((await fetch(f.origin+'/api/state')).status,401);

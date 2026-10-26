@@ -6,8 +6,10 @@ import { validateMermaid, parseMermaid, generateArchitectureMermaid, validateArc
 import { toPresentationDocument,exportPresentation,validatePresentationDocument } from '../web/visualization/presentation.ts';
 import { buildTimeline } from '../web/visualization/timeline.ts';
 import { ArtifactRepository } from '../server/visualization/artifacts.ts';
-import { readFile } from 'node:fs/promises';
-import { transform } from 'esbuild';
+import { serializePresentation } from '../server/visualization/pptx.ts';
+import { readFileSync } from 'node:fs';
+import { registerHooks } from 'node:module';
+import ts from 'typescript';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
@@ -87,6 +89,67 @@ test('presentation validation rejects images, external fields and dangling conne
   assert.equal(validatePresentationDocument({...document,path:'C:/example'}),false);
 });
 
+test('presentation save validation rejects zero-sized boxes just as standalone PPTX export does',()=>{
+  for(const type of ['shape','text'])for(const dimension of ['width','height']) {
+    const doc=toPresentationDocument(graph);
+    const element=doc.slides[0].elements.find(e=>e.type===type)! as {width:number;height:number};
+    element[dimension as 'width'|'height']=0;
+    assert.equal(validatePresentationDocument(doc),false,`${type} ${dimension}`);
+    assert.throws(()=>serializePresentation(doc),/INVALID_PRESENTATION/);
+    assert.throws(()=>new ArtifactRepository().create('p1',{kind:'presentation',source:JSON.stringify(doc),metadata:{}}),/INVALID_ARTIFACT/);
+  }
+});
+
+test('presentation save validation rejects boxes extending outside the canvas just as PPTX export does',()=>{
+  for(const type of ['shape','text'])for(const axis of ['x','y']) {
+    const doc=toPresentationDocument(graph),slide=doc.slides[0];
+    const element=slide.elements.find(e=>e.type===type)! as {x:number;y:number};
+    element[axis as 'x'|'y']=axis==='x'?slide.width:slide.height;
+    assert.equal(validatePresentationDocument(doc),false,`${type} ${axis}`);
+    assert.throws(()=>serializePresentation(doc),/INVALID_PRESENTATION/);
+    assert.throws(()=>new ArtifactRepository().create('p1',{kind:'presentation',source:JSON.stringify(doc),metadata:{}}),/INVALID_ARTIFACT/);
+  }
+});
+
+test('presentation save validation rejects XML-invalid text, kinds and identifiers before export',()=>{
+  for(const value of ['bad\u0000value','bad\u000bvalue','bad\ufffevalue','bad\uffffvalue','bad\ud800value','bad\udfffvalue']) {
+    const documents=Array.from({length:5},()=>toPresentationDocument(graph));
+    documents[0].slides[0].elements.find(e=>e.type==='text')!.text=value;
+    documents[1].slides[0].elements.find(e=>e.type==='shape')!.kind=value;
+    documents[2].slides[0].elements.find(e=>e.type==='text')!.id=value;
+    documents[3].slides[0].elements.find(e=>e.type==='connector')!.id=value;
+    documents[4].slides[0].id=value;
+    for(const doc of documents) {
+      assert.equal(validatePresentationDocument(doc),false,JSON.stringify(value));
+      assert.throws(()=>serializePresentation(doc),/INVALID_PRESENTATION/);
+      assert.throws(()=>new ArtifactRepository().create('p1',{kind:'presentation',source:JSON.stringify(doc),metadata:{}}),/INVALID_ARTIFACT/);
+    }
+  }
+});
+
+test('presentation validation keeps exportable Unicode and boundary boxes but rejects empty identifiers and byte overflow',()=>{
+  const doc=toPresentationDocument(graph),slide=doc.slides[0];
+  const text=slide.elements.find(e=>e.type==='text')!;
+  text.text='한글 😀\tXML & <tag>\r\n두 번째 줄';
+  text.x=0;text.y=0;text.width=slide.width;text.height=slide.height;
+  assert.equal(validatePresentationDocument(doc),true);
+  assert.ok(serializePresentation(doc).byteLength>0);
+  for(const value of ['', '  ', 'x'.repeat(161)]) {
+    const bad=toPresentationDocument(graph);bad.slides[0].id=value;
+    assert.equal(validatePresentationDocument(bad),false);
+    assert.throws(()=>serializePresentation(bad),/INVALID_PRESENTATION/);
+  }
+  for(const value of ['', '  ']) {
+    const bad=toPresentationDocument(graph);bad.slides[0].elements.find(e=>e.type==='text')!.id=value;
+    assert.equal(validatePresentationDocument(bad),false);
+    assert.throws(()=>serializePresentation(bad),/INVALID_PRESENTATION/);
+  }
+  const large=toPresentationDocument(graph);
+  large.slides[0].elements=[large.slides[0].elements[0],...Array.from({length:799},(_,i)=>({type:'text' as const,id:`text${i}`,x:0,y:0,width:10,height:10,text:'한'.repeat(160)}))];
+  assert.equal(validatePresentationDocument(large),false);
+  assert.throws(()=>serializePresentation(large),/INVALID_PRESENTATION/);
+});
+
 test('Artifact revisions preserve exact source, server authority and detached history',()=>{
   const repo=new ArtifactRepository();
   const input={kind:'mermaid' as const,source:source+'\n',metadata:{title:'Original'}};
@@ -160,20 +223,22 @@ test('Artifact list and history mutations never alter stored originals',()=>{
   assert.throws(()=>repo.revise('p1',created.id,1,{kind:'architecture',source:JSON.stringify(graph),metadata:{}}),/ARTIFACT_KIND_IMMUTABLE/);
 });
 
-// Transform JSX in memory, resolving only observed local imports. This checks rendered
-// output without requiring a browser or writing transpiled files into the repository.
+// Transform the local component dependency tree in memory. This is a rendering
+// check, not a browser test; assertions still inspect the actual production JSX.
 async function components() {
-  const url=new URL('../web/visualization/Studio.tsx',import.meta.url);
-  const transformed=await transform(await readFile(url,'utf8'),{loader:'tsx',format:'esm',jsx:'automatic'});
-  const code=transformed.code.replace(/from "([^"]+)"/g,(_match,spec:string)=>`from ${JSON.stringify(spec.startsWith('.')?new URL(spec,url).href:import.meta.resolve(spec))}`);
-  return import('data:text/javascript;base64,'+Buffer.from(code).toString('base64'));
+  const root=new URL('../web/visualization/',import.meta.url).href;
+  const hooks=registerHooks({load(url,context,nextLoad){
+    if(url.startsWith(root)&&url.endsWith('.tsx'))return {format:'module',shortCircuit:true,source:ts.transpileModule(readFileSync(new URL(url),'utf8'),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText};
+    return nextLoad(url,context);
+  }});
+  try{return await import('../web/visualization/Studio.tsx');}finally{hooks.deregister();}
 }
 
 test('standalone UI renders an inert preview and keeps unavailable PPTX export disabled',async()=>{
   const {VisualizationStudio,ArchitecturePreview}=await components();
   const html=renderToStaticMarkup(createElement(VisualizationStudio,{projectId:'p1',artifacts:[]}));
-  assert.match(html,/Visualization Studio/);assert.match(html,/PPTX generation foundation only/);
-  assert.match(html,/<button[^>]*disabled=""[^>]*>Export PPTX/);
+  assert.match(html,/Visualization Studio/);assert.match(html,/PPTX 문서 구조만 지원합니다/);
+  assert.match(html,/<button[^>]*disabled=""[^>]*>PPTX 내보내기/);
   const preview=renderToStaticMarkup(createElement(ArchitecturePreview,{graph}));
   assert.match(preview,/<svg/);assert.match(preview,/Local server/);assert.doesNotMatch(preview,/<image|foreignObject|<script/);
   assert.match(preview,/d="M 260 90 L 300 90"/,'same-row connector must use facing sides so its arrowhead remains visible');
@@ -202,10 +267,10 @@ test('reload cleanup ignores an old in-flight failure and allows an explicit ret
   assert.equal(failures,0);assert.equal(attempts,1);
 });
 
-test('timeline UI labels completed runs unverified and never renders foreign diffs',async()=>{
+test('timeline UI refers to separate verification evidence and never renders foreign diffs',async()=>{
   const {RunTimeline}=await components();
   const html=renderToStaticMarkup(createElement(RunTimeline,{view:buildTimeline(snapshot,[]),snapshot,onReload:async()=>{},diff:{workspaceId:'w2',baseSha:'abc',files:[{path:'foreign.txt',status:'M',patch:'secret fixture'}]}}));
-  assert.match(html,/Verification: not_run/);assert.doesNotMatch(html,/foreign.txt|secret fixture/);
+  assert.match(html,/검증: 개발 화면에서 확인/);assert.doesNotMatch(html,/검증: 통과|검증 성공|foreign.txt|secret fixture/);
   const matching=renderToStaticMarkup(createElement(RunTimeline,{view:buildTimeline(snapshot,[]),snapshot,onReload:async()=>{},diff:{workspaceId:'w1',baseSha:'abc',files:[{path:'<img>.txt',status:'M',patch:'<script>fixture</script>'}]}}));
   assert.match(matching,/&lt;script&gt;fixture&lt;\/script&gt;/);assert.doesNotMatch(matching,/<script>/);
 });

@@ -1,0 +1,169 @@
+{
+  "scope": "Task16 Native Review baseline, before Task17 inventory",
+  "status": "passed",
+  "startedAt": "2026-10-25T18:20:03.545Z",
+  "finishedAt": "2026-10-25T18:24:43.047Z",
+  "typecheckExit": 0,
+  "tests": {
+    "exit": 0,
+    "passed": 445,
+    "failed": 0
+  },
+  "buildExit": 0,
+  "browserScenarios": 35,
+  "screenshots": 43,
+  "steps": [
+    {
+      "name": "CLI 설치·명령 확인",
+      "status": "passed"
+    },
+    {
+      "name": "스크립트 정적 검사",
+      "status": "passed"
+    },
+    {
+      "name": "타입 검사",
+      "status": "passed"
+    },
+    {
+      "name": "전체 테스트",
+      "status": "passed"
+    },
+    {
+      "name": "제품 빌드",
+      "status": "passed"
+    },
+    {
+      "name": "임시 Git·DB 서버",
+      "status": "passed"
+    },
+    {
+      "name": "Chrome 접속",
+      "status": "passed"
+    },
+    {
+      "name": "전체 메뉴 이동",
+      "status": "passed"
+    },
+    {
+      "name": "프로젝트 등록·선택",
+      "status": "passed"
+    },
+    {
+      "name": "작업 공간·Git Diff",
+      "status": "passed"
+    },
+    {
+      "name": "Planning 저장·승인·Task",
+      "status": "passed"
+    },
+    {
+      "name": "Visualization 저장·복구",
+      "status": "passed"
+    },
+    {
+      "name": "모의 개인정보 반출 차단",
+      "status": "passed"
+    },
+    {
+      "name": "새로고침 데이터 복원",
+      "status": "passed"
+    },
+    {
+      "name": "서버 재시작 데이터 복원",
+      "status": "passed"
+    },
+    {
+      "name": "1366×768 전체 메뉴·캡처",
+      "status": "passed"
+    },
+    {
+      "name": "1744×864 전체 메뉴·캡처",
+      "status": "passed"
+    },
+    {
+      "name": "원본 fixture 보존",
+      "status": "passed"
+    },
+    {
+      "name": "실제 Node 검증·사용자 승인",
+      "status": "passed"
+    },
+    {
+      "name": "소스 변경 후 검증 무효화·복구",
+      "status": "passed"
+    },
+    {
+      "name": "실제 소스 그래프·파일 탐색·Artifact",
+      "status": "passed"
+    },
+    {
+      "name": "소스 그래프·Artifact 무효화·복구",
+      "status": "passed"
+    },
+    {
+      "name": "Model Hub 명시 동의·로컬 HTTP·반출 차단",
+      "status": "passed"
+    },
+    {
+      "name": "Model Hub 중단·이력 복구",
+      "status": "passed"
+    },
+    {
+      "name": "Planning MD·JSON 실제 다운로드·재가져오기",
+      "status": "passed"
+    },
+    {
+      "name": "Planning 개발 증거·질문 폐기·승인 보존",
+      "status": "passed"
+    },
+    {
+      "name": "Merge 전용 검증·리뷰 승인·후보 생성",
+      "status": "passed"
+    },
+    {
+      "name": "Merge 별도 승인·실제 ff 반영·source 보존",
+      "status": "passed"
+    },
+    {
+      "name": "Merge 새로고침·재시작 기록 복구",
+      "status": "passed"
+    },
+    {
+      "name": "Workflow 전용 DAG 저장·미리보기·실제 명령 통과",
+      "status": "passed"
+    },
+    {
+      "name": "Workflow 실패·종속 단계 생략·명시 재시도·버전 보존",
+      "status": "passed"
+    },
+    {
+      "name": "Workflow 실제 중단·새로고침·재시작·재실행 없음",
+      "status": "passed"
+    },
+    {
+      "name": "Bedrock 명시 동의·없는 CLI 실패·진단 복구·전송 차단",
+      "status": "passed"
+    },
+    {
+      "name": "Native Review 정확한 입력·동의·mock 완료·복구",
+      "status": "passed"
+    },
+    {
+      "name": "Native Review mock 시작·중단·복구·재실행 없음",
+      "status": "passed"
+    }
+  ],
+  "cleanup": {
+    "errors": [],
+    "browserClosed": true,
+    "allPidsGone": true,
+    "ownedServerPids": 10,
+    "allPortsClosed": true
+  },
+  "actualAI": false,
+  "actualAWS": false,
+  "actualCLI": false,
+  "originalResultSHA256": "602d17ba223d7304dfccd94d2278aa702d2666cfc518ddfb2e7c61f51ec830c8",
+  "note": "Portable summary of Windows evidence; raw screenshots/temp repositories/logs are intentionally not in Git. Does not validate Task17 or macOS."
+}

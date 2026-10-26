@@ -1,5 +1,7 @@
 # Visualization integration handoff
 
+Integration update (2026-10-25): the Studio and timeline are mounted; Artifact SQLite/API persistence is connected. The following text is the original module handoff. See [product integration results](../ORBIT-INTEGRATION-RESULTS.md). Actual PPTX export remains unsupported; sandbox product build and browser acceptance remain unverified.
+
 Status: independently implemented modules; not mounted in the application. No shared types, Controller, HTTP, SQLite, package manifests, security core, or other worktrees were changed. No provider or paid API is required.
 
 ## Shared contract prerequisite

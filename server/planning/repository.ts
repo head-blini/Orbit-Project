@@ -3,6 +3,7 @@ import { isDeepStrictEqual } from 'node:util';
 import type { PlanningVersion, TaskDraft } from '../../shared/parallel.ts';
 import { approvalIssues, parsePlanningDraft } from './parser.ts';
 import type { PlanningInput } from './parser.ts';
+import type { DatabaseSync } from 'node:sqlite';
 
 export interface PlanningRepository {
   create(projectId: string, input: PlanningInput): PlanningVersion;
@@ -10,6 +11,52 @@ export interface PlanningRepository {
   approve(projectId: string, versionId: string, expectedRevision: number): PlanningVersion;
   list(projectId: string): PlanningVersion[];
   toTasks(projectId: string, versionId: string): TaskDraft[];
+}
+
+/** SQLite mutations are called inside the host Store.transaction (including audit/receipts). */
+export class SqlitePlanningRepository implements PlanningRepository {
+  private db:DatabaseSync;
+  constructor(db:DatabaseSync){this.db=db;}
+  create(projectId:string,input:PlanningInput):PlanningVersion {
+    const version=new InMemoryPlanningRepository().create(projectId,input);
+    version.lineageId=version.id;version.createdAt=new Date().toISOString();
+    this.db.prepare('INSERT INTO planning_versions VALUES(?,?,?,?,?)').run(version.id,projectId,version.lineageId,JSON.stringify(version),JSON.stringify(input));
+    this.db.prepare('INSERT INTO planning_heads VALUES(?,?)').run(version.lineageId,version.id);
+    return version;
+  }
+  private get(projectId:string,id:string):PlanningVersion {
+    validateId(projectId);validateId(id);
+    const row=this.db.prepare('SELECT body FROM planning_versions WHERE id=? AND project_id=?').get(id,projectId);
+    if(!row)throw new PlanningError('VERSION_NOT_FOUND');return JSON.parse(row.body as string);
+  }
+  private current(projectId:string,id:string,revision:number):PlanningVersion {
+    const version=this.get(projectId,id);
+    const head=this.db.prepare('SELECT version_id FROM planning_heads WHERE lineage_id=?').get(version.lineageId!);
+    if(!Number.isSafeInteger(revision)||revision!==version.revision||head?.version_id!==id)throw new PlanningError('REVISION_CONFLICT');
+    return version;
+  }
+  revise(projectId:string,id:string,revision:number,input:PlanningInput):PlanningVersion {
+    const previous=this.current(projectId,id,revision);
+    const next=new InMemoryPlanningRepository().create(projectId,input);
+    next.revision=previous.revision+1;next.lineageId=previous.lineageId;next.createdAt=new Date().toISOString();
+    if(previous.state==='draft'){
+      previous.state='superseded';this.db.prepare('UPDATE planning_versions SET body=? WHERE id=?').run(JSON.stringify(previous),id);
+    }
+    this.db.prepare('INSERT INTO planning_versions VALUES(?,?,?,?,?)').run(next.id,projectId,next.lineageId!,JSON.stringify(next),JSON.stringify(input));
+    this.db.prepare('UPDATE planning_heads SET version_id=? WHERE lineage_id=?').run(next.id,next.lineageId!);
+    return next;
+  }
+  approve(projectId:string,id:string,revision:number,actor='local-user'):PlanningVersion {
+    const version=this.current(projectId,id,revision);const issues=approvalIssues(version.draft);
+    if(issues.length)throw new PlanningError('INCOMPLETE_DRAFT',issues);
+    version.state='approved';version.approvedAt??=new Date().toISOString();version.approvedBy??=actor;
+    this.db.prepare('UPDATE planning_versions SET body=? WHERE id=?').run(JSON.stringify(version),id);
+    return version;
+  }
+  list(projectId:string):PlanningVersion[]{
+    validateId(projectId);return this.db.prepare('SELECT body FROM planning_versions WHERE project_id=? ORDER BY rowid').all(projectId).map(row=>JSON.parse(row.body as string));
+  }
+  toTasks(projectId:string,id:string):TaskDraft[]{return toTaskDrafts(snapshot(this.get(projectId,id)));}
 }
 
 export class PlanningError extends Error {

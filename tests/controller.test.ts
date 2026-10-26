@@ -24,6 +24,46 @@ class FakeRpc extends EventEmitter {
 }
 function setup(){const rpc=new FakeRpc();const store=new Store(':memory:');const dir=createWorkspace(mkdtempSync(join(tmpdir(),'aicc-controller-')));return {rpc,store,c:new Controller(store,dir,()=>rpc)};}
 
+test('credential output stays redacted in every persisted run and event across chunks and interleaved items',async()=>{
+  const {c,rpc,store}=setup();try{
+    await c.connect();const run=await c.submit({requestId:'output-redaction-request',prompt:'Explain the synthetic fixture'});
+    const emit=(method:string,params:object)=>rpc.emit('notification',{method,params:{threadId:'thread-fixture',turnId:'turn-fixture',...params}});
+    const secret='synthetic-output-secret';
+    emit('item/agentMessage/delta',{itemId:'a',delta:'AWS_SECRET_ACCESS_KEY='+secret.slice(0,10)});
+    emit('item/completed',{item:{id:'b',type:'agentMessage',text:'Other message completed'}});
+    assert.equal(JSON.stringify(store.eventsAfter(0)).includes(secret.slice(0,10)),false);
+    emit('item/agentMessage/delta',{itemId:'a',delta:secret.slice(10)+'\n'});
+    emit('item/agentMessage/delta',{itemId:'partial',delta:'ghp_fixture'});
+    emit('item/completed',{item:{id:'other',type:'agentMessage',text:'Interleaved completion'}});
+    assert.equal(JSON.stringify(store.eventsAfter(0)).includes('ghp_fixture'),false);
+    emit('item/agentMessage/delta',{itemId:'partial',delta:'x'.repeat(30)+'\n'});
+    emit('item/agentMessage/delta',{itemId:'aws-id',delta:'AKIAAAAAAA'});
+    emit('item/completed',{item:{id:'aws-other',type:'agentMessage',text:'Other item'}});
+    assert.equal(JSON.stringify(store.eventsAfter(0)).includes('AKIAAAAAAA'),false);
+    emit('item/agentMessage/delta',{itemId:'aws-id',delta:'A'.repeat(10)+'\n'});
+    emit('item/agentMessage/delta',{itemId:'c',delta:'-----BEGIN PRIVATE KEY-----\n'});
+    emit('item/agentMessage/delta',{itemId:'c',delta:'SYNTHETIC_PRIVATE_BODY\n'});
+    emit('item/completed',{item:{id:'d',type:'agentMessage',text:'Another message'}});
+    emit('item/agentMessage/delta',{itemId:'c',delta:'-----END PRIVATE KEY-----\n'});
+    emit('turn/completed',{turn:{id:'turn-fixture',status:'completed'}});
+    for(const value of [JSON.stringify(store.eventsAfter(0)),JSON.stringify(store.runs()),JSON.stringify(c.snapshot())]){
+      assert.equal(value.includes(secret),false);assert.equal(value.includes('SYNTHETIC_PRIVATE_BODY'),false);
+    }
+    assert.equal(store.getRun(run.id)!.execution,'completed');assert.match(store.getRun(run.id)!.response,/REDACTED/);
+  }finally{await c.close();store.close();}
+});
+
+test('server outbound policy blocks personal data and JSON credentials before Codex dispatch or persistence',async()=>{
+  const {c,rpc,store}=setup();try{
+    await c.connect();
+    for(const prompt of ['Contact example@example.test','{"api_key":"synthetic-value"}','AWS_SECRET_ACCESS_KEY=synthetic-value']){
+      await assert.rejects(c.submit({requestId:'request-privacy',prompt}),/PERSONAL_DATA_BLOCKED|CREDENTIAL_LIKE_INPUT/);
+      assert.equal(rpc.starts,0);assert.equal(store.runs().length,0);
+      assert.equal(JSON.stringify(store.eventsAfter(0)).includes(prompt),false);
+    }
+  }finally{await c.close();store.close();}
+});
+
 test('MCP servers are disabled before thread creation and again on resume without exporting configuration',async()=>{
   const {c,rpc,store}=setup();const original=rpc.request.bind(rpc);
   rpc.request=(method,params)=>method==='config/read'?Promise.resolve({config:{mcp_servers:{fixture:{command:'private-command',env:{EXAMPLE:'private-value'}}}}}):original(method,params);
@@ -46,6 +86,13 @@ test('unreadable MCP configuration prevents thread creation, not merely inferenc
     assert.equal(rpc.sent.some(x=>x.method==='thread/start'),false);
     assert.equal(rpc.starts,0);
   }finally{await c.close();store.close();}
+});
+
+test('null MCP configuration fails before native main-thread creation just as in isolated review',async()=>{
+  const {c,rpc,store}=setup(),original=rpc.request.bind(rpc);
+  rpc.request=(method,params)=>method==='config/read'?Promise.resolve({config:{mcp_servers:null}}):original(method,params);
+  try{await assert.rejects(c.connect(),/MCP_ISOLATION_REQUIRED/);assert.equal(rpc.sent.some(call=>call.method==='thread/start'),false);assert.equal(rpc.starts,0);}
+  finally{await c.close();store.close();}
 });
 
 test('explicitly disabled known MCP entries are accepted; unknown or callable entries are rejected',async()=>{

@@ -1,0 +1,55 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {randomUUID} from 'node:crypto';
+import {execFileSync} from 'node:child_process';
+import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,existsSync} from 'node:fs';
+import {join,resolve} from 'node:path';
+import {tmpdir} from 'node:os';
+import {Store} from '../server/store.ts';
+import {Projects} from '../server/projects.ts';
+import {Controller} from '../server/controller.ts';
+import {createWorkspace} from '../server/workspace.ts';
+import {createHttpServer} from '../server/http.ts';
+import type {WorkflowPreview,WorkflowRun,WorkflowVersion,WorkflowView} from '../shared/workflows.ts';
+
+test('workflow HTTP approves immutable commands and source, executes real steps, preserves repositories and restores without replay',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'orbit-workflow-http-')),root=join(dir,'project');mkdirSync(root);
+  const git=(cwd:string,...args:string[])=>execFileSync('git',['-c','core.hooksPath=/dev/null',...args],{cwd,stdio:'pipe',windowsHide:true});
+  git(root,'init','-q','-b','main');git(root,'config','core.autocrlf','false');writeFileSync(join(root,'.gitignore'),'workflow.log\n');writeFileSync(join(root,'source.txt'),'base');
+  writeFileSync(join(root,'check.mjs'),"import assert from 'node:assert/strict';import{readFileSync,appendFileSync}from'node:fs';assert.equal(readFileSync('source.txt','utf8'),'worktree');if(process.argv[2]==='second')assert.equal(readFileSync('workflow.log','utf8'),'first');appendFileSync('workflow.log',process.argv[2]);console.log('actual check passed');");
+  git(root,'add','.');git(root,'-c','user.name=Fixture','-c','user.email=fixture@localhost','-c','commit.gpgSign=false','commit','-qm','fixture');
+  const store=new Store(join(dir,'test.sqlite')),projects=new Projects(store,join(dir,'managed'),[root]),project=projects.register(root),workspace=projects.create(project.id);writeFileSync(join(workspace.path,'source.txt'),'worktree');
+  const config=['first','second'].map(id=>({projectPath:root,id,label:id,executable:process.execPath,args:['check.mjs',id],timeoutMs:5000}));let aiCalls=0;
+  const factory=()=>{aiCalls++;throw new Error('AI_DISABLED');},controller=new Controller(store,createWorkspace(dir),factory,projects,config);await controller.selectWorkspace(workspace.id);
+  const server=createHttpServer(controller,dir);await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));
+  const origin='http://127.0.0.1:'+(server.address() as {port:number}).port,session=await fetch(origin+'/api/session'),{csrfToken}=await session.json() as {csrfToken:string},cookie=session.headers.get('set-cookie')!.split(';')[0];
+  const headers={Cookie:cookie,Origin:origin,'Content-Type':'application/json','X-CSRF-Token':csrfToken},post=(path:string,data:object,override:Record<string,string>={})=>fetch(origin+path,{method:'POST',headers:{...headers,...override},body:JSON.stringify(data)}),get=(path:string)=>fetch(origin+path,{headers:{Cookie:cookie}});
+  const path=`/api/projects/${project.id}/workflows`,viewPath=path+'?workspaceId='+workspace.id;
+  try{
+    assert.equal((await fetch(origin+viewPath)).status,401);const initial=await get(viewPath);assert.equal(initial.status,200);assert.equal((await initial.json() as WorkflowView).versions.length,0);
+    const save={requestId:randomUUID(),workflowId:null,expectedRevision:null,name:'Real local checks',steps:[{id:'second',commandId:'second',dependsOn:['first']},{id:'first',commandId:'first',dependsOn:[]}]};
+    assert.equal((await post(path,save,{'X-CSRF-Token':''})).status,403);assert.equal((await post(path+'?force=1',save)).status,400);
+    const saved=await post(path,save);assert.equal(saved.status,200);const version=await saved.json() as WorkflowVersion;
+    const previewPath=`/api/workspaces/${workspace.id}/workflows/preview?workflowId=${version.workflowId}`;
+    assert.equal((await get(previewPath+'&workflowId='+version.workflowId)).status,400);
+    const preview=await (await get(previewPath)).json() as WorkflowPreview;assert.deepEqual(preview.steps.map(s=>s.id),['first','second']);
+    const input={requestId:randomUUID(),workspaceId:workspace.id,workflowId:version.workflowId,expectedVersionId:version.id,expectedPreviewDigest:preview.previewDigest,confirmed:true,retryOfId:null};
+    assert.equal((await post('/api/workflows/start',{...input,args:['override']})).status,400);assert.equal((await post('/api/workflows/start',{...input,confirmed:false})).status,409);
+    writeFileSync(join(workspace.path,'source.txt'),'changed');assert.equal((await post('/api/workflows/start',input)).status,409);assert.equal(existsSync(join(workspace.path,'workflow.log')),false);writeFileSync(join(workspace.path,'source.txt'),'worktree');
+    const sourceHead=git(workspace.path,'rev-parse','HEAD'),indexPath=join(resolve(workspace.path,git(workspace.path,'rev-parse','--absolute-git-dir').toString().trim()),'index'),index=readFileSync(indexPath);
+    const start=await post('/api/workflows/start',input);assert.equal(start.status,200);const run=await start.json() as WorkflowRun;await controller.workflows.settle();
+    const result=controller.workflows.record(run.id);assert.equal(result.status,'passed');assert.ok(result.steps.every(s=>s.exitCode===0&&s.sourceDigest===preview.sourceDigest&&s.finishedDigest===preview.sourceDigest));
+    assert.equal(readFileSync(join(workspace.path,'workflow.log'),'utf8'),'firstsecond');assert.equal((await post('/api/workflows/start',input)).status,200);assert.equal(readFileSync(join(workspace.path,'workflow.log'),'utf8'),'firstsecond');
+    assert.equal(readFileSync(join(root,'source.txt'),'utf8'),'base');assert.equal(git(root,'status','--porcelain=v1').toString(),'');assert.deepEqual(git(workspace.path,'rev-parse','HEAD'),sourceHead);assert.deepEqual(readFileSync(indexPath),index);assert.equal(readFileSync(join(workspace.path,'source.txt'),'utf8'),'worktree');assert.equal(store.runs().length,0);assert.equal(aiCalls,0);
+    await controller.close();const restored=new Controller(store,createWorkspace(dir),factory,projects,config);assert.equal(restored.workflows.record(run.id).status,'passed');assert.equal(restored.workflows.view(project.id,workspace.id).versions.length,1);assert.equal(readFileSync(join(workspace.path,'workflow.log'),'utf8'),'firstsecond');await restored.close();
+    store.db.prepare('UPDATE workflow_runs SET body=? WHERE id=?').run(JSON.stringify({...result,status:'running',finishedAt:null}),run.id);
+    const lost=new Controller(store,createWorkspace(dir),factory,projects,config);assert.equal(lost.workflows.record(run.id).status,'lost');
+    assert.equal((await (await get(viewPath)).json() as WorkflowView).recoveryRequired,true);
+    assert.throws(()=>controller.startVerification({requestId:randomUUID(),runId:randomUUID(),workspaceId:workspace.id,commandId:'first',expectedSourceDigest:preview.sourceDigest,expectedConfigDigest:preview.steps[0].command.configDigest}),/WORKFLOW_RECOVERY_REQUIRED/);
+    assert.throws(()=>controller.prepareMerge({requestId:randomUUID(),workspaceId:workspace.id,runId:randomUUID(),expectedSourceDigest:preview.sourceDigest,expectedCheckSetDigest:'a'.repeat(64),expectedApprovalId:randomUUID(),expectedTargetBranch:'main',expectedTargetHead:workspace.baseSha}),/WORKFLOW_RECOVERY_REQUIRED/);
+    assert.equal((await post('/api/workflows/recover',{runId:run.id,confirmedStopped:false})).status,409);
+    assert.equal((await post('/api/workflows/recover',{runId:run.id,confirmedStopped:true})).status,200);
+    assert.equal((await post('/api/workflows/start',{...input,requestId:randomUUID(),retryOfId:run.id})).status,409);
+    assert.equal(readFileSync(join(workspace.path,'workflow.log'),'utf8'),'firstsecond');assert.equal(aiCalls,0);await lost.close();
+  }finally{server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));await controller.close();store.close();}
+});

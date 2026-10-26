@@ -8,3 +8,10 @@ test('coding enables its required local tool host while preserving shell, MCP-re
   for(const feature of ['shell_tool','apps','plugins','hooks','code_mode','multi_agent','skill_mcp_dependency_install'])assert.ok(flags(codexArgs(true),'--disable').includes(feature));
   assert.equal(codexArgs(true).includes('danger-full-access'),false);
 });
+test('both native session modes explicitly disable unowned Goal continuations',()=>{
+  for(const write of [false,true]){
+    const args=codexArgs(write);
+    assert.ok(args.some((arg,index)=>arg==='--disable'&&args[index+1]==='goals'));
+    assert.equal(args.some((arg,index)=>arg==='--enable'&&args[index+1]==='goals'),false);
+  }
+});

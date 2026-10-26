@@ -1,0 +1,58 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync,mkdirSync,writeFileSync,readFileSync } from 'node:fs';
+import { join,resolve } from 'node:path';
+import { tmpdir } from 'node:os';
+import { Store } from '../server/store.ts';
+import { Projects } from '../server/projects.ts';
+import { Controller } from '../server/controller.ts';
+import { createWorkspace } from '../server/workspace.ts';
+import { createHttpServer } from '../server/http.ts';
+import type { MergeView,MergeRecord } from '../shared/merge.ts';
+import { readVerificationConfiguration } from '../server/verification-service.ts';
+
+test('actual disposable Git HTTP flow verifies, approves, snapshots and explicitly fast-forwards while preserving source/index/ignored files',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'orbit-merge-http-')),root=join(dir,'project');mkdirSync(root);
+  const git=(cwd:string,...args:string[])=>execFileSync('git',['-c','core.hooksPath=/dev/null',...args],{cwd,stdio:'pipe',windowsHide:true});
+  git(root,'init','-q','-b','main');git(root,'config','core.autocrlf','false');
+  writeFileSync(join(root,'.gitignore'),'keep.tmp\n');writeFileSync(join(root,'source.txt'),'before');writeFileSync(join(root,'check.mjs'),"import assert from 'node:assert/strict';import{readFileSync}from'node:fs';assert.equal(readFileSync('source.txt','utf8'),'after');console.log('approved source verified');");
+  git(root,'add','.');git(root,'-c','user.name=Fixture','-c','user.email=fixture@localhost','-c','commit.gpgSign=false','commit','-qm','fixture');writeFileSync(join(root,'keep.tmp'),'original ignored bytes');
+  const store=new Store(join(dir,'test.sqlite')),projects=new Projects(store,join(dir,'managed'),[root]),project=projects.register(root),workspace=projects.create(project.id);
+  writeFileSync(join(workspace.path,'source.txt'),'after');
+  const config=readVerificationConfiguration(JSON.stringify([{projectPath:root,id:'test',label:'Merge fixture',executable:process.execPath,args:['check.mjs'],timeoutMs:5000}]));
+  let aiCalls=0;const controller=new Controller(store,createWorkspace(dir),()=>{aiCalls++;throw new Error('AI_DISABLED_IN_FIXTURE');},projects,config);await controller.selectWorkspace(workspace.id);
+  const run=store.createRun(randomUUID(),'fixture','synthetic merge fixture',workspace.id);store.updateRun(run.id,{execution:'completed'},'run.completed');
+  const server=createHttpServer(controller,dir);await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));
+  const origin='http://127.0.0.1:'+(server.address() as {port:number}).port,session=await fetch(origin+'/api/session'),{csrfToken}=await session.json() as {csrfToken:string},cookie=session.headers.get('set-cookie')!.split(';')[0];
+  const headers={Cookie:cookie,Origin:origin,'Content-Type':'application/json','X-CSRF-Token':csrfToken};
+  const post=(path:string,data:object,override:Record<string,string>={})=>fetch(origin+path,{method:'POST',headers:{...headers,...override},body:JSON.stringify(data)});
+  const endpoint=`/api/workspaces/${workspace.id}/merge?runId=${run.id}`,view=async()=>await (await fetch(origin+endpoint,{headers:{Cookie:cookie}})).json() as MergeView;
+  try{
+    assert.equal((await fetch(origin+endpoint)).status,401);assert.equal((await view()).canPrepare,false);
+    let verification=controller.verification.view(workspace.id,run.id);
+    controller.startVerification({requestId:randomUUID(),workspaceId:workspace.id,runId:run.id,commandId:'test',expectedSourceDigest:verification.sourceDigest!,expectedConfigDigest:verification.commands[0].configDigest});await controller.verification.settle();
+    verification=controller.verification.view(workspace.id,run.id);assert.equal(verification.checks[0].exitCode,0);
+    controller.approveVerification({requestId:randomUUID(),workspaceId:workspace.id,runId:run.id,expectedSourceDigest:verification.sourceDigest!,expectedCheckSetDigest:verification.checkSetDigest!});
+    const preview=await view();assert.equal(preview.canPrepare,true);assert.equal(preview.target?.branch,'main');
+    const sourceGitDir=resolve(workspace.path,git(workspace.path,'rev-parse','--absolute-git-dir').toString().trim()),sourceIndex=readFileSync(join(sourceGitDir,'index')),sourceHead=git(workspace.path,'rev-parse','HEAD').toString().trim();
+    const prepare={requestId:randomUUID(),workspaceId:workspace.id,runId:run.id,expectedSourceDigest:preview.sourceDigest!,expectedCheckSetDigest:preview.checkSetDigest!,expectedApprovalId:preview.approvalId!,expectedTargetBranch:preview.target!.branch,expectedTargetHead:preview.target!.head};
+    assert.equal((await post('/api/merges/prepare',prepare,{'X-CSRF-Token':''})).status,403);
+    assert.equal((await post('/api/merges/prepare',{...prepare,path:root})).status,400);
+    assert.equal((await post('/api/merges/prepare?force=true',prepare)).status,400);
+    const response=await post('/api/merges/prepare',prepare);assert.equal(response.status,200);const record=await response.json() as MergeRecord;assert.equal(record.status,'prepared');assert.ok(record.candidate);
+    assert.equal((await (await post('/api/merges/prepare',prepare)).json() as MergeRecord).id,record.id);
+    assert.equal(readFileSync(join(root,'source.txt'),'utf8'),'before');assert.equal(git(root,'rev-parse','HEAD').toString().trim(),sourceHead);assert.deepEqual(readFileSync(join(sourceGitDir,'index')),sourceIndex);
+    const apply={requestId:randomUUID(),recordId:record.id,expectedCommitSha:record.candidate!.commitSha,confirmed:true};
+    assert.equal((await post('/api/merges/apply',{...apply,confirmed:false})).status,409);assert.equal((await post('/api/merges/apply',{...apply,expectedCommitSha:'0'.repeat(40)})).status,409);
+    const appliedResponse=await post('/api/merges/apply',apply);assert.equal(appliedResponse.status,200);const applied=await appliedResponse.json() as MergeRecord;assert.equal(applied.status,'applied');assert.equal(applied.completionBasis,'git_and_bytes');
+    assert.equal(readFileSync(join(root,'source.txt'),'utf8'),'after');assert.equal(readFileSync(join(root,'keep.tmp'),'utf8'),'original ignored bytes');assert.equal(git(root,'rev-parse','HEAD').toString().trim(),record.candidate!.commitSha);
+    assert.equal(git(root,'status','--porcelain=v1','--untracked-files=all').toString(),'');assert.equal(readFileSync(join(workspace.path,'source.txt'),'utf8'),'after');assert.equal(git(workspace.path,'rev-parse','HEAD').toString().trim(),sourceHead);assert.deepEqual(readFileSync(join(sourceGitDir,'index')),sourceIndex);
+    assert.equal((await (await post('/api/merges/apply',apply)).json() as MergeRecord).status,'applied');assert.equal(aiCalls,0);
+    store.db.prepare('UPDATE merge_records SET body=? WHERE id=?').run(JSON.stringify({...applied,status:'unknown',completionBasis:null}),applied.id);
+    assert.throws(()=>controller.startVerification({requestId:randomUUID(),workspaceId:workspace.id,runId:run.id,commandId:'test',expectedSourceDigest:verification.sourceDigest!,expectedConfigDigest:verification.commands[0].configDigest}),/MERGE_RECOVERY_REQUIRED/);
+    assert.equal((await post('/api/merges/recover',{recordId:record.id,confirmedStopped:false})).status,409);
+    const recovered=await (await post('/api/merges/recover',{recordId:record.id,confirmedStopped:true})).json() as MergeRecord;assert.equal(recovered.status,'applied');assert.equal(recovered.completionBasis,'observed_after_recovery');assert.equal(git(root,'rev-parse','HEAD').toString().trim(),record.candidate!.commitSha);
+  }finally{server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));await controller.close();store.close();}
+});

@@ -1,18 +1,16 @@
 import { accessSync, constants, existsSync, lstatSync, mkdirSync, readdirSync, realpathSync } from 'node:fs';
-import { basename, delimiter, dirname, isAbsolute, join, parse, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, parse, relative, resolve } from 'node:path';
 import { homedir } from 'node:os';
-import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import type { Project, Workspace, WorkspaceDiff, FileDiff } from '../shared/types.ts';
 import { Store } from './store.ts';
 import { AppError } from './errors.ts';
 import { safeText } from './privacy.ts';
+import { fingerprintWorkspace,readWorkspaceSourceSnapshot,readWorkspaceSnapshot } from './workspace-fingerprint.ts';
+import { trustedGit } from './git-process.ts';
 
 const same=(a:string,b:string)=>process.platform==='win32'?a.toLowerCase()===b.toLowerCase():a===b;
 const inside=(parent:string,child:string)=>{const r=relative(parent,child);return !!r&&!r.startsWith('..')&&!isAbsolute(r);};
-// Resolve once from the server's absolute PATH entries. Windows otherwise searches
-// the untrusted project cwd for git.exe before PATH, even with shell:false.
-const gitBinary=(process.env.PATH??'').split(delimiter).filter(isAbsolute).map(p=>join(p,process.platform==='win32'?'git.exe':'git')).find(p=>existsSync(p)&&lstatSync(p).isFile());
 export function canonical(path:string):string {
   if(typeof path!=='string'||path.length>2000||!isAbsolute(path)||/[\x00-\x1f]/.test(path)||path.split(/[\\/]/).some(p=>p==='.'||p==='..')||
     (process.platform==='win32'&&(!/^[a-z]:[\\/]/i.test(path)||path.slice(2).includes(':')||path.slice(3).split(/[\\/]/).some(p=>/[. ]$/.test(p)||/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(p)))))throw new AppError('INVALID_PATH',400);
@@ -25,12 +23,7 @@ function scan(root:string,skipGit=false){
   let count=0;const walk=(dir:string)=>{for(const e of readdirSync(dir,{withFileTypes:true})){if(skipGit&&dir===root&&e.name==='.git')continue;if(++count>50000)throw new AppError('TREE_TOO_LARGE');const path=join(dir,e.name);const s=lstatSync(path);if(s.isSymbolicLink()||(!s.isDirectory()&&!s.isFile())||(s.isFile()&&s.nlink>1))throw new AppError('LINK_REJECTED');if(s.isDirectory())walk(path);}};walk(root);
 }
 function git(cwd:string,args:string[],allowDiffExit=false):string {
-  if(!gitBinary)throw new AppError('GIT_NOT_INSTALLED',503);
-  const env={...process.env};for(const key of Object.keys(env))if(/^GIT_/i.test(key))delete env[key];
-  Object.assign(env,{GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:process.platform==='win32'?'NUL':'/dev/null',GIT_TERMINAL_PROMPT:'0',GIT_OPTIONAL_LOCKS:'0',GIT_NO_LAZY_FETCH:'1',GIT_ALLOW_PROTOCOL:''});
-  const options={cwd,env,encoding:'utf8' as const,windowsHide:true,shell:false,timeout:15000,maxBuffer:2*1024*1024,stdio:'pipe' as const};
-  try{return execFileSync(gitBinary,['--no-pager','--literal-pathspecs','-c','protocol.allow=never','-c','core.hooksPath=/dev/null','-c','core.fsmonitor=false','-c','submodule.recurse=false','-c','core.protectNTFS=true',...args],options);}
-  catch(e:any){if(allowDiffExit&&e.status===1)return String(e.stdout??'');throw new AppError('GIT_OPERATION_FAILED');}
+  return trustedGit(cwd,args,{allowDiffExit}).toString('utf8');
 }
 function repository(path:string){
   const root=canonical(path);if(!lstatSync(root).isDirectory()||same(root,homedir())||same(root,parse(root).root))throw new AppError('INVALID_PROJECT');
@@ -72,6 +65,40 @@ export class Projects {
     if(!same(resolve(w.path,git(w.path,['rev-parse','--git-common-dir']).trim()),join(p.path,'.git'))||git(w.path,['branch','--show-current']).trim()!==w.branch||git(w.path,['rev-parse','HEAD']).trim()!==w.baseSha)throw new AppError('WORKSPACE_CHANGED');return w;
   }
   writable(id:string){const w=this.validate(id);if(!this.project(w.projectId).writeEnabled)throw new AppError('WRITES_DISABLED',403);return w;}
+  private manifest(workspace:Workspace) {
+    const tracked=git(workspace.path,['ls-files','--stage','-z']).split('\0').filter(Boolean).map(entry=>{
+      const match=/^([0-9]{6}) [a-f0-9]{40,64} ([0-3])\t([\s\S]+)$/.exec(entry);
+      if(!match||match[2]!=='0')throw new AppError('FINGERPRINT_UNAVAILABLE',409);
+      return {path:match[3],mode:match[1]};
+    });
+    const untracked=git(workspace.path,['ls-files','--others','--exclude-standard','-z']).split('\0').filter(Boolean).map(path=>({path,mode:'100644'}));
+    return [...tracked,...untracked];
+  }
+  fingerprint(id:string):string {
+    const workspace=this.writable(id);
+    try{return fingerprintWorkspace(workspace.path,workspace.baseSha,this.manifest(workspace));}catch{throw new AppError('FINGERPRINT_UNAVAILABLE',409);}
+  }
+  mergeContext(id:string){
+    const workspace=this.writable(id);
+    return {workspace,project:this.project(workspace.projectId),scratchRoot:this.managed};
+  }
+  mergeProject(id:string){
+    const project=this.project(id);if(!project.writeEnabled)throw new AppError('WRITES_DISABLED',403);
+    repository(project.path);return project;
+  }
+  snapshot(id:string){
+    const workspace=this.writable(id);
+    try{return readWorkspaceSnapshot(workspace.path,workspace.baseSha,this.manifest(workspace));}
+    catch{throw new AppError('WORKSPACE_SNAPSHOT_UNAVAILABLE',409);}
+  }
+  sourceSnapshot(id:string) {
+    const workspace=this.writable(id);
+    try{
+      const snapshot=readWorkspaceSourceSnapshot(workspace.path,workspace.baseSha,this.manifest(workspace));
+      const changed=new Set([...git(workspace.path,['diff','--no-ext-diff','--no-textconv','--no-renames','--name-only','-z',workspace.baseSha,'--']).split('\0'),...git(workspace.path,['ls-files','--others','--exclude-standard','-z']).split('\0')]);
+      return {...snapshot,files:snapshot.files.map(file=>({...file,changed:changed.has(file.path)}))};
+    }catch{throw new AppError('SOURCE_SNAPSHOT_UNAVAILABLE',409);}
+  }
   diff(id:string):WorkspaceDiff {
     const w=this.validate(id);const changed=git(w.path,['diff','--no-ext-diff','--no-textconv','--no-renames','--name-only','-z',w.baseSha,'--']).split('\0').filter(Boolean);
     const untracked=git(w.path,['ls-files','--others','--exclude-standard','-z']).split('\0').filter(Boolean);const names=[...new Set([...changed,...untracked])];if(names.length>200)throw new AppError('DIFF_TOO_LARGE');
@@ -80,7 +107,9 @@ export class Projects {
       if(sensitive(path)){out.omitted='sensitive';return out;}
       if(existsSync(join(w.path,path))&&lstatSync(join(w.path,path)).size>128000){out.omitted='too_large';return out;}
       const patch=untracked.includes(path)?git(w.path,['diff','--no-index','--no-ext-diff','--no-textconv','--','/dev/null',path],true):git(w.path,['diff','--no-ext-diff','--no-textconv','--no-renames',w.baseSha,'--',path]);
-      total+=patch.length;if(total>512000||patch.length>128000){out.omitted='too_large';return out;}if(patch.includes('Binary files')||patch.includes('\0')){out.omitted='binary';return out;}out.patch=safeText(patch);return out;
+      // safeText masks after its 64k prefix cap. Decide completeness from the
+      // raw patch first: masking must never hide an already truncated suffix.
+      total+=patch.length;if(total>512000||patch.length>64000){out.omitted='too_large';return out;}if(patch.includes('Binary files')||patch.includes('\0')){out.omitted='binary';return out;}out.patch=safeText(patch);return out;
     });return {workspaceId:w.id,baseSha:w.baseSha,files};
   }
 }

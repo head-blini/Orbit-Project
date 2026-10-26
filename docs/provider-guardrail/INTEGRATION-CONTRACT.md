@@ -1,5 +1,7 @@
 # Provider connections and outbound inspection
 
+Integration update (2026-10-25): fixed mock transport, server-owned block policies, authenticated HTTP/UI and Codex preflight/input inspection are connected. The original handoff below describes the standalone module. See [product integration results](../ORBIT-INTEGRATION-RESULTS.md). No real external adapter transport has been enabled.
+
 This is an independently testable, mock-only server module. It does not connect to Bedrock, LiteLLM, vLLM, or FreeLLMAPI, discover credentials, configure authentication, or grant coding-agent capabilities. No new dependencies are required. Existing Controller, HTTP, SQLite, Codex RPC approvals, MCP isolation, and workspace policy remain authoritative and unchanged.
 
 ## Integration boundary

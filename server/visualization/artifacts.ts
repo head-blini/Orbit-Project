@@ -1,8 +1,10 @@
 import { createHash,randomUUID } from 'node:crypto';
 import { validateMermaid,validateArchitecture } from '../../web/visualization/mermaid.ts';
 import { validatePresentationDocument } from '../../web/visualization/presentation.ts';
+import type { DatabaseSync } from 'node:sqlite';
+import type { ArtifactInput,ArtifactRecord } from '../../shared/parallel.ts';
 
-type Input={kind:'mermaid'|'architecture'|'presentation';source:string;metadata:Record<string,string>};
+type Input=ArtifactInput;
 function validateProject(id:string) {
   if(typeof id!=='string'||!/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(id)) throw new Error('INVALID_PROJECT');
 }
@@ -18,8 +20,34 @@ function validateInput(input:Input) {
   }
 }
 
-function record(projectId:string,id:string,revision:number,input:Input) {
+function record(projectId:string,id:string,revision:number,input:Input):ArtifactRecord {
   return {id,projectId,revision,kind:input.kind,source:input.source,contentHash:createHash('sha256').update(input.source,'utf8').digest('hex'),createdAt:new Date().toISOString(),metadata:structuredClone(input.metadata)};
+}
+
+/** Host supplies the transaction shared with audit events and idempotency receipts. */
+export class SqliteArtifactRepository {
+  private db:DatabaseSync;
+  constructor(db:DatabaseSync){this.db=db;}
+  private save(value:ArtifactRecord){
+    this.db.prepare('INSERT INTO artifacts VALUES(?,?,?,?)').run(value.projectId,value.id,value.revision,JSON.stringify(value));return value;
+  }
+  create(projectId:string,input:Input):ArtifactRecord {
+    validateProject(projectId);validateInput(input);return this.save(record(projectId,randomUUID(),1,input));
+  }
+  revise(projectId:string,id:string,expectedRevision:number,input:Input):ArtifactRecord {
+    const latest=this.history(projectId,id).at(-1)!;
+    if(!Number.isSafeInteger(expectedRevision)||latest.revision!==expectedRevision)throw new Error('REVISION_CONFLICT');
+    validateInput(input);if(input.kind!==latest.kind)throw new Error('ARTIFACT_KIND_IMMUTABLE');
+    return this.save(record(projectId,id,expectedRevision+1,input));
+  }
+  list(projectId:string):ArtifactRecord[]{
+    validateProject(projectId);
+    return this.db.prepare('SELECT body FROM artifacts a WHERE project_id=? AND revision=(SELECT MAX(revision) FROM artifacts b WHERE b.project_id=a.project_id AND b.id=a.id) ORDER BY rowid').all(projectId).map(row=>JSON.parse(row.body as string));
+  }
+  history(projectId:string,id:string):ArtifactRecord[]{
+    validateProject(projectId);const rows=this.db.prepare('SELECT body FROM artifacts WHERE project_id=? AND id=? ORDER BY revision').all(projectId,id);
+    if(!rows.length)throw new Error('ARTIFACT_NOT_FOUND');return rows.map(row=>JSON.parse(row.body as string));
+  }
 }
 
 /** Memory implementation only; integration owns authorization, HTTP and persistence. */

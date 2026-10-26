@@ -1,0 +1,34 @@
+{
+  "date": "2026-10-26",
+  "platform": "Windows",
+  "node": "24.22.1",
+  "git": "2.56.0.windows.3",
+  "typecheckExit": 0,
+  "buildExit": 0,
+  "defaultSuite": {
+    "passed": 470,
+    "exit": 1,
+    "attempts": 2,
+    "tests": 471,
+    "failed": 1,
+    "failure": "tests/merge-http.test.ts: fetch ECONNRESET; cause not confirmed"
+  },
+  "focusedMerge": {
+    "passed": 1,
+    "exit": 0,
+    "failed": 0
+  },
+  "boundedSuite": {
+    "failed": 0,
+    "exit": 0,
+    "passed": 471,
+    "tests": 471,
+    "skipped": 0,
+    "command": "node --test --test-concurrency=4 tests/*.test.ts spikes/phase0/*.test.mjs",
+    "durationMs": 86776.4658
+  },
+  "newInventoryBrowser": "not_run",
+  "macOS": "not_run",
+  "previousBrowserEvidence": "2026-10-26-native-review-windows.json",
+  "suiteLogSHA256": "e26b130c0260b8e7d875fa75124484bc26827343863ce0c1445f692d0ef15f2c"
+}

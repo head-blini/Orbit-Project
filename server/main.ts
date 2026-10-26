@@ -8,6 +8,8 @@ import { codexFactory } from './codex.ts';
 import { createHttpServer } from './http.ts';
 import { acquireInstance } from './instance.ts';
 import { Projects } from './projects.ts';
+import { readVerificationConfiguration } from './verification-service.ts';
+import { readModelHubConfiguration } from './providers/model-hub-configuration.ts';
 
 const dataDir=resolve('.local');mkdirSync(dataDir,{recursive:true});
 const port=Number(process.env.AICC_PORT??4317);
@@ -21,7 +23,9 @@ try{assertWorkspace(workspace);}catch{store.close();throw new Error('The disposa
 const allowed:unknown=JSON.parse(process.env.ORBIT_ALLOWED_PROJECTS??'[]');
 if(!Array.isArray(allowed)||allowed.some(p=>typeof p!=='string'))throw new Error('ORBIT_ALLOWED_PROJECTS must be a JSON array of exact repository paths');
 const projects=new Projects(store,join(dataDir,'workspaces'),allowed);
-const controller=new Controller(store,workspace,(path,write)=>codexFactory(path,write)(),projects);
+const verificationConfig=readVerificationConfiguration(process.env.ORBIT_VERIFICATION_COMMANDS);
+const modelHubConfig=readModelHubConfiguration(process.env.ORBIT_MODEL_HUB);
+const controller=new Controller(store,workspace,(path,write)=>codexFactory(path,write)(),projects,verificationConfig,modelHubConfig);
 const server=createHttpServer(controller,resolve('dist'));
 let stopping=false;
 async function stop(){if(stopping)return;stopping=true;server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));await controller.close();store.close();release();}

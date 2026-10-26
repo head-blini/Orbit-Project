@@ -1,13 +1,14 @@
 import type { Snapshot,AppEvent } from '../../shared/types.ts';
+import type { TimelineView } from '../../shared/parallel.ts';
 
 const labels:Record<string,string>={
   'run.created':'Run starting','run.accepted':'Run accepted','run.started':'Run running',
   'run.completed':'Agent completed — not verified','run.interrupted':'Run interrupted',
-  'run.interrupting':'Interrupt requested','interrupt.accepted':'Interrupt accepted',
+  'run.interrupting':'Interrupt requested','interrupt.requested':'Interrupt requested','interrupt.accepted':'Interrupt accepted',
   'run.failed':'Run failed','run.lost':'Connection lost','provider.status':'Provider status changed',
 };
 
-export function buildTimeline(snapshot:Readonly<Snapshot>,events:readonly AppEvent[]) {
+export function buildTimeline(snapshot:Readonly<Snapshot>,events:readonly AppEvent[]):TimelineView {
   const workspaceKey=JSON.stringify([snapshot.selectedWorkspaceId??null,snapshot.workspace]);
   const items:{seq:number;at:string;runId:string|null;kind:string;label:string}[]=[];
   let lastSeq=snapshot.lastSeq;

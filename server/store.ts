@@ -5,6 +5,7 @@ import type { Run, AppEvent, Project, Workspace } from '../shared/types.ts';
 import { terminal } from '../shared/types.ts';
 export class Store extends EventEmitter {
   db:DatabaseSync;
+  private pendingEvents:AppEvent[]|null=null;
   constructor(path:string) {
     super();this.db=new DatabaseSync(path);
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
@@ -29,9 +30,9 @@ export class Store extends EventEmitter {
     const row=this.db.prepare('SELECT body,digest FROM runs WHERE request_id=?').get(id);
     return row?{run:JSON.parse(row.body as string),digest:row.digest as string}:null;
   }
-  createRun(requestId:string,digest:string,prompt:string,workspaceId?:string):Run {
+  createRun(requestId:string,digest:string,prompt:string,workspaceId?:string,task?:Pick<Run,'taskId'|'planningVersionId'|'requirementLabels'>):Run {
     const now=new Date().toISOString();
-    const r:Run={id:randomUUID(),requestId,turnId:null,prompt,response:'',execution:'starting',verification:'not_run',createdAt:now,updatedAt:now,...(workspaceId?{workspaceId}:{})};
+    const r:Run={id:randomUUID(),requestId,turnId:null,prompt,response:'',execution:'starting',verification:'not_run',createdAt:now,updatedAt:now,...(workspaceId?{workspaceId}:{}),...task};
     this.db.exec('BEGIN IMMEDIATE');
     let event:AppEvent;
     try {this.db.prepare('INSERT INTO runs VALUES(?,?,?,?)').run(r.id,requestId,digest,JSON.stringify(r));event=this.insert('run.created',r.id,{run:r});this.db.exec('COMMIT');}
@@ -52,7 +53,27 @@ export class Store extends EventEmitter {
     const row=this.db.prepare('INSERT INTO events(kind,at,run_id,data) VALUES(?,?,?,?)').run(kind,at,runId,JSON.stringify(data));
     return {seq:Number(row.lastInsertRowid),kind,at,runId,data};
   }
-  append(kind:string,runId:string|null,data:Record<string,unknown>={}) {const e=this.insert(kind,runId,data);this.emit('event',e);return e;}
+  /** Called inside the check transaction. Actual verdicts stay in bound Check records. */
+  markVerificationRecorded(runId:string){
+    if(!this.pendingEvents)throw new Error('VERIFICATION_TRANSACTION_REQUIRED');
+    const run=this.getRun(runId);if(!run)throw new Error('RUN_NOT_FOUND');
+    if(run.verification==='recorded')return;
+    const next={...run,verification:'recorded' as const};
+    this.db.prepare('UPDATE runs SET body=? WHERE id=?').run(JSON.stringify(next),runId);
+    this.append('run.verification_recorded',runId,{run:next});
+  }
+  /** Synchronous atomic Studio mutation; observers only see committed events. */
+  transaction<T>(work:()=>T):T {
+    if(this.pendingEvents)throw new Error('NESTED_TRANSACTION');
+    this.db.exec('BEGIN IMMEDIATE');this.pendingEvents=[];
+    let result:T;let events:AppEvent[];
+    try{result=work();this.db.exec('COMMIT');events=this.pendingEvents;}
+    catch(error){this.db.exec('ROLLBACK');throw error;}
+    finally{this.pendingEvents=null;}
+    for(const event of events)this.emit('event',event);
+    return result;
+  }
+  append(kind:string,runId:string|null,data:Record<string,unknown>={}) {const e=this.insert(kind,runId,data);if(this.pendingEvents)this.pendingEvents.push(e);else this.emit('event',e);return e;}
   lastSeq():number {return Number(this.db.prepare('SELECT COALESCE(MAX(seq),0) AS seq FROM events').get()!.seq);}
   eventsAfter(seq:number,limit=100000):AppEvent[] {return this.db.prepare('SELECT * FROM events WHERE seq>? ORDER BY seq LIMIT ?').all(seq,limit).map(r=>({seq:Number(r.seq),kind:String(r.kind),at:String(r.at),runId:r.run_id as string|null,data:JSON.parse(r.data as string)}));}
   close(){this.db.close();}
