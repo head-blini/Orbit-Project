@@ -67,6 +67,8 @@ export class Controller {
   registerProject(path:string){this.idle();if(!this.projects)throw new AppError('UNSUPPORTED',404);return this.projects.register(path);}
   createWorktree(projectId:string){this.idle();this.merges.ensureProjectAvailable(projectId);if(!this.projects)throw new AppError('UNSUPPORTED',404);return this.projects.create(projectId);}
   workspaceDiff(id:string){if(!this.projects)throw new AppError('UNSUPPORTED',404);return this.projects.diff(id);}
+  appPreviewSnapshot(id:string){if(!this.projects)throw new AppError('UNSUPPORTED',404);if(id!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);return this.projects.snapshot(id);}
+  assertAppPreviewAvailable(){this.idle();}
   analyzeSourceGraph(id:string){this.idle();if(id!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);return this.sourceGraphs.analyze(id);}
   sourceGraphArtifact(id:string,input:Parameters<SourceGraphService['artifact']>[1]){this.idle();if(id!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);return this.sourceGraphs.artifact(id,input);}
   startVerification(input:Parameters<VerificationService['start']>[0]){this.extensionIdle();

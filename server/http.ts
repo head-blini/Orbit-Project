@@ -12,6 +12,7 @@ import { createNativeProbeService } from './capability-probe.ts';
 import { PlanningHandoffService } from './planning-handoff-service.ts';
 import {controlPlaneStatus} from './control-plane.ts';
 import {GoalService} from './goal-service.ts';
+import {AppPreviewHost} from './app-preview.ts';
 
 function json(res:ServerResponse,status:number,value:unknown){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(value));}
 async function body(req:IncomingMessage,limit=18000):Promise<Record<string,unknown>>{
@@ -26,17 +27,24 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
   const planningHandoff=new PlanningHandoffService(controller.store,(workspaceId,runId)=>controller.verification.view(workspaceId,runId),id=>controller.workspaceDiff(id));
   const nativeProbe=options.nativeProbe??createNativeProbeService();
   const sessions=new Map<string,{csrf:string;expires:number}>();
+  const appPreview=new AppPreviewHost(id=>controller.appPreviewSnapshot(id));
+  let previewReady:Promise<void>=Promise.resolve();
   const server=createServer((req,res)=>{void handle(req,res).catch(e=>{
     if(res.headersSent){res.end();return;}
     const error=e instanceof AppError?e:studioError(e);
     json(res,error?error.status:500,{error:error?error.message:'INTERNAL_ERROR'});
   });});
   server.requestTimeout=15000;server.headersTimeout=10000;
+  server.once('listening',()=>{const address=server.address();if(address&&typeof address!=='string')previewReady=appPreview.listen('http://127.0.0.1:'+address.port).catch(()=>{});});
+  const previewWorkspace=(event:{kind:string})=>{if(event.kind==='workspace.selected')appPreview.clear();};
+  controller.store.on('event',previewWorkspace);
+  server.once('close',()=>{controller.store.off('event',previewWorkspace);void appPreview.close();});
   async function handle(req:IncomingMessage,res:ServerResponse){
+    await previewReady;
     const address=server.address();if(!address||typeof address==='string')throw new AppError('UNAVAILABLE',503);
     const host=`127.0.0.1:${address.port}`,origin=`http://${host}`;
     res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','no-referrer');res.setHeader('Cross-Origin-Resource-Policy','same-origin');
-    res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
+    res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; frame-src "+(appPreview.origin||"'none'"));
     const url=new URL(req.url??'/',origin);const cookieName=`aicc_${address.port}`;
     if(req.headers.host!==host || (req.headers.origin!==undefined&&req.headers.origin!==origin))throw new AppError('ORIGIN_REJECTED',403);
     if(url.pathname.startsWith('/api/') && (req.headers['sec-fetch-site']==='cross-site'||(req.headers.referer&&new URL(req.headers.referer).origin!==origin)))throw new AppError('ORIGIN_REJECTED',403);
@@ -62,12 +70,17 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
       }
       const studioRoute=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/(plans|artifacts|tasks)(?:\/([a-f0-9-]{36})\/(revisions|approve|task-drafts|history|diff|replan))?$/);
       const goalRoute=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/goals(?:\/([a-f0-9-]{36})\/(state|history))?$/);
+      const appPreviewRoute=url.pathname.match(/^\/api\/workspaces\/([a-f0-9-]{36})\/app-preview$/);
       if(req.method==='POST'){
         const token=req.headers['x-csrf-token'];
         if(req.headers.origin!==origin||typeof token!=='string'||token.length!==64||!timingSafeEqual(Buffer.from(token),Buffer.from(session.csrf)))throw new AppError('CSRF_REJECTED',403);
         const largeStudioInput=studioRoute&&studioRoute[2]!=='tasks'&&(!studioRoute[3]||studioRoute[4]==='revisions');
         const planningSuggestion=url.pathname.match(/^\/api\/projects\/([a-f0-9-]{36})\/planning-suggestions\/(preview|start|recover|([a-f0-9-]{36})\/(interrupt|save))$/);
         const data=await body(req,largeStudioInput?6*256*1024+256*1024:planningSuggestion?64000:18000);
+        if(appPreviewRoute){
+          if(url.search)throw new AppError('INVALID_FIELDS',400);exact(data,['entryPath','expectedSourceDigest']);controller.assertAppPreviewAvailable();
+          json(res,200,appPreview.create(appPreviewRoute[1],data as unknown as Parameters<AppPreviewHost['create']>[1]));return;
+        }
         if(goalRoute){
           if(url.search)throw new AppError('INVALID_FIELDS',400);
           if(!goalRoute[2]){json(res,200,goals.create(goalRoute[1],data as unknown as Parameters<GoalService['create']>[1]));return;}
@@ -337,6 +350,7 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
       if(req.method==='GET'&&studioRoute&&(!studioRoute[3]||(studioRoute[2]==='artifacts'&&studioRoute[4]==='history'))){
         json(res,200,studio.read(studioRoute[1],studioRoute[2],studioRoute[3]));return;
       }
+      if(req.method==='GET'&&appPreviewRoute){if(url.search)throw new AppError('INVALID_FIELDS',400);json(res,200,appPreview.catalog(appPreviewRoute[1]));return;}
       if(req.method==='GET'&&url.pathname==='/api/state'){json(res,200,controller.snapshot());return;}
       const diff=url.pathname.match(/^\/api\/workspaces\/([a-f0-9-]{36})\/diff$/);
       if(req.method==='GET'&&diff){json(res,200,controller.workspaceDiff(diff[1]));return;}
@@ -363,7 +377,7 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
     }
     const files:Record<string,[string,string]>={'/':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/app.css':['app.css','text/css']};
     const file=files[url.pathname];if(req.method!=='GET'||!file)throw new AppError('NOT_FOUND',404);
-    try{const bytes=await readFile(resolve(assets,file[0]));res.writeHead(200,{'Content-Type':file[1]+'; charset=utf-8'});res.end(bytes);}
+    try{const bytes=await readFile(resolve(assets,file[0]));res.writeHead(200,{'Content-Type':file[1]+'; charset=utf-8'});res.end(url.pathname==='/'?bytes.toString('utf8').replace(/<\/head\s*>/i,`<meta name="orbit-preview-origin" content="${appPreview.origin}"></head>`):bytes);}
     catch{throw new AppError('BUILD_REQUIRED',503);}
   }
   return server;

@@ -9,6 +9,7 @@ import { SourceGraphPanel } from './source-graph.tsx';
 import { MergePanel } from './merge.tsx';
 import { ReviewPanel } from './reviews.tsx';
 import {ControlPlanePanel} from './control-plane.tsx';
+import {AppPreviewPanel} from './app-preview.tsx';
 
 export function Dashboard({state,projectId,onNavigate}:{state:Snapshot|null;projectId:string;onNavigate:(page:PageId)=>void}) {
   const [tasks,setTasks]=useState<SavedTask[]|null>(null),[failed,setFailed]=useState(false),[retry,setRetry]=useState(0);
@@ -44,7 +45,7 @@ export function Development({state,projectId,onProjects,onVisualize=()=>{},onlin
   const otherBusy=!!state?.planningBusy||!!state?.extensionBusy||!!state?.verificationBusy||!!state?.modelHubBusy||!!state?.workflowBusy||nativeBusy;
   const reviewBusy=!!state?.reviewBusy;
   const terminalRun=state?.runs.filter(run=>terminal(run.execution)).at(-1)?.id??null;
-  return <><section className="surface"><div className="section-heading"><h2>격리된 작업 공간</h2><button onClick={onProjects}>작업 공간 관리 →</button></div>
+  return <>{matching&&state?.selectedWorkspaceId&&<AppPreviewPanel key={'preview-'+state.selectedWorkspaceId} workspaceId={state.selectedWorkspaceId} online={online} locked={otherBusy||mergeBusy||reviewBusy} refreshKey={String(state.lastSeq)} post={post}/>}<section className="surface"><div className="section-heading"><h2>격리된 작업 공간</h2><button onClick={onProjects}>작업 공간 관리 →</button></div>
     {workspaces.length?<ul className="record-list">{workspaces.map(workspace=><li key={workspace.id}><div><b>{workspace.branch}</b><p>{workspace.path}</p><small>기준 커밋 {workspace.baseSha.slice(0,12)}</small></div><span className="badge">{workspace.id===state?.selectedWorkspaceId?'현재 작업 공간':workspace.status==='ready'?'사용 가능':workspace.status==='creating'?'생성 중':'생성 실패'}</span></li>)}</ul>:<p className="subtle">이 프로젝트에 작업 공간이 없습니다. 쓰기가 허용된 프로젝트에서 생성할 수 있습니다.</p>}
     </section>{matching&&state?.selectedWorkspaceId?<><DiffPanel workspaceId={state.selectedWorkspaceId} refreshKey={latest&&terminal(latest.execution)?latest.id+latest.execution:''}/><SourceGraphPanel key={'graph-'+state.selectedWorkspaceId} workspaceId={state.selectedWorkspaceId} online={online} locked={otherBusy||mergeBusy||reviewBusy} post={post} onVisualize={onVisualize}/><ReviewPanel key={'review-'+state.selectedWorkspaceId} workspaceId={state.selectedWorkspaceId} runId={terminalRun} online={online} busy={otherBusy||mergeBusy} post={post}/><VerificationPanel key={state.selectedWorkspaceId} workspaceId={state.selectedWorkspaceId} runId={terminalRun} online={online} agentActive={!!state.planningBusy||!!state.extensionBusy||!!state.modelHubBusy||!!state.workflowBusy||mergeBusy||nativeBusy||reviewBusy} post={post}/><MergePanel projectId={projectId} workspaceId={state.selectedWorkspaceId} runId={terminalRun} online={online} busy={otherBusy||reviewBusy} post={post}/></>:<section className="empty-state"><h2>Git Diff를 확인할 작업 공간을 선택하세요</h2><p>프로젝트의 원본 파일과 기존 변경 사항은 그대로 보존됩니다.</p><button onClick={onProjects}>작업 공간 선택</button></section>}</>;
 }

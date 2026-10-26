@@ -55,7 +55,7 @@ The complete S0–S4 IDs remain in docs/03-BACKLOG.md; Task0–24 history remain
 | A Dashboard/Projects | Project management, goal/blocker/recovery overview, state persistence |
 | B Planning Studio | Ideas/brainstorming, neutral PRD/ADR/task flow, import/export, approved revisions, native planning live validation, optional official Planning Bridge and feedback |
 | C Agent Center | Claude/Gemini/OpenCode optional adapters, roles, session recovery, qualified native subagents, isolated worktrees and handoff; one provider sufficient |
-| D Development | Existing diff/check/review/merge, richer language/function/class/dependency/call graph, change impact, qualified native review and trusted acceptance |
+| D Development | Task30 static HTML/CSS/JS result preview implemented and Mac Chrome fixture verified; build/backend preview and Task→Run→Check→result source binding pending. Existing diff/check/review/merge, richer language/function/class/dependency/call graph, change impact, qualified native review and trusted acceptance remain |
 | E Visualization Studio | Existing Mermaid/C4/UML/sequence/flow/PPTX/MD preserved; PDF, report/chart PPTX, additional UML, source-backed architecture and stale checks |
 | F Automation | Workflow/templates/DAG, explicit retry; schedule and external/AI steps only behind admission and recovery |
 | G Model Provider Hub | Bedrock/LiteLLM/vLLM/FreeLLMAPI/OpenAI-compatible/local/future, actual transport vs live validation, streaming capability, diagnostics/routing/usage |
