@@ -10,6 +10,8 @@ import { providerConnections,sendMock } from './providers/policy.ts';
 import { buildCapabilityRegistry } from './capabilities.ts';
 import { createNativeProbeService } from './capability-probe.ts';
 import { PlanningHandoffService } from './planning-handoff-service.ts';
+import {controlPlaneStatus} from './control-plane.ts';
+import {GoalService} from './goal-service.ts';
 
 function json(res:ServerResponse,status:number,value:unknown){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(value));}
 async function body(req:IncomingMessage,limit=18000):Promise<Record<string,unknown>>{
@@ -20,6 +22,7 @@ async function body(req:IncomingMessage,limit=18000):Promise<Record<string,unkno
 }
 export function createHttpServer(controller:Controller,assets:string,options:{nativeProbe?:ReturnType<typeof createNativeProbeService>}={}){
   const studio=new Studio(controller.store);
+  const goals=new GoalService(controller.store);
   const planningHandoff=new PlanningHandoffService(controller.store,(workspaceId,runId)=>controller.verification.view(workspaceId,runId),id=>controller.workspaceDiff(id));
   const nativeProbe=options.nativeProbe??createNativeProbeService();
   const sessions=new Map<string,{csrf:string;expires:number}>();
@@ -52,12 +55,19 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
     if(url.pathname.startsWith('/api/')){
       if(!session||session.expires<=Date.now())throw new AppError('SESSION_REQUIRED',401);
       const studioRoute=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/(plans|artifacts|tasks)(?:\/([a-f0-9-]{36})\/(revisions|approve|task-drafts|history|diff|replan))?$/);
+      const goalRoute=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/goals(?:\/([a-f0-9-]{36})\/(state|history))?$/);
       if(req.method==='POST'){
         const token=req.headers['x-csrf-token'];
         if(req.headers.origin!==origin||typeof token!=='string'||token.length!==64||!timingSafeEqual(Buffer.from(token),Buffer.from(session.csrf)))throw new AppError('CSRF_REJECTED',403);
         const largeStudioInput=studioRoute&&studioRoute[2]!=='tasks'&&(!studioRoute[3]||studioRoute[4]==='revisions');
         const planningSuggestion=url.pathname.match(/^\/api\/projects\/([a-f0-9-]{36})\/planning-suggestions\/(preview|start|recover|([a-f0-9-]{36})\/(interrupt|save))$/);
         const data=await body(req,largeStudioInput?6*256*1024+256*1024:planningSuggestion?64000:18000);
+        if(goalRoute){
+          if(url.search)throw new AppError('INVALID_FIELDS',400);
+          if(!goalRoute[2]){json(res,200,goals.create(goalRoute[1],data as unknown as Parameters<GoalService['create']>[1]));return;}
+          if(goalRoute[3]==='state'){json(res,200,goals.setState(goalRoute[1],goalRoute[2],data as unknown as Parameters<GoalService['setState']>[2]));return;}
+          throw new AppError('NOT_FOUND',404);
+        }
         if(planningSuggestion){
           if(url.search)throw new AppError('INVALID_FIELDS',400);
           const projectId=planningSuggestion[1],action=planningSuggestion[2],id=planningSuggestion[3];
@@ -221,6 +231,13 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
         const match=url.pathname.match(/^\/api\/runs\/([a-f0-9-]{36})\/interrupt$/);
         if(match){if(Object.keys(data).length)throw new AppError('INVALID_FIELDS',400);await controller.interrupt(match[1]);json(res,200,controller.snapshot());return;}
       }
+      if(req.method==='GET'&&goalRoute){
+        if(url.search)throw new AppError('INVALID_FIELDS',400);
+        if(!goalRoute[2]){json(res,200,goals.list(goalRoute[1]));return;}
+        if(goalRoute[3]==='history'){json(res,200,goals.history(goalRoute[1],goalRoute[2]));return;}
+        throw new AppError('NOT_FOUND',404);
+      }
+      if(req.method==='GET'&&url.pathname==='/api/control-plane'){if(url.search)throw new AppError('INVALID_FIELDS',400);json(res,200,controlPlaneStatus(controller.snapshot().provider));return;}
       if(req.method==='GET'&&url.pathname==='/api/capabilities'){json(res,200,buildCapabilityRegistry(controller.snapshot().provider,nativeProbe.get()));return;}
       if(req.method==='GET'&&url.pathname==='/api/usage'){json(res,200,controller.usageSnapshot());return;}
       const analyticsRoute=url.pathname.match(/^\/api\/projects\/([a-f0-9-]{36})\/analytics$/);

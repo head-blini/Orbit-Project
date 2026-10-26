@@ -1,5 +1,15 @@
 # Orbit 전체 구현·검증 증거
 
+## Task25 — Goal Tracking 통합 및 새 목표 기준선 (2026-10-27)
+
+- 실제 환경: macOS Darwin25.2 arm64, 시작 HEAD `faba903bb9e6856e26166600cbcc413058fef553`, branch `codex/orbit-mac-handoff-2026-10-26`(remote보다8commits ahead), 단일 checkout. 최초 cwd의 하위 `Orbit-Project`가 실제 Git root다. 시스템 Node25.8.2 대신 기존 ignored Node24.22.1 사용. 기존 Goal/Control Plane/Recovery 미커밋 변경 보존.
+- 최초 `.local/verification/goal-20261027-baseline.log`: typecheck exit2, `runsTotal` 계약 누락4건. 새 실제 서비스→UI coordinator 회귀와105개 실행 projection 회귀 RED2를 확인하고 shared/server 계약·100개 상한을 수정했다. 전체 기록의 lost blocker와 합계는 보존한다. `web/main.tsx` 자동화 화면에 기존 GoalTrackingPanel을 연결했다.
+- 독립 검토4건: UI 미연결, runsTotal 불일치, lost Check 복구 사유 누락, 시간순이 아닌 근거 목록의 '최근' 오표시. 앞2개 통합 후 lost Check RED1→수정, 설명을 '최대100개'로 정정했다. 목표 추적은 여전히 무실행·reference-only이며 achieved를 허용하지 않는다.
+- 샌드박스 전체 검사 `.local/verification/goal-foundation-verify.log`:831total/750pass/80fail/1skip, loopback listen EPERM 등 환경 제한으로 실패, build 미실행. 승인된 host 검사 `goal-foundation-host-verify.log`:831total/830pass/0fail/1skip, type/build0. 최종 `goal-foundation-final-verify.log`: **832total/831pass/0fail/1 Windows-only skip, type0/build0/exit0**,24.86초.
+- Chrome CUA `.local/ui-e2e/goal-foundation-20261027`: 실제 제품 화면에서 Atlas 승인 기획 선택→Goal 생성v1→pause v2→resume v3, history, Boreal 격리, reload, 새 서버/같은DB 복원 확인. browser-checks.json과3JPEG 보존, console warn/error0. 실제 Controller/HTTP/SQLite 사용; fixture native factory0, Run0, 외부 API0. 두 서버18945/19090 정상 종료exit0; 탭423251701 닫음. 첫 서버 stdin이 닫혀 stop 입력 실패 후 동일 소유 PID에 SIGTERM으로 정상 종료했으며 재시작은 별도 프로세스다.
+- 변경 주요 파일: shared/goals.ts, server/goal-service.ts, web/goals.tsx, web/main.tsx, tests/goals*.test.ts와 기존 Control Plane 기반. 기존 user DB·인증·설정은 열거나 변경하지 않았다. 이번 검증은 Goal Tracking과 Mac fixture 범위이며 실제 AI·Windows·설치·원클릭 시나리오 A–E는 미완료다.
+- 다음: V4-02 Solo lost가 terminal로 취급되어 reconnect/새 작업을 허용하는 경로를 영속 차단하고 회귀 검증. 이어 공통 resource ownership, 증거 기반 release, 수용 테스트 무결성, 원클릭 실행 연결. 전체 제품 Goal은 계속 active.
+
 ## 2026-10-25 시작 기준
 
 - 목표 파일을 전체 읽고 기존 로컬 통합 worktree를 우선 확인했다. 기준 HEAD `73ec364`, 브랜치 `integration/orbit-20261025104804486-08592a18`. 기존 통합/UI 변경이 미커밋으로 존재하며 보존한다.

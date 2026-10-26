@@ -8,6 +8,7 @@ import { VerificationPanel } from './verification.tsx';
 import { SourceGraphPanel } from './source-graph.tsx';
 import { MergePanel } from './merge.tsx';
 import { ReviewPanel } from './reviews.tsx';
+import {ControlPlanePanel} from './control-plane.tsx';
 
 export function Dashboard({state,projectId,onNavigate}:{state:Snapshot|null;projectId:string;onNavigate:(page:PageId)=>void}) {
   const [tasks,setTasks]=useState<SavedTask[]|null>(null),[failed,setFailed]=useState(false),[retry,setRetry]=useState(0);
@@ -50,7 +51,7 @@ export function Development({state,projectId,onProjects,onVisualize=()=>{},onlin
 
 export function PrivacySecurity({state}:{state:Snapshot|null}) {
   const policies=[['HTTP 모델 목적지',state?.modelHubConfigured?'서버에 설정된 목적지만 명시 승인 후 사용':'서버 미설정 · 모델 요청 비활성',state?.externalApiEnabled?'외부 HTTPS 목적지가 설정되어 있습니다. Model Hub에서 목적지·본문·과금 가능성을 확인한 뒤 전송합니다.':'외부 HTTPS 목적지는 비활성입니다. loopback 서버도 외부 서비스를 중계하거나 요금을 부과할 수 있습니다.'],['반출 정책','프로젝트·목적지·모델·사용자 확인에 결합','개인정보·인증정보 패턴은 전송 전에 차단합니다. 기존 모의 정책 검사(mock-only)는 실제 제공자에 전송하지 않습니다.'],['민감 입력','인증정보·개인정보 패턴 차단','이메일·전화번호·식별번호 등을 제한된 패턴으로 검사합니다. 포괄적인 개인정보 탐지 기능은 아닙니다.'],['실행 승인 및 도구','승인 기본 거절 · MCP 격리 검사','정책 확인에 실패하면 Codex 실행을 차단합니다. 검증·리뷰 승인 뒤 후보 생성과 대상 branch 반영을 각각 명시 승인해야 하며 자동 병합하지 않습니다.'],['프로젝트 쓰기','명시적으로 허용한 경로만','에이전트는 격리된 source worktree에서 수정합니다. 별도의 사용자 승인과 서버 재검증을 거친 같은 base·clean primary branch에는 ff-only로 반영할 수 있습니다. 원 source worktree를 보존하며 민감 파일의 Diff 내용은 숨깁니다.'],['로컬 연결','loopback · 세션 · Origin · CSRF 검사','브라우저는 서버 API를 사용합니다. 인증 파일과 토큰은 UI에서 읽지 않습니다.']];
-  return <><div className="notice"><b>기존 Codex 연결은 별도입니다</b><p>Codex는 공식 CLI와 기존 로그인을 사용합니다. AI 추론까지 이 컴퓨터 안에서 수행된다는 의미는 아닙니다.</p></div><section className="surface"><h2>현재 보호 정책</h2><dl className="policy-list">{policies.map(([title,status,description])=><div key={title}><dt>{title}</dt><dd><b>{status}</b><p>{description}</p></dd></div>)}</dl></section><section className="surface"><h2>현재 연결 상태</h2><p>{state?providerLabels[state.provider]:'상태를 불러오는 중입니다.'}</p>{state?.issue&&<p className="hint">차단·연결 진단: {state.issue}</p>}<p className="subtle">기획 저장·승인은 코드 실행 권한을 부여하지 않습니다. 응답 완료와 검증 성공은 별도로 표시합니다.</p></section></>;
+  return <><ControlPlanePanel refreshKey={state?.provider??'unknown'}/><div className="notice"><b>기존 Codex 연결은 별도입니다</b><p>Codex는 공식 CLI와 기존 로그인을 사용합니다. AI 추론까지 이 컴퓨터 안에서 수행된다는 의미는 아닙니다.</p></div><section className="surface"><h2>현재 보호 정책</h2><dl className="policy-list">{policies.map(([title,status,description])=><div key={title}><dt>{title}</dt><dd><b>{status}</b><p>{description}</p></dd></div>)}</dl></section><section className="surface"><h2>현재 연결 상태</h2><p>{state?providerLabels[state.provider]:'상태를 불러오는 중입니다.'}</p>{state?.issue&&<p className="hint">차단·연결 진단: {state.issue}</p>}<p className="subtle">기획 저장·승인은 코드 실행 권한을 부여하지 않습니다. 응답 완료와 검증 성공은 별도로 표시합니다.</p></section></>;
 }
 
 export function UnavailablePage({page}:{page:'automation'|'extensions'|'usage'|'settings'}) {

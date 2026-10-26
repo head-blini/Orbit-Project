@@ -1,0 +1,41 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {randomUUID} from 'node:crypto';
+import {Store} from '../server/store.ts';
+import {Studio} from '../server/studio.ts';
+import {createHttpServer} from '../server/http.ts';
+import type {Controller} from '../server/controller.ts';
+import type {PlanningVersion} from '../shared/parallel.ts';
+import type {TrackedGoal,TrackedGoalView} from '../shared/goals.ts';
+test('goal HTTP is project scoped, explicitly mutated, receipt-safe and incapable of runtime launch or achieved state',async()=>{
+  const store=new Store(':memory:'),studio=new Studio(store);let execution=0;
+  for(const id of ['project-a','project-b'])store.saveProject({id,name:id,path:'never-opened',createdAt:'',writeEnabled:false});
+  const plan=studio.mutate('project-a','plans',undefined,undefined,{requestId:randomUUID(),input:{format:'json',source:'manual',text:JSON.stringify({schema_version:'1.0',title:'Goal HTTP',goal:'Track only',requirements:[{id:'R1',description:'Local state',acceptance_criteria:['Restores']}],constraints:[],open_questions:[]})}}) as PlanningVersion;
+  studio.mutate('project-a','plans',plan.id,'approve',{expectedRevision:1});
+  const controller={store,snapshot:()=>({provider:'disconnected'}),submit:async()=>{execution++;}} as unknown as Controller;
+  const server=createHttpServer(controller,'unused');await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const origin='http://127.0.0.1:'+(server.address() as {port:number}).port,path='/api/projects/project-a/goals';
+  try{
+    assert.equal((await fetch(origin+path)).status,401);
+    const session=await fetch(origin+'/api/session'),cookie=session.headers.get('set-cookie')!.split(';')[0],{csrfToken}=await session.json() as {csrfToken:string};
+    const headers={cookie,Origin:origin,'X-CSRF-Token':csrfToken,'Content-Type':'application/json'},input={requestId:randomUUID(),planningVersionId:plan.id,expectedPlanningHash:plan.contentHash};
+    const post=(target:string,data:object,override:Record<string,string>={})=>fetch(origin+target,{method:'POST',headers:{...headers,...override},body:JSON.stringify(data)});
+    assert.equal((await post(path,input,{'X-CSRF-Token':''})).status,403);
+    assert.equal((await post(path,{...input,execution:'autonomous'})).status,400);
+    const created=await post(path,input);assert.equal(created.status,200);const goal=await created.json() as TrackedGoal;
+    assert.deepEqual(await (await post(path,input)).json(),goal);
+    assert.equal((await post('/api/projects/project-b/goals',input)).status,409);
+    const action=path+'/'+goal.id+'/state';
+    assert.equal((await post(action,{requestId:randomUUID(),expectedRevision:1,state:'achieved'})).status,400);
+    const paused=await post(action,{requestId:randomUUID(),expectedRevision:1,state:'paused'});assert.equal(paused.status,200);
+    assert.equal((await post(action,{requestId:randomUUID(),expectedRevision:1,state:'cancelled'})).status,409);
+    assert.equal((await fetch(origin+'/api/projects/project-b/goals/'+goal.id+'/history',{headers:{cookie}})).status,404);
+    assert.equal((await fetch(origin+path+'?execute=true',{headers:{cookie}})).status,400);
+    const seq=store.lastSeq();
+    const views=await (await fetch(origin+path,{headers:{cookie}})).json() as TrackedGoalView[];
+    assert.equal(views[0].goal.state,'paused');assert.equal(views[0].requirements[0].acceptance,'unverified');
+    assert.equal((await (await fetch(origin+path+'/'+goal.id+'/history',{headers:{cookie}})).json() as TrackedGoal[]).length,2);
+    assert.deepEqual(await (await fetch(origin+'/api/projects/project-b/goals',{headers:{cookie}})).json(),[]);
+    assert.equal(store.lastSeq(),seq);assert.equal(execution,0);assert.equal(store.runs().length,0);
+  }finally{server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));store.close();}
+});

@@ -6,6 +6,25 @@
 
 **Spec:** 사용자가 지정한 `goal-objective.md`(2026-10-25), AGENTS.md, PRD/TECH-DESIGN/BACKLOG, Provider-Neutral Core, Planning Bridge, 세 모듈 통합 계약. 최신 전체 요구가 이전 Phase 범위를 확장하되 기존 보안 경계는 유지한다.
 
+## 2026-10-27 목표 재개
+
+새 목표 파일 `18380c8e-dfb3-4171-b446-22881ab6c67a/goal-objective.md`를 읽었다. 기존 A–K와 v0.1–v0.4 자산을 보존하며 자연어→기획→실행→검증→미리보기 경로를 최우선으로 연결한다. 추적 화면 완료는 원클릭 실행이나 전체 제품 완료가 아니다.
+
+| 새 단계 | 기존 작업 연결 | 실제 상태와 다음 요구 |
+|---|---|---|
+| Phase 0 기준선 | Task0–24, V4-00 | Mac 검증 기록 있음. 이번 기준선은 미완성 Goal UI 타입 오류로 실패 후 Task25에서 수정 |
+| Phase 1 원클릭 E2E | Planning Agent, Task, Verification, V4-02–06 | 부분 구현. 자동 연결·앱 미리보기·신뢰된 수용 판정 미완료 |
+| Phase 2 실행기/모델 | Model Hub, V4-07 | text transport와 coding runtime 분리. OpenCode+API/로컬 모델 코딩, 단계별 자동 선택 미구현. 외부 실서비스 미검증 |
+| Phase 3 협업/장기 실행 | 6모드, V4-02/03/05/08 | Solo 외 executor, 공통 소유권/복구/예산, 인계·자동 수정 미완료. 불명확한 종료 뒤 중복 실행 차단 우선 |
+| Phase 4 도구 번들 | Extensions, V4-09 | inventory 부분 구현. 공식 출처/라이선스/버전 검증, profiles/install/rollback 미완료 |
+| Phase 5 나머지 | A–K, V4-09 | Graphify adapter 비교, PDF·보고 PPTX, 계정별 구독 한도·리셋·실행 프로필 미완료. ChatGPT/Codex 한도 분리·unknown 유지 |
+| Phase 6 설치/통합 | Task8, V4-10 | 깨끗한 설치, macOS/Windows 실제 E2E, 시나리오 A–E 미완료. mock 통과는 실제 AI 성공이 아님 |
+
+- [x] Task25: 기존 미커밋 Goal Tracking/Control Plane 통합. 서버/UI 계약, 자동화 화면 연결, 실행 목록 상한, lost Check 복구 표시. 전체832/831pass/1skip/0fail 및 Mac Chrome 생성·상태·격리·재시작 검증.
+- [ ] 다음: V4-02 Solo uncertain 실행의 영속 차단을 기존 Controller에 연결. 종료 증거와 공통 소유권이 검증되기 전 새 실행으로 우회하지 않는다.
+
+재개 branch `codex/orbit-mac-handoff-2026-10-26`, 시작 HEAD `faba903bb9e6856e26166600cbcc413058fef553`. 기존 dirty Goal/Control Plane/Recovery 파일을 보존한다. 아래 과거 Windows 경로·branch는 역사 기록이며 현재 경로는 Mac의 `Orbit_Project/Orbit-Project`다.
+
 ## 전역 제약과 결정
 
 - 사용자 DB/WAL/SHM, 인증정보, 기존 dirty 변경과 원본 worktree 보존. 임시 DB/Git fixture에서만 검증한다.

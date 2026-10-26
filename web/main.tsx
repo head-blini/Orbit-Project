@@ -20,6 +20,7 @@ import { ProjectAnalyticsPanel } from './project-analytics.tsx';
 import { ExtensionsPanel } from './extensions.tsx';
 import { ModelHubPanel } from './model-hub.tsx';
 import { WorkflowsPanel } from './workflows.tsx';
+import { GoalTrackingPanel } from './goals.tsx';
 
 const errors:Record<string,string>={PERSONAL_DATA_BLOCKED:'개인정보 패턴이 감지되어 전송을 차단했습니다. 실제 개인정보를 입력하지 마세요.',DESTINATION_BLOCKED:'현재 목적지의 반출 정책으로 차단됐습니다.',CHATGPT_LOGIN_REQUIRED:'터미널에서 codex login으로 ChatGPT 계정에 로그인하세요.',CODEX_NOT_INSTALLED:'Codex 실행 파일을 찾지 못했습니다. README의 AICC_CODEX_BIN 설정을 확인하세요.',CONNECTION_FAILED:'Codex에 연결하지 못했습니다. CLI 로그인과 정상 사용자 환경을 확인한 뒤 다시 연결하세요.',SUBMIT_UNCERTAIN:'전송 결과를 확인하지 못했습니다. 자동으로 재전송하지 않습니다.',RUN_ACTIVE:'다른 실행이 진행 중입니다.',CREDENTIAL_LIKE_INPUT:'인증정보로 보이는 내용은 전송할 수 없습니다.',CSRF_REJECTED:'웹 연결이 만료됐습니다. 새로고침하세요.',NOT_CONNECTED:'먼저 Codex를 연결하세요.',POLICY_MISMATCH:'읽기 전용·네트워크·승인 정책이 일치하지 않아 연결을 차단했습니다.',MCP_ISOLATION_REQUIRED:'MCP 도구 격리를 확인하지 못해 연결을 차단했습니다. README의 MCP 격리 안내를 확인하세요.',THREAD_STILL_ACTIVE:'저장된 세션이 아직 실행 중입니다. 기존 실행 상태를 확인하세요.'};
 export function App(){
@@ -124,7 +125,7 @@ export function App(){
       {page==='extensions'&&<><ExtensionsPanel workspaceId={state?.selectedWorkspaceId??null} matches={matches} online={online} status={state?.provider} busy={locked} post={post}/><CapabilityPanel online={online} status={state?.provider} post={post} extensionsOnly/><section className="notice"><b>확장 설치·프로필 변경은 미연결입니다</b><p>출처·버전·실행 권한 검토와 격리 실험을 마친 뒤에만 도입합니다. 현재 실행 정책은 유지됩니다.</p></section></>}
       {page==='security'&&<PrivacySecurity state={state}/>}
       {page==='usage'&&<><ProjectAnalyticsPanel projectId={projectId} online={online}/><UsagePanel state={state} online={online} post={post}/></>}
-      {page==='automation'&&<WorkflowsPanel projectId={projectId} workspaceId={matches?state?.selectedWorkspaceId??null:null} online={online} busy={busy||!!active||!!state?.verificationBusy||!!state?.modelHubBusy||!!state?.mergeBusy||!!state?.planningBusy||!!state?.reviewBusy||!!state?.extensionBusy||state?.provider==='connecting'} post={post}/>}
+      {page==='automation'&&<><GoalTrackingPanel projectId={projectId||null} online={online} post={post}/><WorkflowsPanel projectId={projectId} workspaceId={matches?state?.selectedWorkspaceId??null:null} online={online} busy={busy||!!active||!!state?.verificationBusy||!!state?.modelHubBusy||!!state?.mergeBusy||!!state?.planningBusy||!!state?.reviewBusy||!!state?.extensionBusy||state?.provider==='connecting'} post={post}/></>}
       {page==='settings'&&<UnavailablePage page={page}/>}
     </main></div>
     {commandOpen&&page!=='agents'&&<CommandPanel onClose={()=>setCommandOpen(false)}>{error&&<div className="banner error" role="alert">{error}</div>}{!online&&<div className="banner">로컬 서버 연결을 기다리는 중입니다.</div>}{agent}</CommandPanel>}
