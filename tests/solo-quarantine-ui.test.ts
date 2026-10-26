@@ -9,7 +9,7 @@ import type {Snapshot} from '../shared/types.ts';
 
 test('Solo recovery is disclosed and reconnect/submit remain disabled even with a ready provider',async()=>{
   const hooks=registerHooks({load(url,context,next){
-    if(url.endsWith('/web/agent-center.tsx'))return {format:'module',shortCircuit:true,source:ts.transpileModule(readFileSync(new URL(url),'utf8'),{compilerOptions:{module:ts.ModuleKind.ESNext,jsx:ts.JsxEmit.ReactJSX}}).outputText};
+    if(url.endsWith('/web/agent-center.tsx')||url.endsWith('/web/solo-operation.tsx'))return {format:'module',shortCircuit:true,source:ts.transpileModule(readFileSync(new URL(url),'utf8'),{compilerOptions:{module:ts.ModuleKind.ESNext,jsx:ts.JsxEmit.ReactJSX}}).outputText};
     return next(url,context);
   }});
   try{

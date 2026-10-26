@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash,randomUUID } from 'node:crypto';
 import { basename } from 'node:path';
 import type { Snapshot, ProviderStatus, Run, Execution } from '../shared/types.ts';
 import { terminal } from '../shared/types.ts';
@@ -42,6 +42,7 @@ export class Controller {
   private knownMcpNames:readonly string[]|null=null;
   private telemetry:RunTelemetry;
   private soloLost=false;
+  private readonly ownerIncarnation=randomUUID();
   private soloRecoveryRequired(){return this.soloLost||this.store.runs().some(run=>run.execution==='lost');}
   assertExecutionAvailable(){if(this.soloRecoveryRequired())throw new AppError('SOLO_RECOVERY_REQUIRED',409);}
   constructor(store:Store,workspace:string,factory:(workspace:string,write:boolean)=>RpcPort,projects?:Projects,verificationConfig:VerificationConfiguration[]=[],modelHubConfig:readonly ModelHubConfiguration[]=[]){
@@ -173,9 +174,17 @@ export class Controller {
     this.status('connecting');const generation=++this.generation;
     try{
       this.validate();const rpc=this.factory(this.workspace,!!this.workspaceId);this.rpc=rpc;
-      rpc.on('closed',()=>{if(generation!==this.generation)return;++this.generation;this.rpc=null;this.loseActive();this.telemetry.disconnect();this.status('disconnected','TRANSPORT_CLOSED');});
-      rpc.on('notification',(e:any)=>{if(generation===this.generation)this.onEvent(e);});
-      rpc.on('approval',(e:any)=>{if(generation===this.generation)this.store.append('approval.denied',this.active()?.id??null,{kind:e.method,decision:'deny'});});
+      const receive=(handle:()=>void)=>{
+        if(generation!==this.generation)return;
+        try{handle();}catch{
+          // EventEmitter callbacks must not escape into the native stdout listener.
+          // A failed durable transition leaves execution uncertain, even if loss cannot be saved.
+          this.soloLost=true;void this.failTransport('STATE_PERSISTENCE_FAILED');
+        }
+      };
+      rpc.on('closed',()=>receive(()=>{++this.generation;this.rpc=null;this.loseActive();this.telemetry.disconnect();this.status('disconnected','TRANSPORT_CLOSED');}));
+      rpc.on('notification',(e:any)=>receive(()=>this.onEvent(e)));
+      rpc.on('approval',(e:any)=>receive(()=>{this.store.append('approval.denied',this.active()?.id??null,{kind:e.method,decision:'deny'});}));
       await rpc.initialize();const a=await rpc.request('account/read',{refreshToken:false});
       if(a.account?.type!=='chatgpt')throw new AppError('CHATGPT_LOGIN_REQUIRED');
       // Read effective names before loading any thread: a threadless MCP inventory
@@ -240,7 +249,8 @@ export class Controller {
       expectedWorkspaceId:input.workspaceId??null,selectedWorkspaceId:this.workspaceId??null,workspaceValidated:true,writeEnabled:!!this.workspaceId,
       policyValidated:this.launchValidated,mcpIsolated:this.launchValidated});
     if(!launch.allowed)throw new AppError(launch.code);
-    const run=this.store.createRun(input.requestId,digest,safeText(input.prompt),this.workspaceId,task);const rpc=this.rpc;
+    const sessionId=this.thread();if(!sessionId)throw new AppError('NOT_CONNECTED');
+    const run=this.store.createRun(input.requestId,digest,safeText(input.prompt),this.workspaceId,task,{runtimeId:'codex',ownerIncarnation:this.ownerIncarnation,generation:this.generation,nativeSessionId:sessionId});const rpc=this.rpc;
     this.telemetry.begin(run.id);
     this.output.clear();this.deadline=setTimeout(()=>{void this.failTransport('RUN_TIMEOUT');},120000);
     try{
@@ -305,6 +315,13 @@ export class Controller {
     catch{/* Keep the volatile denial; the durable nonterminal Run is quarantined on restart. */}
     this.telemetry.finish(r.id,true);
   }
-  private async failTransport(issue:string){this.loseActive();this.telemetry.disconnect();const rpc=this.rpc;this.rpc=null;++this.generation;this.status('error',issue);if(rpc)await rpc.close();}
+  private async failTransport(issue:string){
+    const rpc=this.rpc;this.rpc=null;++this.generation;
+    try{this.loseActive();}catch{this.soloLost=true;}
+    this.telemetry.disconnect();
+    try{this.status('error',issue);}catch{this.launchValidated=false;this.usage=unknownUsage();}
+    // Closing the connection is best effort, never evidence permitting a new dispatch.
+    try{if(rpc)await rpc.close();}catch{/* The generation remains fenced and recovery stays required. */}
+  }
   async close(){await this.planningSuggestions.close();await this.reviews.close();await this.workflows.close();await this.modelHub.close();await this.verification.close();this.loseActive();this.telemetry.disconnect();const rpc=this.rpc;this.rpc=null;++this.generation;if(rpc)await rpc.close();this.provider='disconnected';this.launchValidated=false;this.clearExtensions();}
 }

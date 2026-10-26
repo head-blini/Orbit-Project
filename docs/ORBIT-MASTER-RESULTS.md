@@ -1,5 +1,15 @@
 # Orbit 전체 구현·검증 증거
 
+## Task27 — Solo 실행 식별 기록과 상태 변경 이력 (2026-10-27)
+
+- 시작 HEAD `089fbb8`, macOS Darwin25.2 arm64/Node24.22.1. 기존 Store/Controller/Agent Center를 확장했다. `shared/solo-operation.ts`, `server/solo-operation-journal.ts`가 새 실행의 runtime/manager nonce/connection generation/native session/turn과 개정 이력을 보존한다. native turn/start 전에 Run·journal·event를 한 트랜잭션으로 저장하며, 실패하면 native 전송과 부분 Run을 남기지 않는다. 연결 초기화 전 프로세스 소유권을 증명하는 기능은 아니다.
+- 버전1 additive migration의 DDL·version 쓰기 rollback, 반복 실행, 기존 Run bytes·event prefix·request receipt 보존을 검사했다. 시작 시 unresolved Run을 lost로 변경하는 기존 경로가 journal도 함께 갱신한다. 응답 chunk만 바뀌면 상태 이력을 늘리지 않으며 known turn ID를 바꾸지 못한다. 과거 Run에 manager/session을 추정해서 채우지 않는다.
+- 인증된 `GET /api/runs/:id/operation`과 실행별 상세 화면은 조회 전용이다. 위조 browser identity POST, query, 인증 없는 요청·다른 Origin을 거부한다. 이력에는 prompt/response를 복제하지 않는다. legacy unknown 설명과 종료/복구 증거가 아니라는 안내, 명시적 새로고침을 제공한다.
+- 독립 검토 P1: 완료 notification의 journal 쓰기 실패가 EventEmitter 밖으로 전파돼 서버를 종료시킬 수 있었다. RED2로 재현한 뒤 native 이벤트 경계에서 격리하고, 저장 작업 전에 connection generation을 무효화했다. loss·status 저장이 함께 실패해도 메모리 차단을 보존하며 close 실패도 새 실행 허용 근거로 삼지 않는다. 늦은 완료·ACK가 원래 journal을 덮지 않는 검사 포함. 독립 최종 probe는 journal/event/close 동시 실패에서도 격리·재연결 거부·늦은 알림 무시를 확인했고 추가 지적 없음.
+- 검사 기록: 초기 Store RED4→GREEN4, Controller RED2, typecheck의 key tuple 오류2건 수정. Store/Controller/HTTP 통합34/34, notification 경계 RED2→관련33/33. 최종 `.local/verification/solo-operation-reviewed.log`: **854total /853pass /0fail /1 Windows-only skip, type0/build0/exit0**,24.91초. 이후 한국어 저장 실패 안내·상세 행 간격만 변경하여 typecheck/build exit0을 다시 확인했다. `git diff --check` 통과.
+- 실제 Chrome CUA `.local/ui-e2e/solo-operation-20261027`: 합성 legacy/completed/lost Run3개, unknown 안내, 기록된 manager/session/generation7/native turn, 개정1–3, 수동 새로고침, 동일DB 새 프로세스 reload 후 기존 식별자·이력 및 실행 차단 유지. `browser-checks.json`, `result.json`, JPEG3개 보존. 마지막 `03-restarted.jpg`가 최종 간격 조정 화면이다. 두 서버PID83861/83935 exit0, 탭423251713 닫음, native factory0·실제AI/외부API0·Run/journal 불변, browser warn/error0. 브라우저 핸들 이름 재사용1회가 실패하여 설정된 Chrome의 새 탭을 정상 생성했으며 제품 동작 실패는 아니다.
+- 한계: 신뢰된 종료/자식 프로세스 증명, runtime/version/policy qualification, cross-state-dir resource ownership, persisted recovery ledger와 release CAS는 아직 없다. 이 journal은 해제 권한이 아니며 기존 quarantine 해제 API를 추가하지 않았다. Windows 및 실제 AI 시나리오 A–E·원클릭 미리보기·전체 A–K Goal은 미완료다. 다음 구현은 공통 소유권과 복구 사실 수집을 기존 dispatch에 연결하는 단계다.
+
 ## Recovery 순수계약 감사 체크포인트 (2026-10-27)
 
 - Task25 `25ecf4a`, Task26 `42b45c9` 로컬 커밋 완료. 이전부터 별도 미커밋으로 있던 `shared/recovery.ts`와 `tests/recovery-contract.test.ts`는 독립 read-only 검토를 마쳤다. 19개 계약 테스트가 실제 통과했고 최종 전체841 gate에도 포함돼 있다. 신뢰된 서버 facts라는 명시된 경계 안에서 재현 가능한 해제 우회는 발견하지 못했다.

@@ -139,6 +139,24 @@ test('unknown path/CLI override keys and oversized body are rejected',async()=>{
     assert.equal(f.count(),0);
   }finally{await f.close();}
 });
+
+test('operation identity history is an inert authenticated read and cannot be supplied by the browser',async()=>{
+  const f=await fixture();try{
+    const run=f.store.createRun('identity-http-request','digest','PRIVATE_PROMPT',undefined,undefined,{runtimeId:'codex',ownerIncarnation:'owner-fixture',generation:1,nativeSessionId:'session-fixture'});
+    f.store.updateRun(run.id,{execution:'completed',turnId:'turn-fixture'},'run.completed');
+    const path='/api/runs/'+run.id+'/operation',seq=f.store.lastSeq();
+    assert.equal((await fetch(f.origin+path)).status,401);
+    assert.equal((await fetch(f.origin+path,{headers:{cookie:f.cookie,Origin:'http://evil.test'}})).status,403);
+    assert.equal((await fetch(f.origin+path+'?generation=2',{headers:{cookie:f.cookie}})).status,400);
+    const response=await fetch(f.origin+path,{headers:{cookie:f.cookie}}),view=await response.json() as any;
+    assert.equal(response.status,200);assert.equal(view.identity,'recorded');assert.equal(view.record.nativeTurnId,'turn-fixture');assert.equal(view.history.length,2);
+    assert.equal(JSON.stringify(view).includes('PRIVATE_PROMPT'),false);
+    const headers={cookie:f.cookie,Origin:f.origin,'Content-Type':'application/json','X-CSRF-Token':f.csrfToken};
+    assert.equal((await fetch(f.origin+path,{method:'POST',headers,body:JSON.stringify({ownerIncarnation:'forged'})})).status,404);
+    assert.equal((await fetch(f.origin+'/api/runs/'+randomUUID()+'/operation',{headers:{cookie:f.cookie}})).status,404);
+    assert.equal(f.store.lastSeq(),seq);assert.equal(f.probes(),0);assert.equal(f.count(),0);
+  }finally{await f.close();}
+});
 test('state reload does not start a turn; SSE replays only events after cursor',async()=>{
   const f=await fixture();try{
     const first=f.store.append('fixture.first',null,{});f.store.append('fixture.second',null,{});

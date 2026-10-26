@@ -4,6 +4,8 @@ import { EventEmitter } from 'node:events';
 import type { Run, AppEvent, Project, Workspace } from '../shared/types.ts';
 import { terminal } from '../shared/types.ts';
 import type {RunMetrics} from '../shared/analytics.ts';
+import type {SoloOperationIdentity} from '../shared/solo-operation.ts';
+import {migrateSoloOperations,readSoloOperation,insertSoloOperation,updateSoloOperation} from './solo-operation-journal.ts';
 export class Store extends EventEmitter {
   db:DatabaseSync;
   private pendingEvents:AppEvent[]|null=null;
@@ -17,6 +19,7 @@ export class Store extends EventEmitter {
       CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY,request_id TEXT NOT NULL UNIQUE,digest TEXT NOT NULL,body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS run_metrics(run_id TEXT PRIMARY KEY,body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS events(seq INTEGER PRIMARY KEY AUTOINCREMENT,kind TEXT NOT NULL,at TEXT NOT NULL,run_id TEXT,data TEXT NOT NULL);`);
+    try{migrateSoloOperations(this.db);}catch(error){this.db.close();throw error;}
     for(const r of this.runs()) if(!terminal(r.execution)||r.execution==='lost') {
       if(!terminal(r.execution))this.updateRun(r.id,{execution:'lost'},'run.lost');
       const metrics=this.getRunMetrics(r.id);
@@ -35,6 +38,11 @@ export class Store extends EventEmitter {
   saveWorkspace(w:Workspace) {this.db.prepare('INSERT INTO workspaces VALUES(?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body').run(w.id,JSON.stringify(w));this.append('workspace.'+w.status,null,{workspaceId:w.id,projectId:w.projectId});}
   runs():Run[] {return this.db.prepare('SELECT body FROM runs ORDER BY rowid').all().map(row=>JSON.parse(row.body as string));}
   getRun(id:string):Run|null {const row=this.db.prepare('SELECT body FROM runs WHERE id=?').get(id);return row?JSON.parse(row.body as string):null;}
+  soloOperation(id:string){
+    const run=this.getRun(id);if(!run)throw new Error('RUN_NOT_FOUND');const view=readSoloOperation(this.db,id),record=view.record;
+    if(record&&(record.requestId!==run.requestId||record.workspaceId!==(run.workspaceId??null)||record.createdAt!==run.createdAt||record.execution!==run.execution||record.nativeTurnId!==run.turnId))throw new Error('OPERATION_INTEGRITY');
+    return view;
+  }
   runMetricsOverlay(id:string):RunMetrics|null {const value=this.volatileMetrics.get(id);return value?structuredClone(value):null;}
   getRunMetrics(id:string):RunMetrics|null {const pending=this.runMetricsOverlay(id);if(pending)return pending;const row=this.db.prepare('SELECT body FROM run_metrics WHERE run_id=?').get(id);return row?JSON.parse(String(row.body)):null;}
   /** Telemetry has its own timestamps and may arrive after execution completes. */
@@ -47,12 +55,12 @@ export class Store extends EventEmitter {
     const row=this.db.prepare('SELECT body,digest FROM runs WHERE request_id=?').get(id);
     return row?{run:JSON.parse(row.body as string),digest:row.digest as string}:null;
   }
-  createRun(requestId:string,digest:string,prompt:string,workspaceId?:string,task?:Pick<Run,'taskId'|'planningVersionId'|'requirementLabels'>):Run {
+  createRun(requestId:string,digest:string,prompt:string,workspaceId?:string,task?:Pick<Run,'taskId'|'planningVersionId'|'requirementLabels'>,identity?:SoloOperationIdentity):Run {
     const now=new Date().toISOString();
     const r:Run={id:randomUUID(),requestId,turnId:null,prompt,response:'',execution:'starting',verification:'not_run',createdAt:now,updatedAt:now,...(workspaceId?{workspaceId}:{}),...task};
     this.db.exec('BEGIN IMMEDIATE');
     let event:AppEvent;
-    try {this.db.prepare('INSERT INTO runs VALUES(?,?,?,?)').run(r.id,requestId,digest,JSON.stringify(r));event=this.insert('run.created',r.id,{run:r});this.db.exec('COMMIT');}
+    try {this.db.prepare('INSERT INTO runs VALUES(?,?,?,?)').run(r.id,requestId,digest,JSON.stringify(r));if(identity!==undefined)insertSoloOperation(this.db,r,identity);event=this.insert('run.created',r.id,{run:r});this.db.exec('COMMIT');}
     catch(e){this.db.exec('ROLLBACK');throw e;}
     this.emit('event',event);return r;
   }
@@ -61,7 +69,7 @@ export class Store extends EventEmitter {
     if(terminal(old.execution)) return old;
     const next={...old,...patch,updatedAt:new Date().toISOString()};
     this.db.exec('BEGIN IMMEDIATE');let event:AppEvent;
-    try {this.db.prepare('UPDATE runs SET body=? WHERE id=?').run(JSON.stringify(next),id);event=this.insert(kind,id,{run:next});this.db.exec('COMMIT');}
+    try {this.db.prepare('UPDATE runs SET body=? WHERE id=?').run(JSON.stringify(next),id);updateSoloOperation(this.db,old,next,kind);event=this.insert(kind,id,{run:next});this.db.exec('COMMIT');}
     catch(e){this.db.exec('ROLLBACK');throw e;}
     this.emit('event',event);return next;
   }

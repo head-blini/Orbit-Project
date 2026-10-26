@@ -24,6 +24,64 @@ class FakeRpc extends EventEmitter {
 }
 function setup(){const rpc=new FakeRpc();const store=new Store(':memory:');const dir=createWorkspace(mkdtempSync(join(tmpdir(),'aicc-controller-')));return {rpc,store,c:new Controller(store,dir,()=>rpc)};}
 
+test('Solo dispatch has durable manager/session identity and replay preserves the same operation',async()=>{
+  const {c,rpc,store}=setup(),request=rpc.request.bind(rpc);let beforeDispatch=false;
+  rpc.request=async(method,params)=>{
+    if(method==='turn/start'){
+      const run=store.runs().at(-1)!,record=store.soloOperation(run.id).record;
+      assert.ok(record);assert.equal(record.execution,'starting');assert.equal(record.nativeSessionId,params.threadId);
+      assert.match(record.ownerIncarnation,/^[a-f0-9-]{36}$/);assert.ok(record.generation>0);beforeDispatch=true;
+    }return request(method,params);
+  };
+  try{
+    await c.connect();const input={requestId:'journal-dispatch-request',prompt:'Fixture'},run=await c.submit(input);
+    assert.equal(beforeDispatch,true);const view=store.soloOperation(run.id);assert.equal(view.record?.nativeTurnId,'turn-fixture');
+    assert.equal((await c.submit(input)).id,run.id);assert.deepEqual(store.soloOperation(run.id),view);assert.equal(rpc.starts,1);
+  }finally{await c.close();store.close();}
+});
+
+test('failed Solo identity persistence never starts a native turn or leaves a partial Run',async()=>{
+  const {c,rpc,store}=setup();try{
+    await c.connect();store.db.exec("CREATE TRIGGER fail_identity BEFORE INSERT ON solo_operations BEGIN SELECT RAISE(FAIL,'fixture'); END;");
+    await assert.rejects(c.submit({requestId:'journal-failure-request',prompt:'Fixture'}));
+    assert.equal(rpc.starts,0);assert.equal(store.runs().length,0);
+    assert.equal(store.db.prepare('SELECT count(*) AS count FROM solo_operation_history').get()!.count,0);
+  }finally{await c.close();store.close();}
+});
+
+test('native notification persistence failure fences the connection even when loss and status writes also fail',async()=>{
+  for(const allWritesFail of [false,true]){
+    const {c,rpc,store}=setup();try{
+      await c.connect();const run=await c.submit({requestId:'journal-notification-failure',prompt:'Fixture'});
+      store.db.exec(`CREATE TRIGGER fail_history BEFORE INSERT ON solo_operation_history ${allWritesFail?'':"WHEN json_extract(NEW.body,'$.execution')='completed'"} BEGIN SELECT RAISE(FAIL,'journal-write-failed'); END;`);
+      if(allWritesFail)store.db.exec("CREATE TRIGGER fail_events BEFORE INSERT ON events BEGIN SELECT RAISE(FAIL,'event-write-failed'); END;");
+      const complete=()=>rpc.emit('notification',{method:'turn/completed',params:{threadId:'thread-fixture',turn:{id:'turn-fixture',status:'completed'}}});
+      assert.doesNotThrow(complete);await new Promise(resolve=>setImmediate(resolve));
+      assert.equal(c.snapshot().provider,'error');assert.equal(c.snapshot().issue,'STATE_PERSISTENCE_FAILED');
+      assert.equal(c.snapshot().soloRecoveryRequired,true);assert.equal(rpc.dead,true);
+      assert.equal(store.getRun(run.id)?.execution,allWritesFail?'running':'lost');
+      assert.equal(store.soloOperation(run.id).history.some(entry=>entry.execution==='completed'),false);
+      await assert.rejects(c.connect(),/SOLO_RECOVERY_REQUIRED/);
+      await assert.rejects(c.submit({requestId:'journal-notification-next',prompt:'Next'}),/SOLO_RECOVERY_REQUIRED/);
+      store.db.exec('DROP TRIGGER fail_history; DROP TRIGGER IF EXISTS fail_events');
+      const before=store.soloOperation(run.id);complete();assert.deepEqual(store.soloOperation(run.id),before);
+      assert.equal(rpc.starts,1);
+    }finally{store.db.exec('DROP TRIGGER IF EXISTS fail_history; DROP TRIGGER IF EXISTS fail_events');await c.close();store.close();}
+  }
+});
+
+test('closed and approval audit failures cannot escape native listeners or permit another dispatch',async()=>{
+  for(const event of ['closed','approval']){
+    const {c,rpc,store}=setup();try{
+      await c.connect();await c.submit({requestId:'native-audit-failure',prompt:'Fixture'});
+      store.db.exec("CREATE TRIGGER fail_events BEFORE INSERT ON events BEGIN SELECT RAISE(FAIL,'event-write-failed'); END;");
+      assert.doesNotThrow(()=>rpc.emit(event,{method:'fixtureApproval'}));await new Promise(resolve=>setImmediate(resolve));
+      assert.equal(c.snapshot().soloRecoveryRequired,true);assert.equal(c.snapshot().provider,'error');
+      await assert.rejects(c.connect(),/SOLO_RECOVERY_REQUIRED/);assert.equal(rpc.starts,1);
+    }finally{store.db.exec('DROP TRIGGER IF EXISTS fail_events');await c.close();store.close();}
+  }
+});
+
 test('credential output stays redacted in every persisted run and event across chunks and interleaved items',async()=>{
   const {c,rpc,store}=setup();try{
     await c.connect();const run=await c.submit({requestId:'output-redaction-request',prompt:'Explain the synthetic fixture'});

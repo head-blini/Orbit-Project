@@ -66,7 +66,9 @@ test('terminal boundary before delayed acknowledgement is measured once and rema
   try{
     await c.connect();const pending=c.submit({requestId:'metrics-preack',prompt:'fixture'});await started;
     const r=store.runs()[0],before=store.getRunMetrics(r.id)!;assert.equal(before.turnId,null);assert.ok(before.finishedAt);assert.ok(before.durationMs!==null);
+    const operation=store.soloOperation(r.id);assert.equal(operation.record?.execution,'completed');assert.equal(operation.record?.nativeTurnId,'turn-1');
     release();await pending;const after=store.getRunMetrics(r.id)!;assert.equal(after.finishedAt,before.finishedAt);assert.equal(after.durationMs,before.durationMs);assert.equal(after.turnId,'turn-1');
+    assert.deepEqual(store.soloOperation(r.id),operation,'late acceptance must not regress the terminal journal or identity');
   }finally{release();await c.close();store.close();rmSync(root,{recursive:true,force:true});}
 });
 test('metrics-only recovery failure keeps startup available with an incomplete volatile projection',()=>{

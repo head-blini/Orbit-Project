@@ -54,6 +54,12 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
     }
     if(url.pathname.startsWith('/api/')){
       if(!session||session.expires<=Date.now())throw new AppError('SESSION_REQUIRED',401);
+      const soloOperation=url.pathname.match(/^\/api\/runs\/([a-f0-9-]{36})\/operation$/);
+      if(req.method==='GET'&&soloOperation){
+        if(url.search)throw new AppError('INVALID_FIELDS',400);
+        if(!controller.store.getRun(soloOperation[1]))throw new AppError('RUN_NOT_FOUND',404);
+        json(res,200,controller.store.soloOperation(soloOperation[1]));return;
+      }
       const studioRoute=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/(plans|artifacts|tasks)(?:\/([a-f0-9-]{36})\/(revisions|approve|task-drafts|history|diff|replan))?$/);
       const goalRoute=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/goals(?:\/([a-f0-9-]{36})\/(state|history))?$/);
       if(req.method==='POST'){
