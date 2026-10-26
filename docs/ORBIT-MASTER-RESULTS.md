@@ -1,5 +1,11 @@
 # Orbit 전체 구현·검증 증거
 
+## Recovery 순수계약 감사 체크포인트 (2026-10-27)
+
+- Task25 `25ecf4a`, Task26 `42b45c9` 로컬 커밋 완료. 이전부터 별도 미커밋으로 있던 `shared/recovery.ts`와 `tests/recovery-contract.test.ts`는 독립 read-only 검토를 마쳤다. 19개 계약 테스트가 실제 통과했고 최종 전체841 gate에도 포함돼 있다. 신뢰된 서버 facts라는 명시된 경계 안에서 재현 가능한 해제 우회는 발견하지 못했다.
+- 계약은 operation/request/runtime/manager generation/session/turn, process identity, profile qualification, workspace/source, recovery revision, ownership와 수동 확인의 유효시간을 비교한다. PID/lease/timeout/interrupt ACK/EOF는 종료 증거가 아니다. 수동 확인도 unknown identity·안전성·실행 중인 소유자·작업을 우회하지 못한다.
+- 이것은 pure 판정 함수이며 collector, OS 종료 증명, persisted recovery ledger, lock authority, CAS commit 또는 실제 release endpoint는 아니다. 합성 사실을 실제 qualification으로 쓰지 않는다. 다음 구현은 실제 수집·영속 기록·소유권 연결이며, 현재 quarantine의 자동/수동 해제는 여전히 제공하지 않는다.
+
 ## Task26 — Solo 종료 불확실 실행 격리 (2026-10-27)
 
 - Task25 local commit `25ecf4a` 위에서 진행. 저장된 lost Run 또는 저장 실패 시 메모리 차단 상태가 있으면 재연결·새 프롬프트·작업 공간 변경과 Check/Review/Planning/Workflow/Merge/Model Hub의 새 실행을 차단한다. 기존 요청 결과 재조회와 기록·상태 조회는 실행을 반복하지 않는다. 같은 상태 DB 재시작 시 unresolved Run을 lost로 읽어 계속 차단한다.
