@@ -125,7 +125,7 @@ export function serializePresentation(value:unknown):Uint8Array {
 function canvasContents(slide:CanvasSlide):string {
   const point=(n:number)=>Math.round(n*12700);
   const transform=(x:number,y:number,w:number,h:number,extra='')=>`<a:xfrm${extra}><a:off x="${point(x)}" y="${point(y)}"/><a:ext cx="${point(w)}" cy="${point(h)}"/></a:xfrm>`;
-  const fills={none:'<a:noFill/>',paper:'<a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill>',blue:'<a:solidFill><a:srgbClr val="EDF5FF"/></a:solidFill>',note:'<a:solidFill><a:srgbClr val="FFF2CC"/></a:solidFill>'};
+  const fills={none:'<a:noFill/>',paper:'<a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill>',blue:'<a:solidFill><a:srgbClr val="EDF5FF"/></a:solidFill>',note:'<a:solidFill><a:srgbClr val="FFF2CC"/></a:solidFill>',ink:'<a:solidFill><a:srgbClr val="355C86"/></a:solidFill>'};
   const stroke='<a:solidFill><a:srgbClr val="355C86"/></a:solidFill>';
   return slide.elements.map((e,i)=>{
     const id=i+2,name=escape(e.id);

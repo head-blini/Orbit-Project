@@ -52,3 +52,11 @@ test('legacy presentation objects are rejected by the fixed-primitive preview wi
   const html=renderToStaticMarkup(createElement(FixedCanvasPreview,{document:legacy as unknown as CanvasPresentationDocument,label:'C4'}));
   assert.match(html,/role="alert"/);assert.doesNotMatch(html,/<svg/);
 });
+
+test('fixed diamond preview matches native bounds and distinguishes its solid foreground fill',async()=>{
+  const {FixedCanvasPreview}=await component(),doc=document();
+  Object.assign(doc.slides[0].elements[0],{geometry:'diamond',fill:'ink',x:100,y:200,width:24,height:40});
+  const html=renderToStaticMarkup(createElement(FixedCanvasPreview,{document:doc,label:'UML'}));
+  assert.match(html,/<polygon[^>]*points="112,200 124,220 112,240 100,220"[^>]*fill="#b9d9df"/);
+  assert.doesNotMatch(html,/role="alert"|<image|foreignObject/);
+});

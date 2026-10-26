@@ -7,4 +7,7 @@ export { layoutSequence } from './sequence-layout.ts';
 export {C4Preview} from './C4Preview.tsx';
 export {parseC4,validateC4} from './c4.ts';
 export {layoutC4} from './c4-layout.ts';
+export {ClassDiagramPreview} from './ClassDiagramPreview.tsx';
+export {parseClassDiagram,validateClassDiagram,validateClassModel} from './uml-class.ts';
+export {layoutClassDiagram} from './uml-class-layout.ts';
 export { toPresentationDocument,exportPresentation,validatePresentationDocument } from './presentation.ts';

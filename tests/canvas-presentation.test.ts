@@ -27,3 +27,14 @@ test('generic canvas rejects unknown formats, unsafe primitives and nonportable 
     d=>d.slides[0].elements[1].id='system',d=>d.slides[0].width=71];
   for(const edit of edits){const doc=document();edit(doc);assert.equal(validatePresentationDocument(doc),false);assert.throws(()=>serializePresentation(doc),/INVALID_PRESENTATION/);}
 });
+
+test('fixed composition diamonds export as native editable geometry with a bounded foreground fill',()=>{
+  const doc=document();Object.assign(doc.slides[0].elements[0],{geometry:'diamond',fill:'ink'});
+  assert.equal(validatePresentationDocument(doc),true);
+  const xml=Buffer.from(serializePresentation(doc)).toString();
+  assert.match(xml,/<a:prstGeom prst="diamond"/);assert.match(xml,/<a:solidFill><a:srgbClr val="355C86"\/><\/a:solidFill>/);
+  for(const geometry of ['path','polygon','star','diamond<script>']){
+    const invalid=document();Object.assign(invalid.slides[0].elements[0],{geometry,fill:'ink'});
+    assert.equal(validatePresentationDocument(invalid),false);assert.throws(()=>serializePresentation(invalid),/INVALID_PRESENTATION/);
+  }
+});

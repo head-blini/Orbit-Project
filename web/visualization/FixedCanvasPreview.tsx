@@ -3,7 +3,7 @@ import type {CanvasPresentationDocument} from '../../shared/canvas.ts';
 import type {SequencePresentationDocument} from '../../shared/sequence.ts';
 import {validatePresentationDocument} from './presentation.ts';
 
-const fills={none:'none',paper:'#14242e',blue:'#315b72',note:'#403e27'};
+const fills={none:'none',paper:'#14242e',blue:'#315b72',note:'#403e27',ink:'#b9d9df'};
 
 /** Fixed primitives only; user text is escaped by React and never used as markup or URLs. */
 export function FixedCanvasPreview({document,label}:{document:CanvasPresentationDocument|SequencePresentationDocument;label:string}){
@@ -18,6 +18,7 @@ export function FixedCanvasPreview({document,label}:{document:CanvasPresentation
         {slide.elements.map(element=>{
           if(element.type==='box'){
             const style={fill:fills[element.fill],stroke:element.stroke==='none'?'none':'#93b8c5',strokeWidth:1.5};
+            if(element.geometry==='diamond')return <polygon key={element.id} points={`${element.x+element.width/2},${element.y} ${element.x+element.width},${element.y+element.height/2} ${element.x+element.width/2},${element.y+element.height} ${element.x},${element.y+element.height/2}`} {...style}/>;
             return element.geometry==='ellipse'?<ellipse key={element.id} cx={element.x+element.width/2} cy={element.y+element.height/2} rx={element.width/2} ry={element.height/2} {...style}/>:<rect key={element.id} x={element.x} y={element.y} width={element.width} height={element.height} {...style}/>;
           }
           if(element.type==='line')return <line key={element.id} x1={element.x1} y1={element.y1} x2={element.x2} y2={element.y2} stroke="#b9d9df" strokeWidth="1.5" strokeDasharray={element.dash==='dash'?'7 5':undefined} markerEnd={element.arrow==='triangle'?`url(#${marker}-${index})`:undefined}/>;

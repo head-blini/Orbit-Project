@@ -4,6 +4,7 @@ import { validatePresentationDocument } from '../../web/visualization/presentati
 import { layoutSequence } from '../../web/visualization/sequence-layout.ts';
 import { parseC4 } from '../../web/visualization/c4.ts';
 import { layoutC4 } from '../../web/visualization/c4-layout.ts';
+import { layoutClassDiagram } from '../../web/visualization/uml-class-layout.ts';
 import type { DatabaseSync } from 'node:sqlite';
 import type { ArtifactInput,ArtifactRecord } from '../../shared/parallel.ts';
 
@@ -20,6 +21,7 @@ export function validateArtifactInput(input:Input) {
     if(!validateMermaid(input.source).ok)return invalid();
     const document=parseMermaidDocument(input.source);
     if(document.kind==='sequence')layoutSequence(document); // A saved source must fit the same preview/export budgets.
+    else if(document.kind==='class')layoutClassDiagram(document);
   }
   else if(input.kind==='c4')layoutC4(parseC4(input.source));
   else {

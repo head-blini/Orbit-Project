@@ -1,6 +1,6 @@
 # Visualization integration contract
 
-Current implementation contract (2026-10-26). Studio and timeline are mounted in the product; SQLite Artifact history, authenticated HTTP save/history/export, and actual editable PPTX/Markdown downloads are connected. Task22 adds sequence diagrams. Verification evidence and remaining product gaps belong in `ORBIT-MASTER-RESULTS.md`; this contract is not a claim that unrun checks passed.
+Current implementation contract (2026-10-26). Studio and timeline are mounted in the product; SQLite Artifact history, authenticated HTTP save/history/export, and actual editable PPTX/Markdown downloads are connected. Task22 adds sequence diagrams and Task23 adds bounded C4 views. Verification evidence and remaining product gaps belong in `ORBIT-MASTER-RESULTS.md`; this contract is not a claim that unrun checks passed.
 
 ## Inert diagram inputs
 
@@ -34,9 +34,21 @@ Limits: 10 participants, 120 normalized events (shorthand adds an activation eve
 
 `layoutSequence(diagram)` produces one deterministic `SequencePresentationDocument` for both SVG and PPTX. Text wraps without truncation; long diagrams paginate with repeated participant headers and continuing fragment/activation context. Pages have natural scrollable dimensions. Grammar-valid sources can still exceed geometry/page/byte budgets: `SEQUENCE_LAYOUT_LIMIT` prevents preview export and server persistence before any partial result is saved.
 
+### UML class source contract (Task24)
+
+`parseMermaidDocument` additionally dispatches `classDiagram` to `parseClassDiagram`; `parseMermaid` retains its existing flowchart return value. The strict `ClassDiagram` model in `shared/uml-class.ts` has explicit classes with display names, optional interface/abstract/enumeration annotation, attributes and operations, plus normalized typed relationships. The exact source is retained under Artifact kind `mermaid`.
+
+Declare every class before relationships. Supported declarations are `class Id`, `class Id["Display name"]`, or either followed by a multiline `{ ... }` body. Body members retain visibility and ordinary type notation, such as `+name: String` and `+load(id: String): Project`. One balanced, non-nested parenthesis pair identifies an operation. Annotations are `<<interface>>`, `<<abstract>>`, or `<<enumeration>>` on their own body line. No implicit classes, later member patches or inline `{}` bodies.
+
+Eight relationship kinds are supported: inheritance (`--|>`), composition (`*--`), aggregation (`o--`), directed association (`-->`), dependency (`..>`), realization (`..|>`), solid link (`--`) and dashed link (`..`). Reverse single-marker forms normalize semantic direction and exchange endpoint multiplicities together. Inheritance/realization point child→parent; composition/aggregation retain whole→part with the diamond at the whole. Equivalent reversed plain links are duplicate relations. Multiplicities are `*`, canonical integers0–999, or ascending `a..b` / `a..*`; optional relation labels are inert text.
+
+Limits:256KiB UTF-8,1024source lines,1–10classes,16members per class/80total,20relationships,64ASCII ID characters,80Unicode codepoints per display name,160per member/label,32fixed diagnostics. Direct AST validation requires exact enumerable data fields, plain prototypes and dense arrays, and rejects accessor/serialization hooks. Unsafe Unicode/control characters, markup/entities/encoded syntax, links/executable URI schemes, callbacks/styles/directives/comments, namespace/generics, member static/abstract suffixes, self relations and two-headed markers are unsupported. Known URI schemes remain blocked in ordinary text. The member parser permits unambiguous `data: Type` / `file: Type` fields and fully typed method parameters, using an identifier type with optional `[]`; this narrow exception excludes unions, defaults, generics and qualified type names. Ordinary member colons never become links.
+
+`layoutClassDiagram` returns one complete `canvas-v1` overview or throws `CLASS_LAYOUT_LIMIT` before preview/export/persistence. Cards have separate name/attribute/operation compartments, native markers and endpoint multiplicities. Fixed lanes below cards and label slots between cards avoid arbitrary path search. Perpendicular crossings are non-junctions. The authored model does not attest to source-code/runtime structure or design correctness.
+
 ## Presentation and real file output
 
-### C4 source contract (Task23 integration in progress)
+### C4 source contract (Task23)
 
 `shared/c4.ts` defines `C4Diagram`: `{format:'c4-v1',title,view,scope,elements,relationships}`. `view` is `context`, `container` or `component`; `scope` references the focus system/container. `parseC4` validates raw JSON size and returns the typed model; `validateC4` also validates direct objects. Each element has `id,kind,name,description,parentId,technology`; each relationship has `id,from,to,description,technology`. Parent/technology use explicit null when absent. Containers/components require technology; relationships between container leaves require technology too.
 
@@ -46,7 +58,7 @@ Limits:12elements including boundaries,24relationships,ASCII identifiers up to64
 
 `toPresentationDocument(graph)` retains the legacy single-slide model: editable `shape`, `text`, and endpoint-linked `connector` elements. `validatePresentationDocument` preserves its 800-element / 256 KiB / 160 UTF-16 text contract. `serializePresentation` produces an actual deterministic PPTX ZIP with DrawingML, internal relationships, editable text/shapes/connectors and no raster images, external relationships or macros. Legacy diagrams retain 16:9 scaling.
 
-The additive `format:'sequence-v1'` and `format:'canvas-v1'` models use native point coordinates with `box` (rect/ellipse), `line` (fixed solid/dash stroke and none/triangle arrow), and `label` primitives from `shared/canvas.ts`. Sequence type aliases and serialized bytes remain compatible. Element order is retained. Every page shares dimensions; minimum 72 points per axis meets OOXML slide-size bounds, maximum 3600×1200 points. Positive boxes/segments have at least a one-point extent. Label font size is 17–48 points; wrapped labels allow 512 UTF-16 units. Limits: 32 pages, 800 elements/page, 8000 total elements, 1 MiB generated JSON. These generated limits do not increase the stored-source budget. SVG and PPTX consume the same page geometry.
+The additive `format:'sequence-v1'` and `format:'canvas-v1'` models use native point coordinates with `box` (rect/ellipse/fixed diamond), `line` (fixed solid/dash stroke and none/triangle arrow), and `label` primitives from `shared/canvas.ts`. Sequence type aliases and serialized bytes remain compatible. Element order is retained. Every page shares dimensions; minimum 72 points per axis meets OOXML slide-size bounds, maximum 3600×1200 points. Positive boxes/segments have at least a one-point extent. Label font size is 17–48 points; wrapped labels allow 512 UTF-16 units. Limits: 32 pages, 800 elements/page, 8000 total elements, 1 MiB generated JSON. These generated limits do not increase the stored-source budget. SVG and PPTX consume the same page geometry.
 
 ## Studio and persistence
 
@@ -57,9 +69,9 @@ The additive `format:'sequence-v1'` and `format:'canvas-v1'` models use native p
 - `onExportArtifact(record,'pptx'|'markdown')` downloads the exact selected saved revision. Dirty source must be saved first.
 - Optional `onExportPresentation(document)` supports an embedding host's exporter and accepts legacy, sequence or generic canvas presentation documents.
 
-Editor state is keyed by project; foreign records are filtered. The sequence sample is a local editable example, never an agent invocation. Source remains exact; a new-Artifact action detaches history while retaining source. Errors use fixed diagnostics or generic messages.
+Editor state is keyed by project; foreign records are filtered. The sequence, class and C4 samples are local editable examples, never agent invocations. Source remains exact; a new-Artifact action detaches history while retaining source. Errors use fixed diagnostics or generic messages.
 
-`SqliteArtifactRepository` is the product repository; `ArtifactRepository` is the memory implementation. UUIDs, hashes, revision numbers and timestamps are server assigned. SHA-256 covers exact original UTF-8 source bytes, including whitespace. Kind is immutable within an Artifact. Metadata permits 32 entries, keys up to 64 and values up to 1000 UTF-16 units. Input validation and sequence layout execute before persistence. SQLite mutations share the Studio transaction, audit event and idempotency receipt.
+`SqliteArtifactRepository` is the product repository; `ArtifactRepository` is the memory implementation. UUIDs, hashes, revision numbers and timestamps are server assigned. SHA-256 covers exact original UTF-8 source bytes, including whitespace. Kind is immutable within an Artifact. Metadata permits 32 entries, keys up to 64 and values up to 1000 UTF-16 units. Input validation and sequence, class or C4 layout execute before persistence. SQLite mutations share the Studio transaction, audit event and idempotency receipt.
 
 HTTP retains session/origin/CSRF checks, registered project ownership, quotas, exact request fields and expected revisions. Historical export requires the requested revision/hash, rechecks stored record identity and recomputes the source hash, then revalidates input. Corruption returns `ARTIFACT_INTEGRITY` (409); no bytes are returned. Markdown contains exact source inside a safe-length fence. There is no arbitrary output path, file read or provider call in export.
 
@@ -75,4 +87,4 @@ HTTP retains session/origin/CSRF checks, registered project ownership, quotas, e
 
 Run `npm run verify` with Node 24. Focused sequence parser/layout/PPTX/Studio tests supplement existing malicious-input, project-isolation, immutable revision, rollback and legacy export coverage. Actual browser and PPTX import/render checks are recorded separately with their real results.
 
-C4 Task23 is in integration; other UML forms and PDF export remain separate incomplete requirements. Supporting this inert subset does not imply support for full Mermaid syntax or the Mermaid layout engine. PowerPoint/Google Slides manual round-trip evidence must be reported separately from package inspection and the bundled importer.
+C4 Task23 and UML class Task24 local integration are complete. Other UML syntax remains unsupported; PDF export is an incomplete requirement. Supporting this inert subset does not imply support for full Mermaid syntax or the Mermaid layout engine. PowerPoint/Google Slides manual round-trip evidence must be reported separately from package inspection and the bundled importer.

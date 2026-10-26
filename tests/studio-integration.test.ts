@@ -26,6 +26,44 @@ async function fixture(path=':memory:'){
 }
 const plans='/api/projects/project-a/plans',artifacts='/api/projects/project-a/artifacts';
 
+const classSource='classDiagram\nclass Project["프로젝트"] {\n+id: String\n+save(): bool\n}\nclass Task {\n+title: String\n+run(): Result\n}\nclass Repository {\n<<interface>>\n+load(id: String): Project\n}\nclass LocalRepository\nProject "1" *-- "0..999" Task : 작업 보존\nLocalRepository ..|> Repository : 구현\nTask ..> Repository : 조회\n';
+
+test('class diagrams retain exact source and immutable editable exports through project isolation and restart',async()=>{
+  const path=join(mkdtempSync(join(tmpdir(),'orbit-uml-class-')),'test.sqlite');let f=await fixture(path);
+  try{
+    const response=await f.post(artifacts,{requestId:randomUUID(),input:{kind:'mermaid',source:classSource,metadata:{title:'Classes'}}});assert.equal(response.status,200);
+    const first=await response.json() as any;assert.equal(first.source,classSource);assert.equal(first.kind,'mermaid');
+    const url=`${artifacts}/${first.id}/export?revision=1&hash=${first.contentHash}&format=pptx`;
+    const exported=await f.get(url);assert.equal(exported.status,200);const bytes=Buffer.from(await exported.arrayBuffer());
+    assert.equal(bytes.subarray(0,4).toString('hex'),'504b0304');assert.match(bytes.toString(),/<a:prstGeom prst="diamond"/);assert.match(bytes.toString(),/0\.\.999/);
+    assert.match(bytes.toString(),/load/);assert.match(bytes.toString(),/<p:cxnSp>/);assert.doesNotMatch(bytes.toString(),/<p:pic|TargetMode="External"/);
+    assert.ok((await (await f.get(url.replace('format=pptx','format=markdown'))).text()).includes('```mermaid\n'+classSource+'\n```'));
+    assert.equal((await f.get(url.replace('project-a','project-b'))).status,404);assert.equal((await f.get(url.replace(first.contentHash,'0'.repeat(64)))).status,409);
+    const revisedSource=classSource.replace('+title: String','+name: String');
+    const revised=await f.post(`${artifacts}/${first.id}/revisions`,{requestId:randomUUID(),expectedRevision:1,input:{kind:'mermaid',source:revisedSource,metadata:{title:'Classes revised'}}});assert.equal(revised.status,200);
+    await f.close();f=await fixture(path);assert.deepEqual(Buffer.from(await (await f.get(url)).arrayBuffer()),bytes);
+    assert.deepEqual((await (await f.get(`${artifacts}/${first.id}/history`)).json() as any[]).map(r=>r.source),[classSource,revisedSource]);assert.equal(f.store.runs().length,0);
+    f.store.db.prepare('UPDATE artifacts SET body=? WHERE project_id=? AND id=? AND revision=1').run(JSON.stringify({...first,source:classSource.replace('save','changed')}),'project-a',first.id);
+    for(const format of ['pptx','markdown']){const corrupt=await f.get(url.replace('format=pptx',`format=${format}`));assert.equal(corrupt.status,409);assert.deepEqual(await corrupt.json(),{error:'ARTIFACT_INTEGRITY'});}
+  }finally{await f.close();}
+});
+
+test('class unsupported syntax and geometry overflow leave history and audit untouched',async()=>{
+  const f=await fixture();try{
+    const response=await f.post(artifacts,{requestId:randomUUID(),input:{kind:'mermaid',source:classSource,metadata:{}}});assert.equal(response.status,200);
+    const first=await response.json() as any,before=f.store.lastSeq();
+    for(const source of [classSource+'Task --> Task',classSource+'Task --> Missing',classSource+'click Task href "https://example.invalid"',classSource.replace('+id: String','+<script>bad</script>')]){
+      assert.equal((await f.post(artifacts,{requestId:randomUUID(),input:{kind:'mermaid',source,metadata:{}}})).status,400);
+    }
+    const limited=['classDiagram',...Array.from({length:5},(_,i)=>[`class C${i} {`,...Array.from({length:16},(_,j)=>`+field${j}: ${'설'.repeat(140)}`),'}']).flat()].join('\n');
+    const input={kind:'mermaid',source:limited,metadata:{}};
+    for(const [url,body] of [[artifacts,{requestId:randomUUID(),input}],[`${artifacts}/${first.id}/revisions`,{requestId:randomUUID(),expectedRevision:1,input}]] as const){
+      const rejected=await f.post(url,body);assert.equal(rejected.status,422);assert.deepEqual(await rejected.json(),{error:'CLASS_LAYOUT_LIMIT'});
+    }
+    assert.equal(f.store.lastSeq(),before);assert.deepEqual(await (await f.get(`${artifacts}/${first.id}/history`)).json(),[first]);assert.deepEqual(await (await f.get(artifacts)).json(),[first]);
+  }finally{await f.close();}
+});
+
 test('C4 Artifact preserves exact source, project ownership and editable historical exports through restart',async()=>{
   const path=join(mkdtempSync(join(tmpdir(),'orbit-c4-')),'test.sqlite');let f=await fixture(path);
   const source=JSON.stringify(c4Samples.container,null,2)+'\n';

@@ -62,7 +62,7 @@ function validateCanvasPresentation(doc:Record<string,unknown>):boolean {
         const common=['type','id','x','y','width','height'];
         if(!['x','y','width','height'].every(k=>finite(e[k]))||e.width<1||e.height<1||e.x+e.width>slide.width||e.y+e.height>slide.height)return false;
         if(e.type==='box'){
-          if(!exact(e,[...common,'geometry','fill','stroke'])||!['rect','ellipse'].includes(e.geometry)||!['none','paper','blue','note'].includes(e.fill)||!['none','solid'].includes(e.stroke))return false;boxes++;
+          if(!exact(e,[...common,'geometry','fill','stroke'])||!['rect','ellipse','diamond'].includes(e.geometry)||!['none','paper','blue','note','ink'].includes(e.fill)||!['none','solid'].includes(e.stroke))return false;boxes++;
         }else if(!exact(e,[...common,'text','fontSize','align'])||typeof e.text!=='string'||e.text.length>512||!xmlText(e.text)||!finite(e.fontSize)||e.fontSize<17||e.fontSize>48||!['left','center'].includes(e.align))return false;
       }else return false;
     }

@@ -27,6 +27,7 @@ test('dedicated Studio pages render only their editor, preserve safe preview and
     assert.match(viz,/Visualization Studio/);assert.doesNotMatch(viz,/Planning Studio|저장된 Task 초안|모의 제공자 정책/);
     assert.match(viz,/<svg/);assert.doesNotMatch(viz,/<script|foreignObject|<iframe/);
     assert.match(viz,/<button[^>]*disabled=""[^>]*>PPTX 내보내기/);
+    assert.match(viz,/클래스 예제 불러오기/);assert.match(viz,/classDiagram/);assert.match(viz,/직접 작성한 클래스/);
     const empty=renderToStaticMarkup(createElement(StudioPage,{projectId:'',page:'planning',online:false,post}));
     assert.match(empty,/<fieldset[^>]*disabled/);assert.match(empty,/#\/projects/);assert.doesNotMatch(empty,/textarea/);
     const providers=renderToStaticMarkup(createElement(MockProviders,{connections:[{id:'bedrock',status:'mock_only',externalApiEnabled:false,coding:false}],post}));

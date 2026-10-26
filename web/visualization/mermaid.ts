@@ -1,5 +1,7 @@
 import {parseSequence,validateSequence} from './sequence.ts';
 import type {SequenceDiagram} from '../../shared/sequence.ts';
+import {parseClassDiagram,validateClassDiagram} from './uml-class.ts';
+import type {ClassDiagram} from '../../shared/uml-class.ts';
 
 // Intentionally a small, inert flowchart grammar; not the full Mermaid language.
 const identifier = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
@@ -58,6 +60,7 @@ function parse(source:string) {
 
 export function validateMermaid(source:string):{ok:boolean;issues:{code:string;line?:number}[]} {
   if(sequenceHeader(source))return validateSequence(source);
+  if(classHeader(source))return validateClassDiagram(source);
   const {issues}=parse(source);return {ok:issues.length===0,issues};
 }
 
@@ -71,7 +74,11 @@ function sequenceHeader(source:string):boolean {
   return typeof source==='string'&&source.length<=256*1024&&source.replace(/\r\n/g,'\n').split('\n').find(line=>line.trim())?.trim()==='sequenceDiagram';
 }
 
+function classHeader(source:string):boolean {
+  return typeof source==='string'&&source.length<=256*1024&&source.replace(/\r\n/g,'\n').split('\n').find(line=>line.trim())?.trim()==='classDiagram';
+}
+
 /** Additive dispatch preserves parseMermaid's exact legacy flowchart shape. */
-export function parseMermaidDocument(source:string):{kind:'flowchart';graph:ReturnType<typeof parseMermaid>}|SequenceDiagram {
-  return sequenceHeader(source)?parseSequence(source):{kind:'flowchart',graph:parseMermaid(source)};
+export function parseMermaidDocument(source:string):{kind:'flowchart';graph:ReturnType<typeof parseMermaid>}|SequenceDiagram|ClassDiagram {
+  return sequenceHeader(source)?parseSequence(source):classHeader(source)?parseClassDiagram(source):{kind:'flowchart',graph:parseMermaid(source)};
 }
