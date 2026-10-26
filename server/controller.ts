@@ -12,6 +12,7 @@ import { Projects } from './projects.ts';
 import { evaluateLaunch,outboundDenial,providerConnections } from './providers/policy.ts';
 import { Studio } from './studio.ts';
 import { VerificationService,type VerificationConfiguration } from './verification-service.ts';
+import {VerificationSetupService} from './verification-setup.ts';
 import type {TaskVerificationPreview} from '../shared/acceptance.ts';
 import { collectCodexUsage,unknownUsage } from './usage.ts';
 import type { CodexUsage } from '../shared/usage.ts';
@@ -39,6 +40,7 @@ export class Controller {
   readonly modelHub:ModelHubService;
   readonly merges:MergeService;
   readonly workflows:WorkflowService;
+  private readonly verificationSetup:VerificationSetupService;
   readonly reviews:ReviewService;
   readonly planningSuggestions:PlanningAgentService;
   private usage:CodexUsage=unknownUsage();private usagePending:Promise<CodexUsage>|null=null;
@@ -55,10 +57,12 @@ export class Controller {
     this.telemetry=new RunTelemetry(metrics=>this.store.saveRunMetrics(metrics));
     const selected=projects?.workspaces().find(w=>w.id===store.getMeta('selectedWorkspace'));if(selected){this.workspaceId=selected.id;this.workspace=selected.path;}
     this.modelHub=new ModelHubService(store,modelHubConfig,undefined,undefined,()=>this.assertExecutionAvailable());
-    this.verification=new VerificationService(store,projects,verificationConfig,()=>this.soloRecoveryRequired()||!!this.extensionPending||!!this.active()||!!this.connecting||this.switching||this.modelHub.active||!!this.workflows?.active||!!this.reviews?.active||!!this.planningSuggestions?.active);
+    this.verificationSetup=new VerificationSetupService(store,projects,verificationConfig);
+    const commandResolver=(path:string)=>this.verificationSetup.commands(path);
+    this.verification=new VerificationService(store,projects,commandResolver,()=>this.soloRecoveryRequired()||!!this.extensionPending||!!this.active()||!!this.connecting||this.switching||this.modelHub.active||!!this.workflows?.active||!!this.reviews?.active||!!this.planningSuggestions?.active);
     this.sourceGraphs=new SourceGraphService(store,projects);
     this.merges=new MergeService(store,projects,this.verification,()=>this.soloRecoveryRequired()||!!this.extensionPending||!!this.active()||!!this.connecting||this.switching||this.modelHub.active||!!this.workflows?.active||!!this.reviews?.active||!!this.planningSuggestions?.active);
-    this.workflows=new WorkflowService(store,projects,verificationConfig,()=>this.soloRecoveryRequired()||!!this.extensionPending||!!this.active()||!!this.connecting||this.switching||this.modelHub.active||this.verification.active||this.merges.active||!!this.reviews?.active||!!this.planningSuggestions?.active,id=>{this.merges.ensureAvailable(id);this.verification.ensureAvailable(id);this.planningSuggestions.ensureAvailable(id);this.reviews.ensureAvailable(id);});
+    this.workflows=new WorkflowService(store,projects,commandResolver,()=>this.soloRecoveryRequired()||!!this.extensionPending||!!this.active()||!!this.connecting||this.switching||this.modelHub.active||this.verification.active||this.merges.active||!!this.reviews?.active||!!this.planningSuggestions?.active,id=>{this.merges.ensureAvailable(id);this.verification.ensureAvailable(id);this.planningSuggestions.ensureAvailable(id);this.reviews.ensureAvailable(id);});
     this.reviews=new ReviewService(store,projects,factory,()=>this.soloRecoveryRequired()||!!this.extensionPending||!!this.active()||!!this.connecting||this.switching||this.modelHub.active||this.verification.active||this.merges.active||this.workflows.active||!!this.planningSuggestions?.active,id=>{this.planningSuggestions.ensureAvailable(id);this.merges.ensureAvailable(id);this.verification.ensureAvailable(id);this.workflows.ensureAvailable(id);});
     this.planningSuggestions=new PlanningAgentService(store,projects,factory,()=>this.soloRecoveryRequired()||!!this.extensionPending||!!this.active()||!!this.connecting||this.switching||this.modelHub.active||this.verification.active||this.merges.active||this.workflows.active||this.reviews.active,id=>{this.merges.ensureAvailable(id);this.verification.ensureAvailable(id);this.workflows.ensureAvailable(id);this.reviews.ensureAvailable(id);});
   }
@@ -76,6 +80,18 @@ export class Controller {
   developmentResult(workspaceId:string,runId:string|null){if(!this.projects)throw new AppError('UNSUPPORTED',404);if(workspaceId!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);return getDevelopmentResult(this.store,this.projects,this.verification,workspaceId,runId);}
   analyzeSourceGraph(id:string){this.idle();if(id!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);return this.sourceGraphs.analyze(id);}
   sourceGraphArtifact(id:string,input:Parameters<SourceGraphService['artifact']>[1]){this.idle();if(id!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);return this.sourceGraphs.artifact(id,input);}
+  verificationSetupView(id:string){if(id!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);return this.verificationSetup.view(id);}
+  configureVerification(id:string,input:Parameters<VerificationSetupService['configure']>[1]){
+    this.idle();if(id!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);
+    if(!this.projects)throw new AppError('VERIFICATION_SETUP_UNAVAILABLE',404);
+    const workspace=this.projects.writable(id);
+    // Settings apply to every worktree in this project, including inactive ones.
+    for(const related of this.projects.workspaces().filter(item=>item.projectId===workspace.projectId)){
+      this.verification.ensureAvailable(related.id);this.workflows.ensureAvailable(related.id);this.merges.ensureAvailable(related.id);
+      this.planningSuggestions.ensureAvailable(related.id);this.reviews.ensureAvailable(related.id);
+    }
+    return this.verificationSetup.configure(id,input);
+  }
   startVerification(input:Parameters<VerificationService['start']>[0]){this.extensionIdle();
     this.planningSuggestions.ensureAvailable(input.workspaceId);this.reviews.ensureAvailable(input.workspaceId);
     this.workflows.ensureAvailable(input.workspaceId);

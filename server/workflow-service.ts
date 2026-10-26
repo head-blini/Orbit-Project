@@ -3,7 +3,7 @@ import type {Store} from './store.ts';
 import type {Projects} from './projects.ts';
 import {AppError} from './errors.ts';
 import {exact} from './studio.ts';
-import {readVerificationConfiguration,verificationCommandPreviews,type VerificationConfiguration} from './verification-service.ts';
+import {resolveVerificationCommands,type VerificationConfigurationSource,type VerificationCommandResolver} from './verification-configuration.ts';
 import {runVerification} from './verification.ts';
 import {normalizeWorkflowDefinition,workflowStepOrder} from './workflow-definition.ts';
 import type {WorkflowVersion,WorkflowView,WorkflowPreview,WorkflowRun,WorkflowStatus,SaveWorkflowInput,StartWorkflowInput,RecoverWorkflowInput} from '../shared/workflows.ts';
@@ -16,11 +16,11 @@ const quarantined=(r:WorkflowRun)=>r.status==='lost'&&!r.recoveredAt;
 
 /** Finite, explicitly approved local check sequences; not a native AI orchestrator. */
 export class WorkflowService {
-  private store:Store;private projects:Projects|undefined;private config:VerificationConfiguration[];
+  private store:Store;private projects:Projects|undefined;private resolveCommands:VerificationCommandResolver;
   private externalBusy:()=>boolean;private guard:(workspaceId:string)=>void;
   private pending:{id:string;workspaceId:string;abort:AbortController;promise:Promise<void>}|null=null;
-  constructor(store:Store,projects:Projects|undefined,configuration:VerificationConfiguration[]=[],externalBusy:()=>boolean=()=>false,guard:(workspaceId:string)=>void=()=>{}){
-    this.store=store;this.projects=projects;this.config=readVerificationConfiguration(JSON.stringify(configuration));this.externalBusy=externalBusy;this.guard=guard;
+  constructor(store:Store,projects:Projects|undefined,configuration:VerificationConfigurationSource=[],externalBusy:()=>boolean=()=>false,guard:(workspaceId:string)=>void=()=>{}){
+    this.store=store;this.projects=projects;this.resolveCommands=resolveVerificationCommands(configuration);this.externalBusy=externalBusy;this.guard=guard;
     store.db.exec('CREATE TABLE IF NOT EXISTS workflow_versions(id TEXT PRIMARY KEY,project_id TEXT NOT NULL,workflow_id TEXT NOT NULL,revision INTEGER NOT NULL,body TEXT NOT NULL,UNIQUE(workflow_id,revision)); CREATE TABLE IF NOT EXISTS workflow_runs(id TEXT PRIMARY KEY,project_id TEXT NOT NULL,body TEXT NOT NULL); CREATE TABLE IF NOT EXISTS workflow_receipts(id TEXT PRIMARY KEY,digest TEXT NOT NULL,operation TEXT NOT NULL,target_id TEXT NOT NULL);');
     for(const r of this.runs())if(r.status==='running')this.saveRun({...r,status:'lost',finishedAt:new Date().toISOString(),issue:'WORKFLOW_INTERRUPTED_BY_RESTART',steps:r.steps.map(s=>({...s,status:s.status==='running'?'lost':s.status==='pending'?'skipped':s.status}))});
   }
@@ -31,7 +31,7 @@ export class WorkflowService {
   private head(projectId:string,workflowId:string){const version=this.versions(projectId).find(v=>v.workflowId===workflowId);if(!version)throw new AppError('WORKFLOW_NOT_FOUND',404);return version;}
   private runs():WorkflowRun[]{return this.store.db.prepare('SELECT body FROM workflow_runs ORDER BY rowid DESC').all().map(row=>JSON.parse(String(row.body)));}
   record(id:string):WorkflowRun{const row=this.store.db.prepare('SELECT body FROM workflow_runs WHERE id=?').get(id);if(!row)throw new AppError('WORKFLOW_RUN_NOT_FOUND',404);return JSON.parse(String(row.body));}
-  private commands(projectId:string){return verificationCommandPreviews(this.config,this.project(projectId).path);}
+  private commands(projectId:string){return this.resolveCommands(this.project(projectId).path);}
   ensureAvailable(workspaceId?:string){
     if(this.pending)throw new AppError('WORKFLOW_BUSY',409);
     if(workspaceId&&this.runs().some(r=>r.workspaceId===workspaceId&&quarantined(r)))throw new AppError('WORKFLOW_RECOVERY_REQUIRED',409);

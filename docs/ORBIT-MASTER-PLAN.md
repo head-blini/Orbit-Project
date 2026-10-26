@@ -13,7 +13,7 @@
 | 새 단계 | 기존 작업 연결 | 실제 상태와 다음 요구 |
 |---|---|---|
 | Phase 0 기준선 | Task0–24, V4-00 | Mac 검증 기록 있음. 이번 기준선은 미완성 Goal UI 타입 오류로 실패 후 Task25에서 수정 |
-| Phase 1 원클릭 E2E | Planning Agent, Task, Verification, V4-02–06 | 부분 구현. Task30–32 미리보기·결과 탐색·실행 전 기준 고정 완료. Task33 실제 Mac Codex 기획→코딩→고정 검사→브라우저 실패 수정→미리보기·graph/MD/PPTX·재시작 검증. Task34a 이름만으로 새 Git/격리 공간 준비·기획 이동 완료. 수동 검토·단계별 실행이 필요하며 자동 연결·초보자 명령 설정·빌드/백엔드 미리보기·완전한 수용 판정 미완료 |
+| Phase 1 원클릭 E2E | Planning Agent, Task, Verification, V4-02–06 | 부분 구현. Task30–32 미리보기·결과 탐색·실행 전 기준 고정 완료. Task33 실제 Mac Codex 기획→코딩→고정 검사→브라우저 실패 수정→미리보기·graph/MD/PPTX·재시작 검증. Task34a 이름으로 Git/격리 공간 준비, Task34b 실제 Node 테스트 프리셋 등록·공통 검증 설정 완료. 테스트 작성·수동 검토·단계별 실행이 필요하며 초보자 기본 흐름·자동 연결·빌드/백엔드 미리보기·완전한 수용 판정 미완료 |
 | Phase 2 실행기/모델 | Model Hub, V4-07 | text transport와 coding runtime 분리. OpenCode+API/로컬 모델 코딩, 단계별 자동 선택 미구현. 외부 실서비스 미검증 |
 | Phase 3 협업/장기 실행 | 6모드, V4-02/03/05/08 | Solo 외 executor, 공통 소유권/복구/예산, 인계·자동 수정 미완료. 불명확한 종료 뒤 중복 실행 차단 우선 |
 | Phase 4 도구 번들 | Extensions, V4-09 | inventory 부분 구현. 공식 출처/라이선스/버전 검증, profiles/install/rollback 미완료 |
@@ -31,7 +31,8 @@
 - [x] Task32: 호스트 명령의 protectedFiles와 승인 Task 인수조건을 실행 전에 preview/CAS로 고정하고 Run과 원자 저장. 변경된 테스트·기획·명령 및 기준 없는 Check의 승인 차단, 기존 이력 unbound 유지. 최종948/947pass/1Windows skip/0fail·type/build0, 실제 Node 검사와 Chrome 취소/확인/변경/재시작 검증. 합성 AI1이며 선택 파일 밖·실제 AI·전체 수용 판정은 미검증이다.
 - [x] Task33: 실제 Mac Codex0.162.1/Node24.22.1 기획1+코딩2 turn. 고정 모델 검사 통과 후 실제 iframe의 form submit 실패를 발견하고 기획·코딩에 미리보기 capability 전달, 동일 프로젝트의 새 수정 Task로 해결했다. Chrome 클릭/Enter/완료/삭제/320px·실제 Node Check2개·source graph/MD/PPTX·재시작 무재실행·기록 보존 확인. 최종950/949pass/1Windows skip/0fail·type/build0, 독립 리뷰 완료. sandbox/CSP·과거 기준·고정 테스트 보존. 원클릭·자동 UI 판정·Windows 최종 시나리오 완료는 아니다.
 - [x] Task34a: 이름 입력→서버 소유 새 Git/초기 commit→격리 작업 공간→선택→기획 이동. 영속 생성 요청과 정확한 디렉터리 소유권, 응답 유실·재시작 중복 방지, 실패 파일 보존·기존 저장소 잠금 유지. 최종983/981pass/2Windows skip/0fail·type/build0, 독립 리뷰·Chrome 빈 목록/기존 목록 생성·새로고침·같은DB 재시작 확인. 새 프로젝트의 명령/Check/AI는0이며 검증 완료로 표시하지 않는다.
-- [ ] Task34b 다음 수직기능: 초보자 기본 작업 흐름에서 현재 단계·필요한 준비·다음 실행을 연결하고 검증 명령 준비를 기존 Planning/Task/Verification/Preview에 통합한다. 현재 Verification/Workflow가 각각 정적으로 보관하는 명령 설정의 신뢰된 공통 resolver와 영속 갱신 계약부터 연결한다. 호스트 명령 실행 동의·고정 기준·불명확한 종료 차단을 유지하며 자동 실행 범위와 완료 판정은 별도로 검증한다. Task34 전체 및 Phase1 완료는 아니다.
+- [x] Task34b 검증 설정: 실제 Git-visible Node 테스트를 서버 내장 프리셋으로 명시 등록하고 Verification/Workflow/Acceptance에서 같은 현재 설정을 사용한다. 실행 없는 등록·소스/개정 CAS·영속 동일 요청 확인·호스트 우선순위·형제 작업 공간 복구 gate·보호 파일을 유지한다. 최종1022/1020pass/2Windows skip/0fail·type/build0, 독립 리뷰와 Chrome 등록→실제 Node 성공/실패→같은DB 재시작 보존 검증. 테스트 작성·품질 및 전체 자동화 완료가 아니다.
+- [ ] Task34c 다음 수직기능: 초보자 기본 화면에서 현재 단계·필요한 준비·다음 실행을 프로젝트 준비/Planning/Task/검증 설정/Preview에 연결한다. 새 프로젝트의 테스트 부재를 명확히 표시하고 작성·고정·검사 순서를 안내한다. 기존 실행 동의·고정 기준·불명확한 종료 차단을 재사용하며 자동 실행 범위와 완료 판정은 별도로 검증한다. Task34 전체 및 Phase1 완료는 아니다.
 - [ ] 유지되는 필수 기반: runtime/policy/OS qualification과 하위·원격 작업 종료 사실 수집, 공통 resource ownership·persisted recovery 연결과 안전한 수동 해제, 신뢰된 수용 판정 및 원클릭 실행 연결. 종료 증거와 공통 소유권이 검증되기 전 새 실행으로 우회하지 않는다.
 
 재개 branch `codex/orbit-mac-handoff-2026-10-26`, 시작 HEAD `faba903bb9e6856e26166600cbcc413058fef553`. 기존 dirty Goal/Control Plane/Recovery 파일을 보존한다. 아래 과거 Windows 경로·branch는 역사 기록이며 현재 경로는 Mac의 `Orbit_Project/Orbit-Project`다.

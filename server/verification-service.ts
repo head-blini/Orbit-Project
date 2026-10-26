@@ -1,62 +1,32 @@
 import { createHash,randomUUID } from 'node:crypto';
-import { isAbsolute,resolve } from 'node:path';
 import type { CheckRecord,VerificationApproval,VerificationView,VerificationCommandPreview } from '../shared/verification.ts';
 import { terminal } from '../shared/types.ts';
 import { Store } from './store.ts';
 import type { Projects } from './projects.ts';
 import { AppError } from './errors.ts';
-import { containsCredential } from './privacy.ts';
-import { validateVerificationCommand,runVerification,type VerificationCommand } from './verification.ts';
-import {AcceptanceService,protectedFilePaths} from './acceptance.ts';
+import { validateVerificationCommand,runVerification } from './verification.ts';
+import {AcceptanceService} from './acceptance.ts';
 
-export interface VerificationConfiguration extends VerificationCommand {projectPath:string;protectedFiles?:string[]}
+export {readVerificationConfiguration,verificationCommandPreviews,type VerificationConfiguration} from './verification-configuration.ts';
+import {resolveVerificationCommands,type VerificationConfigurationSource,type VerificationCommandResolver} from './verification-configuration.ts';
 type StartInput={requestId:string;runId:string;workspaceId:string;commandId:string;expectedSourceDigest:string;expectedConfigDigest:string};
 type ApprovalInput={requestId:string;runId:string;workspaceId:string;expectedSourceDigest:string;expectedCheckSetDigest:string};
 const digest=(value:unknown)=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
 const id=(value:unknown)=>typeof value==='string'&&/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value);
 const hash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
-// Credential-bearing CLI options must be rejected as a pair, even when the
-// value alone has no recognizable secret format. This is finite pattern defense.
-const credentialArguments=(args:readonly string[])=>args.some(arg=>containsCredential(arg)
-  ||/^(?:--?|\/)?(?:api[-_]?key|access[-_]?token|refresh[-_]?token|session[-_]?token|token|password|passwd|client[-_]?secret|secret|credentials?|authorization|cookie|private[-_]?key|aws[-_]secret[-_]access[-_]key)(?:$|[=:])/i.test(arg)
-  ||/^(?:proxy-)?authorization\s*:|^set-cookie\s*:/i.test(arg));
-const pathKey=(value:string)=>process.platform==='win32'?resolve(value).toLowerCase():resolve(value);
 const scope='Git 추적 파일과 무시되지 않은 파일의 실행 전후 일치만 검사합니다. ignored 의존성·외부 도구·중간 변경 후 원복은 증명하지 않습니다. 명령은 Codex sandbox 밖의 로컬 OS 권한으로 실행됩니다.';
-export function verificationCommandPreviews(configuration:readonly VerificationConfiguration[],projectPath:string):VerificationCommandPreview[]{
-  return configuration.filter(command=>pathKey(command.projectPath)===pathKey(projectPath)).map(({projectPath:_,...command})=>{
-    if(credentialArguments(command.args))throw new AppError('INVALID_VERIFICATION_CONFIGURATION',503);
-    return {...command,args:[...command.args],...(command.protectedFiles?{protectedFiles:[...command.protectedFiles]}:{}),configDigest:hash({policy:'orbit-local-check-v1',projectPath:pathKey(projectPath),...command})};
-  });
-}
 function exact(value:object,keys:string[]){
   if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).sort().join(',')!==[...keys].sort().join(','))throw new AppError('INVALID_FIELDS',400);
-}
-export function readVerificationConfiguration(raw:string|undefined):VerificationConfiguration[]{
-  if(raw===undefined)return [];
-  try{
-    if(raw.length>64000)throw new Error();
-    const values:unknown=JSON.parse(raw);if(!Array.isArray(values)||values.length>32)throw new Error();
-    const seen=new Set<string>();
-    return Object.freeze(values.map(value=>{
-      exact(value,['projectPath','id','label','executable','args','timeoutMs',...(value&&Object.hasOwn(value,'protectedFiles')?['protectedFiles']:[])]);
-      if(typeof value.projectPath!=='string'||value.projectPath.length>2000||!isAbsolute(value.projectPath)||containsCredential(value.projectPath)||/[\x00-\x1f]/.test(value.projectPath))throw new Error();
-      const {projectPath,protectedFiles,...input}=value,command=validateVerificationCommand(input);
-      const files=protectedFiles===undefined?undefined:protectedFilePaths(protectedFiles);
-      if(containsCredential(command.executable)||credentialArguments(command.args))throw new Error();
-      const key=pathKey(projectPath)+'\0'+command.id;if(seen.has(key))throw new Error();seen.add(key);
-      return Object.freeze({...command,projectPath:resolve(projectPath),...(files?{protectedFiles:Object.freeze(files) as unknown as string[]}: {})});
-    })) as unknown as VerificationConfiguration[];
-  }catch{throw new Error('INVALID_VERIFICATION_CONFIGURATION');}
 }
 
 /** Host-approved commands only. This service does not add a process sandbox. */
 export class VerificationService {
   readonly acceptance:AcceptanceService;
   private pending:{id:string;workspaceId:string;abort:AbortController;promise:Promise<void>}|null=null;
-  private config:VerificationConfiguration[];
-  constructor(privateStore:Store,projects:Projects|undefined,configuration:VerificationConfiguration[]=[],agentBusy:()=>boolean=()=>false){
+  private resolveCommands:VerificationCommandResolver;
+  constructor(privateStore:Store,projects:Projects|undefined,configuration:VerificationConfigurationSource=[],agentBusy:()=>boolean=()=>false){
     this.store=privateStore;this.projects=projects;this.agentBusy=agentBusy;
-    this.config=readVerificationConfiguration(JSON.stringify(configuration));
+    this.resolveCommands=resolveVerificationCommands(configuration);
     this.acceptance=new AcceptanceService(this.store,projects,path=>this.commands(path));
     this.store.db.exec('CREATE TABLE IF NOT EXISTS verification_checks(id TEXT PRIMARY KEY,request_id TEXT NOT NULL UNIQUE,body TEXT NOT NULL); CREATE TABLE IF NOT EXISTS verification_approvals(id TEXT PRIMARY KEY,request_id TEXT NOT NULL UNIQUE,body TEXT NOT NULL);');
     for(const check of this.checks())if(check.execution==='running')this.save({...check,execution:'lost',verdict:'not_run',output:'VERIFICATION_INTERRUPTED_BY_RESTART',completedAt:new Date().toISOString()},'verification.lost');
@@ -77,7 +47,7 @@ export class VerificationService {
     if(runId&&(!run||run.workspaceId!==workspaceId||!terminal(run.execution)))throw new AppError('VERIFICATION_RUN_NOT_TERMINAL',409);
     return {workspace,project,run};
   }
-  private commands(projectPath:string):VerificationCommandPreview[]{return verificationCommandPreviews(this.config,projectPath);}
+  private commands(projectPath:string):VerificationCommandPreview[]{return this.resolveCommands(projectPath);}
   private fingerprint(workspaceId:string){return this.projects!.fingerprint(workspaceId);}
   ensureAvailable(workspaceId?:string){
     if(this.pending)throw new AppError('VERIFICATION_ACTIVE',409);

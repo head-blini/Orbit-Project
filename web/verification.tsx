@@ -1,6 +1,7 @@
 import { useEffect,useRef,useState } from 'react';
 import type { VerificationView,VerificationCommandPreview } from '../shared/verification.ts';
 import {TaskAcceptanceDetails} from './task-verification-preview.tsx';
+import {VerificationSetupPanel} from './verification-setup.tsx';
 const verdicts={not_run:'미검증',passed:'통과',failed:'실패',interrupted:'중단',timed_out:'시간 초과',stale:'소스 변경·무효'};
 type Props={workspaceId:string;runId:string|null;online:boolean;agentActive:boolean;post:(path:string,body:object)=>Promise<unknown>};
 export function VerificationPanel({workspaceId,runId,online,agentActive,post}:Props){
@@ -46,6 +47,7 @@ export function VerificationPanel({workspaceId,runId,online,agentActive,post}:Pr
   return <section className="surface verification-panel">
     <div className="section-heading"><h2>실제 명령 검증 및 승인</h2><button disabled={!online||busy} onClick={()=>setRefresh(value=>value+1)}>검증 상태 새로고침</button></div>
     <p className="notice">명령은 <b>Codex sandbox 밖의 로컬 OS 사용자 권한</b>으로 저장소 코드를 실행합니다. 아래 명령·인자·대상을 확인한 뒤 실행을 승인하세요. 자동 병합하지 않습니다.</p>
+    <VerificationSetupPanel key={workspaceId} workspaceId={workspaceId} online={online} busy={busy||agentActive||running||!!pending||!!view?.quarantined} post={post} onConfigured={()=>setRefresh(value=>value+1)}/>
     {error&&<p role="alert">{error}</p>}
     {!view?<p role="status">{online?'검증 상태 확인 중…':'서버 연결이 필요합니다.'}</p>:<>
       <p className="subtle">{view.scope}</p>
@@ -56,7 +58,7 @@ export function VerificationPanel({workspaceId,runId,online,agentActive,post}:Pr
           {view.acceptance.baseline&&<details><summary>고정 기준과 보호 파일 보기</summary><TaskAcceptanceDetails preview={view.acceptance.baseline}/></details>}
         </>}
       </section>
-      {!view.commands.length?<p>서버에 등록된 검증 명령이 없습니다. ORBIT_VERIFICATION_COMMANDS 설정이 필요합니다. 기획과 기존 AI 실행은 계속 사용할 수 있습니다.</p>:<>
+      {!view.commands.length?<p>등록된 검증 명령이 없습니다. 위에서 Node 테스트 프리셋을 준비하거나 서버의 고급 호스트 설정을 사용할 수 있습니다. 기획과 기존 AI 실행은 계속 사용할 수 있습니다.</p>:<>
         <p>연결 실행: {runId?.slice(0,8)??'완료된 AI 실행 없음'} · 현재 소스: <code>{view.sourceDigest?.slice(0,16)??'확인 불가'}</code></p>
         {view.sourceIssue&&<p role="alert">파일 범위·민감 경로·읽기 제한으로 소스 증거를 만들 수 없어 검증을 차단했습니다.</p>}
         {view.quarantined&&<p role="alert">이전 검증이 비정상 종료되어 프로세스 상태를 확인할 수 없습니다. 해당 로컬 명령이 종료됐는지 확인하기 전 새 실행은 차단됩니다.</p>}

@@ -71,12 +71,17 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
       const studioRoute=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/(plans|artifacts|tasks)(?:\/([a-f0-9-]{36})\/(revisions|approve|task-drafts|history|diff|replan))?$/);
       const goalRoute=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/goals(?:\/([a-f0-9-]{36})\/(state|history))?$/);
       const appPreviewRoute=url.pathname.match(/^\/api\/workspaces\/([a-f0-9-]{36})\/app-preview$/);
+      const verificationSetupRoute=url.pathname.match(/^\/api\/workspaces\/([a-f0-9-]{36})\/verification-setup$/);
       if(req.method==='POST'){
         const token=req.headers['x-csrf-token'];
         if(req.headers.origin!==origin||typeof token!=='string'||token.length!==64||!timingSafeEqual(Buffer.from(token),Buffer.from(session.csrf)))throw new AppError('CSRF_REJECTED',403);
         const largeStudioInput=studioRoute&&studioRoute[2]!=='tasks'&&(!studioRoute[3]||studioRoute[4]==='revisions');
         const planningSuggestion=url.pathname.match(/^\/api\/projects\/([a-f0-9-]{36})\/planning-suggestions\/(preview|start|recover|([a-f0-9-]{36})\/(interrupt|save))$/);
         const data=await body(req,largeStudioInput?6*256*1024+256*1024:planningSuggestion?64000:18000);
+        if(verificationSetupRoute){
+          if(url.search)throw new AppError('INVALID_FIELDS',400);exact(data,['requestId','profileId','expectedPreviewDigest','confirmed']);
+          json(res,200,controller.configureVerification(verificationSetupRoute[1],data as unknown as Parameters<Controller['configureVerification']>[1]));return;
+        }
         if(appPreviewRoute){
           if(url.search)throw new AppError('INVALID_FIELDS',400);exact(data,['entryPath','expectedSourceDigest']);controller.assertAppPreviewAvailable();
           json(res,200,appPreview.create(appPreviewRoute[1],data as unknown as Parameters<AppPreviewHost['create']>[1]));return;
@@ -296,6 +301,9 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
         json(res,200,controller.planningSuggestions.view(planningSuggestionsView[1],workspaceId));return;
       }
       const verificationView=url.pathname.match(/^\/api\/workspaces\/([a-f0-9-]{36})\/verification$/);
+      if(req.method==='GET'&&verificationSetupRoute){
+        if(url.search)throw new AppError('INVALID_FIELDS',400);json(res,200,controller.verificationSetupView(verificationSetupRoute[1]));return;
+      }
       const taskVerificationPreview=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/tasks\/([a-f0-9-]{36})\/verification-preview$/);
       if(req.method==='GET'&&taskVerificationPreview){
         const workspaceId=url.searchParams.get('workspaceId');
