@@ -2,10 +2,11 @@ import { realpathSync } from 'node:fs';
 import { join, dirname, basename, isAbsolute } from 'node:path';
 import { Rpc } from './rpc.ts';
 import { resolveNativeExecutable } from './native-executable.ts';
+import {NativeExecutableUnavailable} from './native-launch-error.ts';
 
 export function findCodex(options:{env?:NodeJS.ProcessEnv;platform?:NodeJS.Platform;arch?:string}={}):string {
   const env=options.env??process.env,platform=options.platform??process.platform,arch=options.arch??process.arch;
-  const fail=():never=>{throw new Error('CODEX_NOT_INSTALLED');};
+  const fail=():never=>{throw new NativeExecutableUnavailable();};
   if(!['win32','darwin','linux'].includes(platform)||!['x64','arm64'].includes(arch))return fail();
   if(env.AICC_CODEX_BIN!==undefined)return resolveNativeExecutable(env.AICC_CODEX_BIN,platform)??fail();
   const triple=(arch==='arm64'?'aarch64':'x86_64')+(platform==='win32'?'-pc-windows-msvc':platform==='darwin'?'-apple-darwin':'-unknown-linux-musl');

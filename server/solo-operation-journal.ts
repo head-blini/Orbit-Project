@@ -42,14 +42,14 @@ function parse(body:unknown,runId:string):SoloOperationRecord {
 export function readSoloOperation(db:DatabaseSync,runId:string):SoloOperationView {
   const row=db.prepare('SELECT body FROM solo_operations WHERE run_id=?').get(runId);
   const rows=db.prepare('SELECT revision,body FROM solo_operation_history WHERE run_id=? ORDER BY revision').all(runId);
-  if(!row){if(rows.length)throw new Error('OPERATION_INTEGRITY');return {runId,identity:'legacy_unknown',record:null,history:[]};}
+  if(!row){if(rows.length)throw new Error('OPERATION_INTEGRITY');return {runId,identity:'legacy_unknown',record:null,history:[],connection:null};}
   const record=parse(row.body,runId),history=rows.map((row,index)=>{
     const item=parse(row.body,runId);
     if(row.revision!==index+1||item.revision!==index+1||stable.some(key=>item[key]!==record[key]))throw new Error('OPERATION_INTEGRITY');
     return item;
   });
   if(!history.length||JSON.stringify(history.at(-1))!==JSON.stringify(record))throw new Error('OPERATION_INTEGRITY');
-  return {runId,identity:'recorded',record,history};
+  return {runId,identity:'recorded',record,history,connection:null};
 }
 /** Called only within the Store transaction that persists the matching Run/event. */
 export function insertSoloOperation(db:DatabaseSync,run:Run,identity:SoloOperationIdentity){

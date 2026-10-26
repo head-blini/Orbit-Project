@@ -1,4 +1,5 @@
 import { createHash,randomUUID } from 'node:crypto';
+import {NativeLaunchNotStarted} from './native-launch-error.ts';
 import { basename } from 'node:path';
 import type { Snapshot, ProviderStatus, Run, Execution } from '../shared/types.ts';
 import { terminal } from '../shared/types.ts';
@@ -47,6 +48,7 @@ export class Controller {
   assertExecutionAvailable(){if(this.soloRecoveryRequired())throw new AppError('SOLO_RECOVERY_REQUIRED',409);}
   constructor(store:Store,workspace:string,factory:(workspace:string,write:boolean)=>RpcPort,projects?:Projects,verificationConfig:VerificationConfiguration[]=[],modelHubConfig:readonly ModelHubConfiguration[]=[]){
     this.store=store;this.workspace=workspace;this.factory=factory;this.projects=projects;
+    this.soloLost=store.unresolvedNativeConnections();
     this.telemetry=new RunTelemetry(metrics=>this.store.saveRunMetrics(metrics));
     const selected=projects?.workspaces().find(w=>w.id===store.getMeta('selectedWorkspace'));if(selected){this.workspaceId=selected.id;this.workspace=selected.path;}
     this.modelHub=new ModelHubService(store,modelHubConfig,undefined,undefined,()=>this.assertExecutionAvailable());
@@ -173,7 +175,28 @@ export class Controller {
   private async open(){
     this.status('connecting');const generation=++this.generation;
     try{
-      this.validate();const rpc=this.factory(this.workspace,!!this.workspaceId);this.rpc=rpc;
+      this.validate();
+      this.store.beginNativeConnection(this.ownerIncarnation,generation);
+      let rpc:RpcPort;
+      try{rpc=this.factory(this.workspace,!!this.workspaceId);}catch(error){
+        if(error instanceof NativeLaunchNotStarted){
+          try{this.store.finishNativeConnectionJournal(this.ownerIncarnation,generation,error.reason);}catch{this.soloLost=true;throw new Error('STATE_PERSISTENCE_FAILED');}
+        }else this.soloLost=true;
+        throw error;
+      }
+      this.rpc=rpc;let observationFailed=false;
+      const finishJournal=()=>{
+        const record=this.store.nativeConnection(this.ownerIncarnation,generation);
+        if(!observationFailed&&record?.transportClosedAt&&(!record.process||['closed','spawn_failed'].includes(record.process.state)))this.store.finishNativeConnectionJournal(this.ownerIncarnation,generation);
+      };
+      const recordProcess=()=>{const observed=rpc.processObservation?.();if(observed)this.store.observeNativeProcess(this.ownerIncarnation,generation,observed);finishJournal();};
+      const observe=(record:()=>void)=>{
+        try{record();}catch{observationFailed=true;this.soloLost=true;void this.failTransport('STATE_PERSISTENCE_FAILED');}
+      };
+      // Facts belong to this exact connection even after its UI/event generation is fenced.
+      // An old child's late close must never be attributed to the current connection.
+      rpc.on('process.observed',()=>observe(recordProcess));
+      rpc.on('closed',()=>observe(()=>{this.store.closeNativeTransport(this.ownerIncarnation,generation);finishJournal();}));
       const receive=(handle:()=>void)=>{
         if(generation!==this.generation)return;
         try{handle();}catch{
@@ -185,6 +208,7 @@ export class Controller {
       rpc.on('closed',()=>receive(()=>{++this.generation;this.rpc=null;this.loseActive();this.telemetry.disconnect();this.status('disconnected','TRANSPORT_CLOSED');}));
       rpc.on('notification',(e:any)=>receive(()=>this.onEvent(e)));
       rpc.on('approval',(e:any)=>receive(()=>{this.store.append('approval.denied',this.active()?.id??null,{kind:e.method,decision:'deny'});}));
+      try{recordProcess();}catch{observationFailed=true;this.soloLost=true;throw new Error('STATE_PERSISTENCE_FAILED');}
       await rpc.initialize();const a=await rpc.request('account/read',{refreshToken:false});
       if(a.account?.type!=='chatgpt')throw new AppError('CHATGPT_LOGIN_REQUIRED');
       // Read effective names before loading any thread: a threadless MCP inventory
@@ -202,6 +226,7 @@ export class Controller {
       const params={cwd:this.workspace,config,sandbox:this.workspaceId?'workspace-write':'read-only',approvalPolicy:this.approvalPolicy(),approvalsReviewer:'user',developerInstructions:this.workspaceId?'Orbit isolated coding workspace. Edit ordinary source files only within the current worktree using apply_patch. Do not access other projects, credentials, user settings, network, .git, .codex, .agents, or links. Do not run shell commands, install software, commit, checkout, merge, or delete the workspace. Approval requests are denied. Report inability honestly; completion is not verification.':'This is a read-only text-only test session. Do not use tools, access files, credentials, network, or other projects. Answer only from user-provided text.'};
       const t=await rpc.request(id?'thread/resume':'thread/start',id?{...params,threadId:id,excludeTurns:true}:params);
       if(typeof t.thread?.id!=='string' || (id && t.thread.id!==id))throw new Error('THREAD_MISMATCH');
+      try{this.store.bindNativeSession(this.ownerIncarnation,generation,t.thread.id);}catch{observationFailed=true;this.soloLost=true;throw new Error('STATE_PERSISTENCE_FAILED');}
       if(t.sandbox?.type!==this.sandbox().type||t.sandbox.networkAccess!==false||t.approvalPolicy!==this.approvalPolicy()||t.approvalsReviewer!=='user')throw new Error('POLICY_MISMATCH');
       if(this.workspaceId&&(!Array.isArray(t.sandbox.writableRoots)||t.sandbox.writableRoots.length!==0||t.sandbox.excludeTmpdirEnvVar!==true||t.sandbox.excludeSlashTmp!==true))throw new Error('POLICY_MISMATCH');
       if(t.thread.status?.type==='active')throw new Error('THREAD_STILL_ACTIVE');
@@ -218,7 +243,7 @@ export class Controller {
       this.knownMcpNames=Object.freeze(Object.keys(config.mcp_servers));this.launchValidated=true;this.store.setThread(t.thread.id,this.workspaceId);this.status('ready');this.store.append(id?'session.resumed':'session.created',null,{threadId:t.thread.id,workspaceId:this.workspaceId??null});
     }catch(e){
       const code=e instanceof Error?e.message:'';
-      const issue=['CODEX_NOT_INSTALLED','CHATGPT_LOGIN_REQUIRED','POLICY_MISMATCH','THREAD_STILL_ACTIVE','MCP_ISOLATION_REQUIRED','WRITES_DISABLED','WORKSPACE_CHANGED','LINK_REJECTED'].includes(code)?code:'CONNECTION_FAILED';
+      const issue=['CODEX_NOT_INSTALLED','CHATGPT_LOGIN_REQUIRED','POLICY_MISMATCH','THREAD_STILL_ACTIVE','MCP_ISOLATION_REQUIRED','WRITES_DISABLED','WORKSPACE_CHANGED','LINK_REJECTED','STATE_PERSISTENCE_FAILED'].includes(code)?code:'CONNECTION_FAILED';
       const rpc=this.rpc;this.rpc=null;++this.generation;if(rpc)await rpc.close();
       this.status(issue==='CODEX_NOT_INSTALLED'?'not_installed':issue==='CHATGPT_LOGIN_REQUIRED'?'auth_required':'error',issue);throw new AppError(issue,503);
     }

@@ -7,6 +7,7 @@ import { createServer as createMockServer } from 'node:http';
 import { Store } from '../../server/store.ts';
 import { Studio } from '../../server/studio.ts';
 import { Controller } from '../../server/controller.ts';
+import { NativeLaunchNotStarted } from '../../server/native-launch-error.ts';
 import { Projects } from '../../server/projects.ts';
 import { createWorkspace } from '../../server/workspace.ts';
 import { createHttpServer } from '../../server/http.ts';
@@ -151,7 +152,8 @@ class InventoryFixtureRpc extends EventEmitter {
 const factory=(path,write)=>{
   if(inventoryEnabled&&write===true)try{const source=selectedInventoryWorkspace();if(resolve(path)===resolve(source.path))return new InventoryFixtureRpc(source);}catch{}
   if(reviewEnabled&&write===false)try{const source=selectedReviewWorkspace();if(resolve(path)===resolve(source.path))return new ReviewFixtureRpc(source);}catch{}
-  reviewCounts.rejectedFactory++;throw new Error('E2E_REAL_AI_DISABLED');
+  // This test host never imports or starts a native factory. Record that known absence.
+  reviewCounts.rejectedFactory++;throw new NativeLaunchNotStarted('LAUNCH_REJECTED_BEFORE_SPAWN');
 };
 const controller=new Controller(store,workspace,factory,projects,verificationConfig,modelHubConfig);
 const server=createHttpServer(controller,resolve(assetDirectory));

@@ -43,7 +43,7 @@ test('native turn identity is immutable and legacy runs stay explicitly unknown'
     assert.throws(()=>store.updateRun(run.id,{turnId:'foreign-turn'},'run.accepted'),/OPERATION_TURN_MISMATCH/);
     assert.equal(store.getRun(run.id)?.turnId,'turn-1');assert.equal(store.soloOperation(run.id).history.length,2);
     const legacy=store.createRun('legacy-request-1','digest','Fixture');
-    assert.deepEqual(store.soloOperation(legacy.id),{runId:legacy.id,identity:'legacy_unknown',record:null,history:[]});
+    assert.deepEqual(store.soloOperation(legacy.id),{runId:legacy.id,identity:'legacy_unknown',record:null,history:[],connection:null});
   }finally{store.close();}
 });
 

@@ -6,6 +6,8 @@ import { terminal } from '../shared/types.ts';
 import type {RunMetrics} from '../shared/analytics.ts';
 import type {SoloOperationIdentity} from '../shared/solo-operation.ts';
 import {migrateSoloOperations,readSoloOperation,insertSoloOperation,updateSoloOperation} from './solo-operation-journal.ts';
+import type {NativeProcessObservation} from '../shared/native-process.ts';
+import {migrateNativeConnections,readNativeConnection,beginNativeConnection,bindNativeSession,observeNativeProcess,closeNativeTransport,finishNativeConnectionJournal,unresolvedNativeConnections} from './native-connection-journal.ts';
 export class Store extends EventEmitter {
   db:DatabaseSync;
   private pendingEvents:AppEvent[]|null=null;
@@ -19,7 +21,7 @@ export class Store extends EventEmitter {
       CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY,request_id TEXT NOT NULL UNIQUE,digest TEXT NOT NULL,body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS run_metrics(run_id TEXT PRIMARY KEY,body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS events(seq INTEGER PRIMARY KEY AUTOINCREMENT,kind TEXT NOT NULL,at TEXT NOT NULL,run_id TEXT,data TEXT NOT NULL);`);
-    try{migrateSoloOperations(this.db);}catch(error){this.db.close();throw error;}
+    try{migrateSoloOperations(this.db);migrateNativeConnections(this.db);}catch(error){this.db.close();throw error;}
     for(const r of this.runs()) if(!terminal(r.execution)||r.execution==='lost') {
       if(!terminal(r.execution))this.updateRun(r.id,{execution:'lost'},'run.lost');
       const metrics=this.getRunMetrics(r.id);
@@ -41,8 +43,19 @@ export class Store extends EventEmitter {
   soloOperation(id:string){
     const run=this.getRun(id);if(!run)throw new Error('RUN_NOT_FOUND');const view=readSoloOperation(this.db,id),record=view.record;
     if(record&&(record.requestId!==run.requestId||record.workspaceId!==(run.workspaceId??null)||record.createdAt!==run.createdAt||record.execution!==run.execution||record.nativeTurnId!==run.turnId))throw new Error('OPERATION_INTEGRITY');
+    if(record){
+      view.connection=this.nativeConnection(record.ownerIncarnation,record.generation);
+      if(view.connection&&view.connection.nativeSessionId!==record.nativeSessionId)throw new Error('CONNECTION_IDENTITY_MISMATCH');
+    }
     return view;
   }
+  nativeConnection(owner:string,generation:number){return readNativeConnection(this.db,owner,generation);}
+  beginNativeConnection(owner:string,generation:number){this.transaction(()=>{beginNativeConnection(this.db,owner,generation);this.append('native.connection.intent',null,{ownerIncarnation:owner,generation});});}
+  bindNativeSession(owner:string,generation:number,session:string){this.transaction(()=>{if(bindNativeSession(this.db,owner,generation,session))this.append('native.connection.session',null,{ownerIncarnation:owner,generation});});}
+  observeNativeProcess(owner:string,generation:number,observation:NativeProcessObservation){this.transaction(()=>{if(observeNativeProcess(this.db,owner,generation,observation))this.append('native.process.observed',null,{ownerIncarnation:owner,generation,state:observation.state});});}
+  closeNativeTransport(owner:string,generation:number){this.transaction(()=>{if(closeNativeTransport(this.db,owner,generation))this.append('native.transport.closed',null,{ownerIncarnation:owner,generation});});}
+  finishNativeConnectionJournal(owner:string,generation:number,reason:import('../shared/solo-operation.ts').NativeNotCreatedReason|null=null){this.transaction(()=>{if(finishNativeConnectionJournal(this.db,owner,generation,reason))this.append('native.connection.recorded',null,{ownerIncarnation:owner,generation});});}
+  unresolvedNativeConnections(){return unresolvedNativeConnections(this.db);}
   runMetricsOverlay(id:string):RunMetrics|null {const value=this.volatileMetrics.get(id);return value?structuredClone(value):null;}
   getRunMetrics(id:string):RunMetrics|null {const pending=this.runMetricsOverlay(id);if(pending)return pending;const row=this.db.prepare('SELECT body FROM run_metrics WHERE run_id=?').get(id);return row?JSON.parse(String(row.body)):null;}
   /** Telemetry has its own timestamps and may arrive after execution completes. */
