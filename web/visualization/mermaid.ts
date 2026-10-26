@@ -1,3 +1,6 @@
+import {parseSequence,validateSequence} from './sequence.ts';
+import type {SequenceDiagram} from '../../shared/sequence.ts';
+
 // Intentionally a small, inert flowchart grammar; not the full Mermaid language.
 const identifier = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
 const forbidden = /[<>"\\\r\n\x00-\x1f\x7f]|[a-z][a-z0-9+.-]*:|\/\/|www\.|&(?:#\w+|\w+);|#(?:x[0-9a-f]+|\d+);|%[0-9a-f]{2}/i;
@@ -54,6 +57,7 @@ function parse(source:string) {
 }
 
 export function validateMermaid(source:string):{ok:boolean;issues:{code:string;line?:number}[]} {
+  if(sequenceHeader(source))return validateSequence(source);
   const {issues}=parse(source);return {ok:issues.length===0,issues};
 }
 
@@ -61,4 +65,13 @@ export function parseMermaid(source:string) {
   const {nodes,edges,issues,direction}=parse(source);
   if(issues.length) throw new Error('INVALID_MERMAID');
   return {nodes,edges,direction};
+}
+
+function sequenceHeader(source:string):boolean {
+  return typeof source==='string'&&source.length<=256*1024&&source.replace(/\r\n/g,'\n').split('\n').find(line=>line.trim())?.trim()==='sequenceDiagram';
+}
+
+/** Additive dispatch preserves parseMermaid's exact legacy flowchart shape. */
+export function parseMermaidDocument(source:string):{kind:'flowchart';graph:ReturnType<typeof parseMermaid>}|SequenceDiagram {
+  return sequenceHeader(source)?parseSequence(source):{kind:'flowchart',graph:parseMermaid(source)};
 }

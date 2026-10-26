@@ -44,6 +44,40 @@ test('saved Artifact exports real PPTX and exact Markdown with immutable revisio
   }finally{await f.close();}
 });
 
+test('sequence Artifact persists exact revisions and exports paginated editable slides after restart',async()=>{
+  const path=join(mkdtempSync(join(tmpdir(),'orbit-sequence-')),'test.sqlite');let f=await fixture(path);
+  const source='sequenceDiagram\nactor User as 사용자\nparticipant API as 서비스\nautonumber\nloop 반복\n'+Array.from({length:28},(_,i)=>`User->>API: 요청 ${i+1}\nAPI-->>User: 응답 ${i+1}`).join('\n')+'\nend\n';
+  try{
+    const response=await f.post(artifacts,{requestId:randomUUID(),input:{kind:'mermaid',source,metadata:{title:'Sequence'}}});assert.equal(response.status,200);
+    const first=await response.json() as any;
+    const url=`${artifacts}/${first.id}/export?revision=1&hash=${first.contentHash}&format=pptx`;
+    const exported=await f.get(url);assert.equal(exported.status,200);const bytes=Buffer.from(await exported.arrayBuffer());
+    assert.equal(bytes.subarray(0,4).toString('hex'),'504b0304');assert.ok(bytes.includes(Buffer.from('ppt/slides/slide2.xml')));
+    assert.ok(bytes.includes(Buffer.from('<p:cxnSp>')));assert.ok(bytes.includes(Buffer.from('<a:prstDash val="dash"')));assert.ok(!bytes.includes(Buffer.from('<p:pic')));
+    const markdown=await (await f.get(url.replace('format=pptx','format=markdown'))).text();assert.ok(markdown.includes('```mermaid\n'+source+'\n```'));
+    assert.equal((await f.get(url.replace('project-a','project-b'))).status,404);
+    const revised=await f.post(`${artifacts}/${first.id}/revisions`,{requestId:randomUUID(),expectedRevision:1,input:{kind:'mermaid',source:source.replace('요청 1','수정 1'),metadata:{title:'Sequence revised'}}});assert.equal(revised.status,200);
+    await f.close();f=await fixture(path);
+    assert.deepEqual(Buffer.from(await (await f.get(url)).arrayBuffer()),bytes);
+    const history=await (await f.get(`${artifacts}/${first.id}/history`)).json() as any[];assert.equal(history.length,2);assert.equal(history[0].source,source);
+    const limited=['sequenceDiagram',...Array.from({length:10},(_,i)=>`actor P${i} as ${'參'.repeat(160)}`),...Array.from({length:4},()=>[`alt ${'條'.repeat(160)}`,`else ${'枝'.repeat(160)}`]).flat(),...Array.from({length:108},()=>`P9->>P9: ${'文'.repeat(160)}`),'end','end','end','end'].join('\n');
+    const before=f.store.lastSeq(),rejected=await f.post(artifacts,{requestId:randomUUID(),input:{kind:'mermaid',source:limited,metadata:{}}});assert.equal(rejected.status,422);assert.deepEqual(await rejected.json(),{error:'SEQUENCE_LAYOUT_LIMIT'});assert.equal(f.store.lastSeq(),before);assert.equal((await (await f.get(artifacts)).json() as any[]).length,1);
+    assert.equal(f.store.runs().length,0);assert.equal(f.store.projects()[0].writeEnabled,false);
+  }finally{await f.close();}
+});
+
+test('Artifact export revalidates stored source integrity before returning Markdown or PPTX',async()=>{
+  const f=await fixture();try{
+    const saved=await (await f.post(artifacts,{requestId:randomUUID(),input:artifact})).json() as any;
+    f.store.db.prepare('UPDATE artifacts SET body=? WHERE project_id=? AND id=? AND revision=1').run(JSON.stringify({...saved,source:artifact.source.replace('Browser','Corrupted')}),'project-a',saved.id);
+    for(const format of ['markdown','pptx']){
+      const response=await f.get(`${artifacts}/${saved.id}/export?revision=1&hash=${saved.contentHash}&format=${format}`);assert.equal(response.status,409);assert.deepEqual(await response.json(),{error:'ARTIFACT_INTEGRITY'});
+    }
+    f.store.db.prepare('UPDATE artifacts SET body=? WHERE project_id=? AND id=? AND revision=1').run(JSON.stringify({...saved,revision:2}),'project-a',saved.id);
+    const forgedRevision=await f.get(`${artifacts}/${saved.id}/export?revision=2&hash=${saved.contentHash}&format=markdown`);assert.equal(forgedRevision.status,409);assert.deepEqual(await forgedRevision.json(),{error:'ARTIFACT_INTEGRITY'});
+  }finally{await f.close();}
+});
+
 test('planning HTTP persists approval and idempotent task drafts across restart without running an agent',async()=>{
   const path=join(mkdtempSync(join(tmpdir(),'orbit-studio-')),'test.sqlite');let f=await fixture(path);
   try{

@@ -3,3 +3,4 @@
 @media(max-width:800px){.viz-layout{grid-template-columns:1fr}.viz-studio,.viz-timeline{padding:16px}}
 
 .viz-studio header{display:block;margin-bottom:16px}.viz-studio header h2{font-size:18px}.viz-studio header p{font-size:13px;color:#98aabb}.viz-timeline{margin-top:20px}.viz-timeline h2{font-size:16px}.viz-layout{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.viz-canvas svg{display:block;width:100%;height:auto;min-width:300px}.viz-canvas rect{fill:#1c343d;stroke:#689b9a}.viz-canvas text{fill:#d5e9e6}.viz-studio p,.viz-timeline p{font-size:13px}.viz-timeline ul,.viz-timeline ol{padding-left:22px;overflow-wrap:anywhere}@media(max-width:1100px){.viz-layout{grid-template-columns:minmax(0,1fr)}}
+.viz-sequence-page{margin:16px 0}.viz-sequence-page h4{margin:8px 0;font-size:13px;color:#a9c9ce}.viz-sequence-scroll{overflow:auto;max-height:640px;max-width:100%;background:#14242e;border:1px solid #3a4b5a;border-radius:8px}.viz-sequence>p{color:#a9c9ce}

@@ -28,7 +28,7 @@
 | B Planning | Markdown/JSON 무손실 import/export, SQLite 버전·승인, Task→실제 Codex brief, 개발 증거 수동 피드백, 버전 diff·영향 Task·선택 후속 Task 생성, 결정·출처 보존과 실행 명세 연결, 선택형 Codex 기획 제안·명시적 새 초안 저장 | 실제 Codex 기획 호출·선택형 다른 제공자 검증 |
 | C Agent Center | Codex App Server prompt/stream/interrupt/reconnect | Task 역할·handoff, 선택형 CLI 진단/adapter, 내장 병렬 기능 연결 |
 | D Development | 격리 patch worktree·diff, 실제검증·중단·복구·리뷰승인; source 보존·별도 승인 ff 병합; JS/TS 소스 graph/잠재영향·탐색·재시작 검증 | 별도 읽기 전용 native 리뷰 연결·로컬 계약 검증 완료; 실제 AI 리뷰/다른 언어 분석 미검증 |
-| E Visualization | 제한 Mermaid flowchart/SVG, architecture, Artifact 이력·source staleness, 실제 editable PPTX/MD·브라우저 저장 검증 | PDF, sequence/C4/UML |
+| E Visualization | 제한 Mermaid flowchart·sequence/SVG, architecture, Artifact 이력·source staleness, 실제 editable 다중 페이지 PPTX/MD·브라우저 저장/복구·파일 편집 검증 | PDF, C4, 기타 UML |
 | F Automation | 로컬 고정 명령 workflow/template 버전·DAG·명시 실행·실패 중단·재시도·lost 복구, 실제 Node·Windows browser 검증 | 예약·외부 서비스 단계 미연결 |
 | G Model Hub | 5종 HTTP 호환 + 공식 AWS CLI 2 Bedrock text adapter·명시 진단/전송·중단·unknown usage/cost·복구; 7종 상태, mock/미설치 E2E | 실제 AWS/외부 실서비스 인증·호환 검증, 고급 라우팅/비용 집계 |
 | H Extensions | 공식 Codex 읽기 전용 metadata inventory·캐시·UI·fake RPC/HTTP 계약, Mac Chrome 2시나리오·독립 리뷰 | Windows 37단계 통합 재검증, profile/source·권한 preview/backup/restore·실제 native 조회 |

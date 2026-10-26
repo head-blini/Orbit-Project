@@ -1,8 +1,12 @@
 import { useEffect,useId,useRef,useState } from 'react';
 import type { Snapshot,WorkspaceDiff } from '../../shared/types.ts';
 import type { ArtifactRecord } from '../../shared/parallel.ts';
-import { generateArchitectureMermaid,parseMermaid,validateArchitecture,validateMermaid } from './mermaid.ts';
+import { generateArchitectureMermaid,parseMermaidDocument,validateArchitecture,validateMermaid } from './mermaid.ts';
 import { toPresentationDocument,validatePresentationDocument } from './presentation.ts';
+import type { PresentationDocument } from './presentation.ts';
+import type { SequenceDiagram,SequencePresentationDocument } from '../../shared/sequence.ts';
+import { SequencePreview } from './SequencePreview.tsx';
+import { layoutSequence } from './sequence-layout.ts';
 import { buildTimeline,startTimelineReload } from './timeline.ts';
 import { ArtifactSourceStatus } from './ArtifactSourceStatus.tsx';
 
@@ -13,10 +17,11 @@ type StudioProps={
   artifacts:readonly Artifact[];
   onSave?:(input:{id?:string;expectedRevision?:number;kind:Artifact['kind'];source:string;metadata:Record<string,string>})=>Promise<Artifact>;
   onHistory?:(id:string)=>Promise<Artifact[]>;
-  onExportPresentation?:(document:ReturnType<typeof toPresentationDocument>)=>Promise<void>;
+  onExportPresentation?:(document:PresentationDocument)=>Promise<void>;
   onExportArtifact?:(artifact:Artifact,format:'pptx'|'markdown')=>Promise<void>;
 };
 const sample='flowchart TD\n  browser["Browser"]\n  server["Local server"]\n  browser -->|HTTP| server';
+const sequenceSample='sequenceDiagram\nactor User as 사용자\nparticipant Orbit as Orbit\nparticipant Agent as 코딩 에이전트\nautonumber\nUser->>Orbit: 작업 요청\nOrbit->>+Agent: 실행 시작\nNote over Orbit,Agent: 승인된 작업 범위\nalt 작업 완료\nAgent-->>Orbit: 변경 결과\nelse 실행 실패\nAgent-->>Orbit: 오류 정보\nend\ndeactivate Agent\nOrbit-->>User: 검토 및 검증 결과';
 
 /** Render known primitives only. No Mermaid engine, raw markup, URLs, or remote renderer. */
 export function ArchitecturePreview({graph}:{graph:Graph}) {
@@ -53,10 +58,14 @@ function StudioEditor({projectId,artifacts,onSave,onHistory,onExportPresentation
   const [busy,setBusy]=useState(false),[message,setMessage]=useState('');
   const editorId=useId(),kindId=useId(),titleId=useId();
   const savedMatches=!!selected&&selected.kind===kind&&selected.source===source&&(selected.metadata.title??'제목 없음')===title;
-  let graph:Graph|null=null,valid=false,issues:{code:string;line?:number}[]=[];
+  let graph:Graph|null=null,sequence:SequenceDiagram|null=null,sequenceDocument:SequencePresentationDocument|null=null,valid=false,issues:{code:string;line?:number}[]=[];
   if(kind==='mermaid') {
     const result=validateMermaid(source);valid=result.ok;issues=result.issues;
-    if(valid) {const parsed=parseMermaid(source);graph={nodes:parsed.nodes,edges:parsed.edges};}
+    if(valid) {
+      const parsed=parseMermaidDocument(source);
+      if(parsed.kind==='flowchart')graph={nodes:parsed.graph.nodes,edges:parsed.graph.edges};
+      else try {sequenceDocument=layoutSequence(parsed);sequence=parsed;}catch{valid=false;issues=[{code:'SEQUENCE_LAYOUT_LIMIT'}];}
+    }
   } else if(kind==='architecture') {
     try {const parsed:unknown=JSON.parse(source);const result=validateArchitecture(parsed);valid=result.ok;issues=result.issues;if(valid)graph=parsed as Graph;}
     catch {issues=[{code:'INVALID_JSON'}];}
@@ -84,19 +93,20 @@ function StudioEditor({projectId,artifacts,onSave,onHistory,onExportPresentation
     <header><h2>Artifact 편집기</h2><p>{selected?`저장된 버전 ${selected.revision} 편집 중`:'새 Artifact · 기본 원문은 저장 전 예제입니다.'}</p></header>
     <div className="viz-layout"><div className="viz-editor">
       <label htmlFor={titleId}>Artifact 제목</label><input id={titleId} value={title} maxLength={160} disabled={busy} onChange={e=>setTitle(e.target.value)}/>
-      <label htmlFor={kindId}>원문 형식</label><select id={kindId} value={kind} disabled={busy||!!selected} onChange={e=>{setKind(e.target.value as Artifact['kind']);setMessage('');}}><option value="mermaid">Mermaid 흐름도</option><option value="architecture">구조 JSON</option><option value="presentation">프레젠테이션 문서 JSON</option></select>
+      <label htmlFor={kindId}>원문 형식</label><select id={kindId} value={kind} disabled={busy||!!selected} onChange={e=>{setKind(e.target.value as Artifact['kind']);setMessage('');}}><option value="mermaid">Mermaid 흐름도·시퀀스</option><option value="architecture">구조 JSON</option><option value="presentation">프레젠테이션 문서 JSON</option></select>
+      {kind==='mermaid'&&!selected&&<button disabled={busy} onClick={()=>{setSource(sequenceSample);setTitle('시퀀스 다이어그램');setMessage('시퀀스 예제를 불러왔습니다. 저장 전에 내용을 수정하세요.');}}>시퀀스 예제 불러오기</button>}
       <label htmlFor={editorId}>원문</label><textarea id={editorId} rows={16} spellCheck={false} value={source} disabled={busy} maxLength={262144} onChange={e=>setSource(e.target.value)}/>
-      <p className="viz-hint">Mermaid 지원: flowchart TD/LR, 따옴표로 감싼 사각형 노드, 방향 간선. 미리보기는 고정 격자이며 HTML·링크·스타일·클릭 동작은 허용하지 않습니다.</p>
+      <p className="viz-hint">Mermaid 지원: flowchart TD/LR의 사각형 노드·방향 간선, sequenceDiagram의 participant/actor·요청/응답·Note·autonumber·activate/deactivate·alt/else·opt·loop·par/and. 참가자는 먼저 선언하세요. 시퀀스는 최대 10명·120개 이벤트·중첩 4단계이며, 긴 내용은 페이지로 나눕니다. HTML·링크·스타일·클릭 동작은 허용하지 않습니다.</p>
       {issues.length>0?<ul className="viz-issues" aria-live="polite">{issues.slice(0,8).map((issue,i)=><li key={i}>{issue.code}{issue.line?` · ${issue.line}행`:''}</li>)}</ul>:<p className="viz-valid">지원하는 문법의 검증을 통과했습니다.</p>}
       <div className="viz-actions"><button disabled={busy||!valid||!onSave} onClick={()=>void save()}>{selected?`버전 ${selected.revision} 이후 새 버전 저장`:'Artifact 저장'}</button><button disabled={busy} onClick={()=>{setSelected(null);setHistory([]);setMessage('새 Artifact를 편집하고 있습니다.');}}>원문으로 새 Artifact 작성</button></div>
       {!onSave&&<p>Artifact 저장 기능이 연결되지 않았습니다.</p>}
       {message&&<p role="status">{message}</p>}
-    </div><div className="viz-preview"><h3>다이어그램 미리보기</h3>{graph?<ArchitecturePreview graph={graph}/>:<p>{valid?'프레젠테이션 원문이 준비됐습니다. 저장 후 내보낼 수 있습니다.':'유효한 원문을 입력하면 구조를 미리 볼 수 있습니다.'}</p>}
+    </div><div className="viz-preview"><h3>다이어그램 미리보기</h3>{sequence?<SequencePreview diagram={sequence}/>:graph?<ArchitecturePreview graph={graph}/>:<p>{valid?'프레젠테이션 원문이 준비됐습니다. 저장 후 내보낼 수 있습니다.':'유효한 원문을 입력하면 구조를 미리 볼 수 있습니다.'}</p>}
       {graph&&<details><summary>생성된 Mermaid 원문</summary><pre>{generateArchitectureMermaid(graph)}</pre></details>}
       <button disabled={busy||!valid||(!onExportPresentation&&!(onExportArtifact&&savedMatches))} onClick={()=>void action(async()=>{
         if(onExportArtifact&&selected&&savedMatches){await onExportArtifact(selected,'pptx');setMessage('저장된 버전의 PPTX 파일을 다운로드했습니다.');return;}
         if(!onExportPresentation)return;
-        const doc=graph?toPresentationDocument(graph):JSON.parse(source) as ReturnType<typeof toPresentationDocument>;
+        const doc=sequenceDocument??(graph?toPresentationDocument(graph):JSON.parse(source) as PresentationDocument);
         await onExportPresentation(doc);setMessage('연결된 내보내기 도구가 작업을 완료했습니다.');
       })}>PPTX 내보내기</button>
       {onExportArtifact&&<button disabled={busy||!savedMatches} onClick={()=>void action(async()=>{if(selected&&savedMatches){await onExportArtifact(selected,'markdown');setMessage('저장된 버전의 Markdown 파일을 다운로드했습니다.');}})}>Markdown 내보내기</button>}

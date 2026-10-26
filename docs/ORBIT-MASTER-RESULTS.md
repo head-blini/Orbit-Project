@@ -301,3 +301,25 @@
 - 전용 Chrome CUA 증거 `.local/ui-e2e/mac-task21-0Z2678/result.json`, `screenshots/01-project-summary.jpg`, `02-project-isolation.jpg`, `03-paged-history.jpg`, `04-restored-summary.jpg`: Atlas35개/관찰416, 25→35개 페이지·합계 불변, Boreal1개/777의 프로젝트 격리, 명시 새로고침25개 복귀, 새 서버 프로세스/같은DB/reload 후35개·416·측정 시간·과거 Check2개·workflow 재시도2 보존을 확인했다. provider disconnected 상태에서도 조회 가능하고 계정 refresh는 disabled다.
 - 원본 fixture 두 저장소 HEAD/README 동일, fake native2turn/계정조회0/실제 AI·CLI·외부요청0, console warning/error0. 실제JPEG4개 크기/SHA256 기록. 소유 서버2개 exit0·loopback65134 종료 확인, Chrome423251661 종료, 양쪽 cleanupComplete true. 자동 승인 심사가 일시적으로 사용량 한도를 보고하여 evidence용 stdin 명령1회가 실행되지 않았으나 이후 동일 tool의 종료/재시작 검증이 성공했다. 우회 실행하지 않았다.
 - 전용 Mac 시나리오이며 전체 통합/Windows E2E를 대신하지 않는다. 이 수직기능 완료는 전체 A–K 플랫폼 Goal 완료가 아니다.
+
+- Task21 검증 변경은 로컬 커밋 `ff99b88`로 보존했으며 원격 push는 하지 않았다.
+
+## Task22 시퀀스 다이어그램 (2026-10-26)
+
+- 기존 `mermaid` Artifact와 exact-source hash를 재사용해 명시 참가자/actor, 실선·점선·자기 호출, 메모, autonumber, 활성 구간과 alt/opt/loop/par를 추가했다. 기존 `parseMermaid` 반환 형식은 유지하고 새 document dispatcher를 사용한다. 외부 Mermaid 런타임·제공자 호출·의존성은 추가하지 않았다.
+- 시퀀스 AST와 고정 box/line/label 도형 계약을 분리했다. SVG와 실제 PPTX가 같은 페이지 배치를 사용하고, 참가자·활성 구간·분기 문맥을 페이지마다 이어 표시한다. 시퀀스 PPTX는 point 좌표의 여러 페이지이며 legacy 흐름도의 16:9 출력은 유지한다. 화면과 저장 경계가 배치 한도를 먼저 검사한다.
+- 저장된 파일 내보내기는 원문 해시와 프로젝트/ID를 재확인한다. 독립 리뷰의 SQL revision1 / JSON revision2 재현을 RED로 확인한 뒤 이력 읽기에서 SQL·JSON 식별자/버전 일치를 검사하도록 수정했다. `ARTIFACT_INTEGRITY`409는 Markdown/PPTX 반환 전에 발생한다.
+- 현재 확인한 증거: parser18, 새 presentation/PPTX6, 기존 PPTX6 =30/30 통과. Studio/legacy visualization/layout40개 초기 실행은 legacy flowchart의 `direction` 필드를 구조 입력으로 넘긴 회귀2건으로38pass/2fail이었고, 명시 nodes/edges projection으로 수정 후40/40 통과. SQL revision 회귀 추가 후 Studio HTTP11/11 통과. 타입 검사 exit0. 전체 최종 검사는 아직 실행 전이다.
+- 첫 실제2페이지 PPTX는85,879bytes, SHA256 `4a499aa5f194f8365cd404af86d1b838195b47f05a3a48e6ec11cb0598a3fca6`; bundled package/geometry 검사 finding0, import 성공, 두 페이지 PNG를 생성하고 확인했다. 최초 importer 실행은 `RUNTIME_NODE_MODULES` 환경 누락으로 실패했으며 설정 후 통과했다. 증거 `.local/verification/sequence-qa/build/validation.json`, `output/page-1.png`, `output/page-2.png`. 이 파일은 최종 배치 수정 이전의 중간 검증이며 최종 출력으로 보고하지 않는다.
+- 독립 리뷰에서 OOXML slide 최소914400EMU(72point) 미달 입력, grapheme 분리 줄바꿈, shorthand 활성 구간의 메시지 경계 불일치를 발견했다. 최소 크기 RED→GREEN 완료; 글자·활성 구간 및 화면 폭 개선은 진행 중이다. 최종 독립 리뷰·실제 브라우저·전체 verify·로컬 커밋이 남아 있다. C4/기타 UML/PDF와 전체 플랫폼 Goal은 미완료다.
+
+### Task22 최종 로컬 검증
+
+- 위 중간 상태의 남은 수정 완료: Intl.Segmenter로 결합 문자·ZWJ emoji를 분리하지 않고 줄바꿈한다. 인접 activate/deactivate는 해당 메시지의 실제 화살표 경계와 맞추며 페이지 경계에서도 보존한다. 짧은 메시지 배경이 활성 막대를 가리지 않도록 좁히고, 보통 2참가자 화면은900point부터 시작하도록 폭을 조절했다. 키보드 스크롤과 명시적 페이지 한도 오류도 검증했다.
+- 집중 신규40개(parser18/layout·UI14/presentation6/HTTP2)와 기존644개를 함께 실행했다. `.local/verification/sequence-frozen-verify.log`: **684total / 683pass / 1 Windows-only skip / 0fail**, type0·build0·exit0,24.3초. 페이지 한도 HTTP 저장 차단 assertion 추가 후 `.local/verification/sequence-final-verify.log`: **684total / 683pass / 1skip / 0fail**, type0·build0·exit0,24.2초. 기존 flowchart/Architecture/PPTX/Studio 회귀도 포함했다.
+- 독립 최종 리뷰: actionable finding 없음. reviewer가 parser/layout/presentation/legacy PPTX44개를 별도로 실행해44pass/0fail/exit0을 확인했고, 소유한 메모리 SQLite에서 layout-limit create/revise 차단, canonical revision 및 malformed JSON 차단도 확인했다.
+- 극단 입력: 10actor×160자 레이블+120긴 자기 호출은24페이지/2304도형/471641JSON bytes, 4중첩+24긴 메모+88긴 자기 호출은30페이지/3098도형/661807bytes로 원문 전체를 보존했다. 더 큰 반복 분기 문맥은32페이지 한도 오류로 처리하며 UI 부분 SVG나 DB 기록·이벤트를 만들지 않는다.
+- 최종 실제 PPTX `.local/verification/sequence-qa/output/v2/sequence-qa.pptx`: **2페이지, 85,808bytes, SHA256 `fc01db94def1ff35ef93be3a507df21a6b8c88e96d49da552300b916c9bef7c5`**. 최종 package/geometry finding0, bundled importer 성공, 두 페이지 PNG 렌더/시각 확인. `.local/verification/sequence-qa/build/v2/editability.json`:49개 editable textbox와55개 native line shape를 인식했고, 별도 복사본에서 참가자 텍스트를 수정→PPTX 재출력→재가져오기 후 수정값 보존을 확인했다. 제품 출력 원본은 변경하지 않았다. PowerPoint/Google Slides 자체 편집 실행은 미검증이다.
+- 실제 Chrome CUA `.local/ui-e2e/mac-task22-hO4d5B/result.json`: 예제 저장v1, 긴 원문 수정v2/2페이지, dirty export disabled, 이전 버전 exact 원문 복원, 다른 프로젝트에 Artifact 없음, 새 서버 프로세스+같은DB+reload 후 원문·페이지·이력·내보낸 bytes 동일, 위험 문법 save/export disabled 및 SVG 없음 확인. Downloads의v1/v2 PPTX·MD4개를 서버 export와 byte-for-byte 비교했고 각각 SHA256을 `download-checks.json`에 보존했다.
+- 브라우저 download-event 대기1회가 timeout되어 CUA kernel이 초기화되었다. fresh UI와 알려진 파일 경로에서 실제 성공을 확인했으므로 성공/실패를 추정하지 않았다. 실제 JPEG5개를 저장했고 console warn/error0, native factory0·실제AI/CLI0·Run0, fixture원본HEAD/status/README 동일이다. 서버PID67969/68105 종료exit0·loopback50234 닫힘, Chrome423251671 종료, cleanupComplete true.
+- 전용 Mac 기능 시나리오이며 Windows 최종 gate/전체37단계/실서비스 검증을 대신하지 않는다. C4/기타 UML/PDF와 전체 A–K Goal은 계속 미완료다.

@@ -1,4 +1,8 @@
 import { validateArchitecture } from './mermaid.ts';
+import { SEQUENCE_CANVAS_LIMITS } from '../../shared/sequence.ts';
+import type { SequencePresentationDocument } from '../../shared/sequence.ts';
+
+export type PresentationDocument=ReturnType<typeof toPresentationDocument>|SequencePresentationDocument;
 
 // Implementation-local element model; shared/parallel.ts remains integration-owned.
 type Element =
@@ -37,9 +41,39 @@ function xmlText(value:string):boolean {
 }
 const validId=(value:unknown):value is string=>typeof value==='string'&&value.trim().length>0&&value.length<=160&&xmlText(value);
 
+function validateSequencePresentation(doc:Record<string,unknown>):boolean {
+  const limit=SEQUENCE_CANVAS_LIMITS;
+  if(Object.keys(doc).some(k=>!['format','slides'].includes(k))||doc.format!=='sequence-v1'||!Array.isArray(doc.slides)||doc.slides.length<1||doc.slides.length>limit.pages)return false;
+  const object=(v:unknown):v is Record<string,any>=>!!v&&typeof v==='object'&&!Array.isArray(v);
+  const exact=(v:Record<string,unknown>,keys:string[])=>Object.keys(v).length===keys.length&&Object.keys(v).every(k=>keys.includes(k));
+  const finite=(n:unknown):n is number=>typeof n==='number'&&Number.isFinite(n)&&n>=0;
+  const pages=new Set<string>();let count=0;
+  for(const slide of doc.slides){
+    if(!object(slide)||!exact(slide,['id','width','height','elements'])||!validId(slide.id)||pages.has(slide.id)||!finite(slide.width)||!finite(slide.height)||slide.width<72||slide.width>limit.width||slide.height<72||slide.height>limit.height||!Array.isArray(slide.elements)||slide.elements.length<1||slide.elements.length>limit.elementsPerPage)return false;
+    pages.add(slide.id);count+=slide.elements.length;
+    if(count>limit.elements||slide.width!==doc.slides[0].width||slide.height!==doc.slides[0].height)return false;
+    const ids=new Set<string>();let boxes=0;
+    for(const e of slide.elements){
+      if(!object(e)||!validId(e.id)||ids.has(e.id))return false;ids.add(e.id);
+      if(e.type==='line'){
+        if(!exact(e,['type','id','x1','y1','x2','y2','dash','arrow'])||!['x1','y1','x2','y2'].every(k=>finite(e[k]))||e.x1>slide.width||e.x2>slide.width||e.y1>slide.height||e.y2>slide.height||Math.max(Math.abs(e.x1-e.x2),Math.abs(e.y1-e.y2))<1||!['solid','dash'].includes(e.dash)||!['none','triangle'].includes(e.arrow))return false;
+      }else if(e.type==='box'||e.type==='label'){
+        const common=['type','id','x','y','width','height'];
+        if(!['x','y','width','height'].every(k=>finite(e[k]))||e.width<1||e.height<1||e.x+e.width>slide.width||e.y+e.height>slide.height)return false;
+        if(e.type==='box'){
+          if(!exact(e,[...common,'geometry','fill','stroke'])||!['rect','ellipse'].includes(e.geometry)||!['none','paper','blue','note'].includes(e.fill)||!['none','solid'].includes(e.stroke))return false;boxes++;
+        }else if(!exact(e,[...common,'text','fontSize','align'])||typeof e.text!=='string'||e.text.length>512||!xmlText(e.text)||!finite(e.fontSize)||e.fontSize<17||e.fontSize>48||!['left','center'].includes(e.align))return false;
+      }else return false;
+    }
+    if(!boxes)return false;
+  }
+  return new TextEncoder().encode(JSON.stringify(doc)).length<=limit.bytes;
+}
+
 export function validatePresentationDocument(value:unknown):boolean {
   if(!value || typeof value!=='object' || Array.isArray(value)) return false;
   const doc=value as Record<string,unknown>;
+  if('format' in doc)return validateSequencePresentation(doc);
   if(Object.keys(doc).some(k=>k!=='slides') || !Array.isArray(doc.slides) || doc.slides.length!==1) return false;
   const slide=doc.slides[0];
   if(!slide || typeof slide!=='object' || Object.keys(slide).some(k=>!['id','width','height','elements'].includes(k)) || !validId(slide.id) || !Array.isArray(slide.elements) || slide.elements.length>800) return false;

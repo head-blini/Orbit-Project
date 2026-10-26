@@ -1,55 +1,59 @@
-# Visualization integration handoff
+# Visualization integration contract
 
-Integration update (2026-10-25): the Studio and timeline are mounted; Artifact SQLite/API persistence is connected. The following text is the original module handoff. See [product integration results](../ORBIT-INTEGRATION-RESULTS.md). Actual PPTX export remains unsupported; sandbox product build and browser acceptance remain unverified.
+Current implementation contract (2026-10-26). Studio and timeline are mounted in the product; SQLite Artifact history, authenticated HTTP save/history/export, and actual editable PPTX/Markdown downloads are connected. Task22 adds sequence diagrams. Verification evidence and remaining product gaps belong in `ORBIT-MASTER-RESULTS.md`; this contract is not a claim that unrun checks passed.
 
-Status: independently implemented modules; not mounted in the application. No shared types, Controller, HTTP, SQLite, package manifests, security core, or other worktrees were changed. No provider or paid API is required.
+## Inert diagram inputs
 
-## Shared contract prerequisite
+`ArtifactInput` / `ArtifactRecord` are defined in `shared/parallel.ts`. Artifact kinds remain `mermaid`, `architecture`, and `presentation`. All stored source is capped at 256 KiB UTF-8. No Mermaid runtime, raw markup, network renderer, scripts, links or arbitrary SVG paths execute.
 
-`shared/parallel.ts` was absent throughout implementation. Its creation and contract tests are explicitly reserved for the integration owner. No replacement named common contracts were created. Public functions currently express structural inputs and inferred return types; local aliases derive from these functions. Integration must supply the common types, bind/check these implementations against them, and run the common contract tests before claiming contract compatibility. This remains a release prerequisite.
+- `parseMermaid(source)` preserves its original flowchart-only return `{nodes,edges,direction}` and throws `INVALID_MERMAID` on invalid input.
+- `parseMermaidDocument(source)` adds dispatch: `{kind:'flowchart',graph}` or the `SequenceDiagram` contract from `shared/sequence.ts`.
+- `validateMermaid(source)` validates either supported grammar and returns `{ok,issues:[{code,line?}]}`.
+- `validateArchitecture(unknown)` validates exact node/edge fields, identifiers, references, unique nodes and text safety. Limits: 100 nodes, 300 edges, nonblank labels/kinds at most 160 UTF-16 units.
+- `generateArchitectureMermaid(graph)` remaps IDs to `n0`, `n1`, etc. and preserves labels/edges. Architecture kinds remain in JSON/presentation data.
 
-## Browser modules
+### Flowcharts
 
-Import `web/visualization/index.tsx` for components and scoped CSS, or `Studio.tsx` for components without styles. Pure helpers are exported from the index and their individual `.ts` modules. Server hashing/repository code is imported by UI only as an erased type reference.
+Supported headers: `flowchart TD` / `flowchart LR`; explicit nodes `name["Plain text"]`; edges `name --> other` / `name -->|Plain text| other`. Each statement occupies one line. Blank lines and CRLF are accepted. IDs follow `[A-Za-z][A-Za-z0-9_]{0,63}`; node IDs `end` and `subgraph` are rejected.
 
-- `generateArchitectureMermaid(graph)` accepts the contracted node/edge shape, validates it, and emits restricted Mermaid. Node identifiers are remapped to `n0`, `n1`, etc. to avoid reserved language tokens; labels and edge topology are preserved. `kind` remains in architecture JSON and presentation shapes, not Mermaid source.
-- `validateMermaid(source)` returns `{ok, issues:[{code,line?}]}`. `parseMermaid(source)` returns inert nodes/edges plus direction, or throws `INVALID_MERMAID`.
-- `validateArchitecture(unknown)` returns the same validation result shape. It rejects unknown fields, duplicate IDs, unknown endpoints, empty graphs, more than 100 nodes or 300 edges. IDs match `[A-Za-z][A-Za-z0-9_]{0,63}`. Labels/kinds are nonblank, at most 160 UTF-16 code units, and satisfy the text safety filter.
-- `toPresentationDocument(graph)` returns one expandable slide with `id`, numeric `width`/`height` and `elements`. Elements are editable `shape` records (`id,x,y,width,height,kind`), `text` records (`id,x,y,width,height,text`), and `connector` records (`id,from,to`, referencing shape IDs). Coordinates use a logical canvas, not PPTX units. Integration must convert units/fit slides.
-- `exportPresentation(graph, exporter)` accepts the structural `PptxExporter.export(document): Promise<Uint8Array>` boundary. It validates/converts before invoking the supplied exporter. **편집 가능한 PPTX 생성 기반만 구현 / editable PPTX generation foundation only.** No serializer, ZIP/XML writer, or actual PPTX artifact exists. A future exporter must emit separate editable elements, escape XML, remap element IDs, and validate package structure. Rasterizing the SVG is not an editable export.
+Both directions retain the existing four-column preview layout. Dense edge crossings and long preview label truncation remain legacy limitations; original source and editable presentation text are preserved.
 
-## Restricted Mermaid syntax
+### Sequences
 
-Input is at most 256 KiB UTF-8. Blank lines and CRLF are accepted. Each statement occupies its own line. Header: `flowchart TD` or `flowchart LR`. Nodes: `name["Plain text"]`. Edges: `name --> other` or `name -->|Plain text| other`. Endpoints must have explicit node declarations. Duplicate node IDs are rejected. Nodes named `end` or `subgraph` are rejected; generated output always uses safe identifiers.
+Header: `sequenceDiagram`. Explicit ordered `participant` / `actor` declarations with optional `as` aliases precede events. Supported statements:
 
-No other Mermaid language is supported: no directives, comments, subgraphs, styles, click handlers, HTML, raw markup, URLs, encoded entities/percent escapes, or arbitrary statements. Labels reject angle brackets, quotes, backslashes, control characters, brackets/braces/pipes/backticks, web URL forms and URI-scheme-like strings (a word directly followed by a colon is conservatively rejected, even when intended as ordinary prose). This is an allowlisted parser, **not validation of the full Mermaid grammar**.
+- `A->>B: Message`, `B-->>A: Reply`, including self calls.
+- `Note left of A: Text`, `Note right of A: Text`, `Note over A,B: Text` (one or two participants for `over`).
+- Bare `autonumber` before events; numbers only messages.
+- `activate A` / `deactivate A`, including stacking; `A->>+B` activates recipient B after the message, `B-->>-A` deactivates sender B after the message.
+- Nested `alt` / `else` / `end`, `opt` / `end`, `loop` / `end`, `par` / `and` / `end`. Fragment starts require labels; branch labels may be empty.
 
-Preview renders validated primitives through React SVG, never `innerHTML`, a Mermaid runtime, or a network renderer. Both accepted directions currently use a documented fixed four-column grid; this is not Mermaid's layout engine. Long labels are visually truncated with full text in SVG titles and preserved in source/presentation text. Dense graphs may have overlapping connectors or labels; no automatic graph-layout engine is included.
+References must exist. Fragment stacks match; activation stacks balance globally in linear source order. Parallel operands have explicit labels; their vertical placement is source presentation, not an execution schedule. Other Mermaid features remain unsupported.
 
-## Studio host callbacks
+Limits: 10 participants, 120 normalized events (shorthand adds an activation event), 24 notes, 16 fragments, nesting/activation depth 4, 1,024 source lines, 160 Unicode code points per label, 32 fixed diagnostics. Labels additionally reject semicolons/comments, markup, URLs, encoded syntax, XML-invalid characters and controls. The typed AST independently validates exact fields, dense arrays, references, stack semantics and budgets.
 
-`VisualizationStudio` takes `projectId`, an array of latest server Artifact records, and optional callbacks:
+`layoutSequence(diagram)` produces one deterministic `SequencePresentationDocument` for both SVG and PPTX. Text wraps without truncation; long diagrams paginate with repeated participant headers and continuing fragment/activation context. Pages have natural scrollable dimensions. Grammar-valid sources can still exceed geometry/page/byte budgets: `SEQUENCE_LAYOUT_LIMIT` prevents preview export and server persistence before any partial result is saved.
 
-- `onSave({id?, expectedRevision?, kind, source, metadata}) -> Promise<ArtifactRecord>`. Missing ID means create; existing ID means revise using optimistic concurrency. The host binds the project using server context, passes only `kind/source/metadata` into repository input, and refreshes the latest list after success. Do not trust browser project, ID, revision, hash or timestamp as authority. HTTP must retain existing origin/session/CSRF checks.
-- `onHistory(id) -> Promise<ArtifactRecord[]>`. Returns revisions in ascending order after checking project access. Selecting an old revision is allowed for inspection; saving it produces a conflict until the latest revision is loaded or a new Artifact is created.
-- `onExportPresentation(document) -> Promise<void>`. The host supplies a tested exporter and download delivery. If absent, the export button is disabled and the foundation-only limitation is visible. Supplying this callback is the host's responsibility and is not evidence that a serializer has been verified.
+## Presentation and real file output
 
-Editor state is keyed by project, foreign project records are filtered, source is preserved exactly, and errors are generic rather than raw server/provider messages. Saving and history actions are unavailable without host callbacks. An explicit new-Artifact action detaches a revision while retaining editor source.
+`toPresentationDocument(graph)` retains the legacy single-slide model: editable `shape`, `text`, and endpoint-linked `connector` elements. `validatePresentationDocument` preserves its 800-element / 256 KiB / 160 UTF-16 text contract. `serializePresentation` produces an actual deterministic PPTX ZIP with DrawingML, internal relationships, editable text/shapes/connectors and no raster images, external relationships or macros. Legacy diagrams retain 16:9 scaling.
 
-## Artifact server boundary
+The additive `format:'sequence-v1'` model uses native point coordinates with `box` (rect/ellipse), `line` (fixed solid/dash stroke and none/triangle arrow), and `label` primitives. Element order is retained. Every page shares dimensions; minimum 72 points per axis meets OOXML slide-size bounds, maximum 3600×1200 points. Positive boxes/segments have at least a one-point extent. Label font size is 17–48 points; wrapped labels allow 512 UTF-16 units. Limits: 32 pages, 800 elements/page, 8000 total elements, 1 MiB generated JSON. These generated limits do not increase the stored-source budget. SVG and PPTX consume the same page geometry.
 
-`server/visualization/artifacts.ts` exports `ArtifactRepository`, an **in-memory implementation only**, with:
+## Studio and persistence
 
-```
-create(projectId, {kind, source, metadata}) -> record
-revise(projectId, id, expectedRevision, {kind, source, metadata}) -> record
-list(projectId) -> latest record[]
-history(projectId, id) -> all revisions[]
-```
+`VisualizationStudio` receives project-bound latest records and callbacks:
 
-Records have the contracted `id,projectId,revision,kind,source,contentHash,createdAt,metadata`. UUIDs/timestamps/SHA-256 and revision numbers are server assigned. SHA-256 covers exact UTF-8 source bytes. Kind cannot change within an Artifact; create a new Artifact to change kind. Return objects and incoming metadata are detached from stored history. Unknown input keys (including paths or forged record authority) are rejected. Project identifiers are bounded identifiers, never filesystem paths. Metadata permits up to 32 entries, keys up to 64 code units and values up to 1000 code units. Source cap: 256 KiB UTF-8. Architecture and presentation JSON are validated before storage.
+- `onSave({id?,expectedRevision?,kind,source,metadata})` creates or revises using optimistic concurrency.
+- `onHistory(id)` retrieves immutable revisions in ascending order.
+- `onExportArtifact(record,'pptx'|'markdown')` downloads the exact selected saved revision. Dirty source must be saved first.
+- Optional `onExportPresentation(document)` supports an embedding host's exporter and accepts legacy or sequence presentation documents.
 
-Errors: `INVALID_PROJECT`, `INVALID_ARTIFACT`, `ARTIFACT_NOT_FOUND`, `REVISION_CONFLICT`, `ARTIFACT_KIND_IMMUTABLE`. The host maps these to safe HTTP statuses. The repository does not authenticate project access; it enforces isolation only within the supplied project scope. There are no filesystem reads/writes and no delete or arbitrary download path operation. Persistence, quotas, migrations, cross-process concurrency, HTTP routes and download APIs remain integration work. SQLite must preserve immutable revisions and transactional expected-revision checking.
+Editor state is keyed by project; foreign records are filtered. The sequence sample is a local editable example, never an agent invocation. Source remains exact; a new-Artifact action detaches history while retaining source. Errors use fixed diagnostics or generic messages.
+
+`SqliteArtifactRepository` is the product repository; `ArtifactRepository` is the memory implementation. UUIDs, hashes, revision numbers and timestamps are server assigned. SHA-256 covers exact original UTF-8 source bytes, including whitespace. Kind is immutable within an Artifact. Metadata permits 32 entries, keys up to 64 and values up to 1000 UTF-16 units. Input validation and sequence layout execute before persistence. SQLite mutations share the Studio transaction, audit event and idempotency receipt.
+
+HTTP retains session/origin/CSRF checks, registered project ownership, quotas, exact request fields and expected revisions. Historical export requires the requested revision/hash, rechecks stored record identity and recomputes the source hash, then revalidates input. Corruption returns `ARTIFACT_INTEGRITY` (409); no bytes are returned. Markdown contains exact source inside a safe-length fence. There is no arbitrary output path, file read or provider call in export.
 
 ## Timeline and reload lifecycle
 
@@ -59,6 +63,8 @@ Errors: `INVALID_PROJECT`, `INVALID_ARTIFACT`, `ARTIFACT_NOT_FOUND`, `REVISION_C
 
 `RunTimeline` takes the computed view, a current snapshot, optional `WorkspaceDiff`, and required `onReload({workspaceKey, after, reason}): Promise<void>`. Supply snapshot/view for the same workspace session. The hook requests reload once per unchanged reload key, cleans up queued requests, ignores obsolete failures, and allows an explicit retry. The host must fetch through existing endpoints, update the anchor/current snapshot/replay state, and ignore responses from a superseded workspace session. It must also handle network reconnect by authoritative reload; no transport/reconnect subscription is created here. Already dispatched host work cannot be aborted by this component. Workspace identity changes remount timeline state; diffs from another workspace are omitted. Diff text is escaped; it is not a file reader.
 
-## Required integration verification
+## Verification and remaining scope
 
-Run `npm.cmd run verify` and `node tests/fixtures/visualization/verify-ui-build.mjs` in an environment where esbuild may resolve the existing workspace. Both bundle attempts are currently blocked by sandbox ancestor-directory access. Typecheck, pure behavior tests and JSX-to-SSR checks run successfully; browser mounting/interactions and screenshot inspection remain unverified. Validate mounted save/history/reload/export flows, stale async responses across workspace changes, shared contract compatibility, persistent history, download delivery, and actual PPTX editability after those integrations exist.
+Run `npm run verify` with Node 24. Focused sequence parser/layout/PPTX/Studio tests supplement existing malicious-input, project-isolation, immutable revision, rollback and legacy export coverage. Actual browser and PPTX import/render checks are recorded separately with their real results.
+
+C4, other UML forms and PDF export remain separate incomplete requirements. Supporting this inert subset does not imply support for full Mermaid syntax or the Mermaid layout engine. PowerPoint/Google Slides manual round-trip evidence must be reported separately from package inspection and the bundled importer.
