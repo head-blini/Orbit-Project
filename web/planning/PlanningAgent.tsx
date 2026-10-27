@@ -144,29 +144,34 @@ export function PlanningAgentPanel(props:PlanningAgentPanelProps){
     return()=>{disposed=true;if(timer)clearTimeout(timer);};
   },[coordinator,props.projectId,props.workspaceId,props.online,props.busy,state.action,running]);
   const ready=idle(state),canPreview=ready&&validText(state.text),blocked=!props.online||!props.workspaceId||!!state.action;
+  const simple=props.presentation==='simple';
+  const explanation=<><p>공식 Codex CLI의 읽기 전용 세션을 사용하며, 읽기 전용도 네이티브 파일 읽기를 허용합니다. CLI의 컨텍스트 로딩·보존·공급자 전송은 Model Hub 게이트웨이 밖에서 처리됩니다.</p>
+    <p>1 turn · 60초 제한과 프로세스 종료 확인을 사용합니다. 자동 시작·재시도·이어받기는 하지 않습니다. 검증된 제안도 별도로 저장해야 미승인 기획 초안이 됩니다.</p></>;
   return <section className="planning-agent" aria-label="Codex 기획 제안" aria-busy={!!state.action||state.loading}>
-    <h3>Codex 기획 제안 · 선택 기능</h3>
-    <p>공식 Codex CLI의 읽기 전용 세션을 사용하며, 읽기 전용도 네이티브 파일 읽기를 허용합니다. CLI의 컨텍스트 로딩·보존·공급자 전송은 Model Hub 게이트웨이 밖에서 처리됩니다.</p>
-    <p>1 turn · 60초 제한과 프로세스 종료 확인을 사용합니다. 자동 시작·재시도·이어받기는 하지 않습니다. 검증된 제안도 별도로 저장해야 미승인 기획 초안이 됩니다.</p>
+    <h3>{simple?'무엇을 만들고 싶으세요?':'Codex 기획 제안 · 선택 기능'}</h3>
+    {simple?<><p>누가 사용할지, 어떤 일을 할 수 있으면 좋을지 적어 주세요. 기획 도우미의 제안을 검토하고 초안으로 저장할 수 있습니다.</p><details><summary>기획 도우미의 실행 범위와 제한</summary>{explanation}</details></>:explanation}
     {!props.workspaceId&&<p>등록한 격리 작업 공간을 선택하면 기획 제안을 요청할 수 있습니다. 수동 기획 작성은 계속 사용할 수 있습니다.</p>}
     {!props.online&&<p>서버 연결 후 기획 제안 상태를 확인할 수 있습니다.</p>}{props.busy&&<p>다른 작업이 진행 중입니다. 완료 후 새 기획 제안을 요청하세요.</p>}
     <button disabled={!props.online||!props.workspaceId||!!state.action||state.loading} onClick={()=>void coordinator.refresh('manual')}>기획 상태 새로고침</button>
     {state.error&&<p role="alert">{state.error}</p>}{state.message&&<p role="status">{state.message}</p>}
     {state.uncertain&&<p role="status">이전 변경 요청의 응답은 미확인입니다. 기획 상태 새로고침을 직접 눌러 성공적으로 조회해야 다시 시작할 수 있습니다. 자동 조회는 이 잠금을 해제하거나 요청을 재전송하지 않습니다.</p>}
     {state.view?.recoveryRequired&&<p>종료가 확인되지 않은 기획 프로세스가 있습니다. 실제 종료를 확인한 뒤 아래 별도 확인란으로 복구하세요.</p>}
-    <label>기획 요청<textarea rows={5} maxLength={8000} value={state.text} disabled={blocked} onChange={event=>coordinator.setText(event.target.value)}/></label>
+    <label>{simple?'만들고 싶은 프로그램':'기획 요청'}<textarea rows={5} maxLength={8000} value={state.text} disabled={blocked} placeholder={simple?'예: 소규모 팀이 할 일을 추가하고 진행 상태를 확인하는 웹 앱을 만들고 싶어요. 담당자와 마감일을 정하고 완료한 일을 모아 볼 수 있으면 좋겠어요.':undefined} onChange={event=>coordinator.setText(event.target.value)}/></label>
     <p>최대 8,000자 · UTF-8 32 KiB. Orbit 실행 기록에는 요청 원문을 저장하지 않습니다. 네이티브 CLI의 컨텍스트·보존 정책은 별도로 적용됩니다.</p>
     <button disabled={!canPreview} onClick={()=>void coordinator.preview()}>기획 요청 미리보기</button>
-    {state.preview&&<PlanningAgentExecutionPreview preview={state.preview} consent={state.consent} disabled={!ready} onConsent={coordinator.consent} onStart={()=>void coordinator.start()}/>}
+    {state.preview&&<PlanningAgentExecutionPreview preview={state.preview} consent={state.consent} disabled={!ready} presentation={props.presentation} onConsent={coordinator.consent} onStart={()=>void coordinator.start()}/>}
     <PlanningAgentHistory projectId={props.projectId} workspaceId={props.workspaceId} records={state.view?.records??[]} online={props.online} busy={props.busy||!!state.view?.busy} loading={state.loading} fresh={state.fresh} uncertain={state.uncertain} action={state.action} recoveryConsent={state.recoveryConsent}
       onInterrupt={id=>void coordinator.interrupt(id)} onRecover={id=>void coordinator.recover(id)} onConfirmStopped={coordinator.confirmStopped} onSave={id=>void coordinator.save(id)}/>
   </section>;
 }
 
-export function PlanningAgentExecutionPreview({preview,consent,disabled,onConsent,onStart}:{preview:PlanningAgentPreview;consent:boolean;disabled:boolean;onConsent:(checked:boolean)=>void;onStart:()=>void}){
-  return <section className="planning-agent-preview" aria-label="기획 요청 전송 미리보기"><h4>정확한 전송 입력</h4>
-    <p>{preview.turnLimit} turn · {preview.timeoutMs} ms · {preview.scope}</p><p>input <code>{preview.inputDigest}</code> · preview <code>{preview.previewDigest}</code></p>
-    <pre>{preview.instructions}</pre><label className="planning-agent-consent"><input type="checkbox" checked={consent} disabled={disabled} onChange={event=>{if(!disabled)onConsent(event.target.checked);}}/>별도 동의: 위 입력과 네이티브 읽기·컨텍스트·보존·공급자 전송 범위를 확인하고 기획 제안 시작에 동의합니다.</label>
+export function PlanningAgentExecutionPreview({preview,consent,disabled,presentation,onConsent,onStart}:{preview:PlanningAgentPreview;consent:boolean;disabled:boolean;presentation?:PlanningAgentPanelProps['presentation'];onConsent:(checked:boolean)=>void;onStart:()=>void}){
+  const simple=presentation==='simple';
+  const input=<><p>input <code>{preview.inputDigest}</code> · preview <code>{preview.previewDigest}</code></p><pre>{preview.instructions}</pre></>;
+  return <section className="planning-agent-preview" aria-label="기획 요청 전송 미리보기"><h4>{simple?'기획 도우미 실행 확인':'정확한 전송 입력'}</h4>
+    <p>{preview.turnLimit} turn · {simple?`${preview.timeoutMs/1000}초`:`${preview.timeoutMs} ms`} · {preview.scope}</p>
+    {simple?<details><summary>정확한 전송 입력 확인</summary>{input}</details>:input}
+    <label className="planning-agent-consent"><input type="checkbox" checked={consent} disabled={disabled} onChange={event=>{if(!disabled)onConsent(event.target.checked);}}/>별도 동의: 위 입력과 네이티브 읽기·컨텍스트·보존·공급자 전송 범위를 확인하고 기획 제안 시작에 동의합니다.</label>
     <button disabled={disabled||!consent} onClick={()=>{if(!disabled&&consent)onStart();}}>동의한 기획 제안 시작</button>
   </section>;
 }

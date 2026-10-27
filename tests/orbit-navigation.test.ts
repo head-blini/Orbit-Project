@@ -5,10 +5,10 @@ import { pages,parsePage,resolveProject,workspaceMatchesProject,readPreference,w
 
 const projects=[{id:'a',name:'A',path:'a',writeEnabled:true,createdAt:''},{id:'b',name:'B',path:'b',writeEnabled:false,createdAt:''}];
 const state:Snapshot={provider:'ready',issue:null,threadId:null,workspace:'fixture',readOnly:false,runs:[],lastSeq:0,selectedWorkspaceId:'wa',projects,workspaces:[{id:'wa',projectId:'a',path:'fixture',branch:'a',baseSha:'sha',createdAt:'',status:'ready'}]};
-test('all twelve page URLs survive refresh parsing, while unknown locations return Dashboard',()=>{
-  assert.equal(pages.length,12);assert.equal(new Set(pages.map(page=>page.id)).size,12);
+test('the beginner start page is the default while all advanced page URLs survive refresh',()=>{
+  assert.equal(pages.length,13);assert.equal(new Set(pages.map(page=>page.id)).size,13);
   for(const page of pages)assert.equal(parsePage('#/'+page.id),page.id);
-  for(const hash of ['','#/not-a-page','#/%FF','#/../../agents','#/agents?run=true'])assert.equal(parsePage(hash),'dashboard');
+  for(const hash of ['','#/not-a-page','#/%FF','#/../../agents','#/agents?run=true'])assert.equal(parsePage(hash),'start');
 });
 test('project preference survives a new read without editing unrelated settings',()=>{
   const values=new Map([['existing-setting','keep']]);

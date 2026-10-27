@@ -9,7 +9,7 @@ export function Icon({name}:{name:string}) {
 export function Navigation({page,open,onNavigate,onClose}:{page:PageId;open:boolean;onNavigate:(page:PageId)=>void;onClose:()=>void}) {
   const nav=(group:string)=><nav aria-label={group==='main'?'주 메뉴':'관리 메뉴'}>{pages.filter(item=>item.group===group).map(item=><a key={item.id} href={'#/'+item.id} className={'nav-item '+(page===item.id?'selected':'')} aria-current={page===item.id?'page':undefined} title={item.name} onClick={()=>{onNavigate(item.id);onClose();}}><Icon name={item.icon}/><span>{item.label}</span></a>)}</nav>;
   return <><button className={'nav-backdrop '+(open?'visible':'')} aria-label="메뉴 닫기" onClick={onClose} tabIndex={open?0:-1}/><aside className={'sidebar '+(open?'is-open':'')} id="orbit-navigation" onKeyDown={event=>{if(event.key==='Escape')onClose();}}>
-    <a className="brand" href="#/dashboard" onClick={()=>{onNavigate('dashboard');onClose();}}><span className="brand-mark">O</span><div>Orbit<small>AI WORKSPACE</small></div></a>
+    <a className="brand" href="#/start" onClick={()=>{onNavigate('start');onClose();}}><span className="brand-mark">O</span><div>Orbit<small>AI WORKSPACE</small></div></a>
     <div className="nav-label">작업 공간</div>{nav('main')}<div className="management-nav"><div className="nav-label">관리</div>{nav('manage')}</div>
     <footer><span className="local-dot"/> 로컬 작업 플랫폼 <small>실행 완료 ≠ 검증 완료</small></footer>
   </aside></>;

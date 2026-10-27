@@ -23,8 +23,9 @@ import { ModelHubPanel } from './model-hub.tsx';
 import { WorkflowsPanel } from './workflows.tsx';
 import { GoalTrackingPanel } from './goals.tsx';
 import {TaskVerificationPreviewPanel} from './task-verification-preview.tsx';
+import {StartPage} from './start.tsx';
 
-type TaskIntent={task:SavedTask;workspaceId:string;scope:string;generation:number};
+type TaskIntent={task:SavedTask;workspaceId:string;scope:string;generation:number;returnPage:'start'|'agents'};
 const acceptanceErrors:Record<string,string>={ACCEPTANCE_PREVIEW_STALE:'확인한 인수 조건·명령 설정·보호 파일이 바뀌었습니다. 실행 기록을 확인한 뒤 Task 기준을 다시 확인하세요.',ACCEPTANCE_BASELINE_CHANGED:'실행 시 고정한 기준이 현재 상태와 다릅니다. 기존 기준을 복원하거나 새 Task 실행에서 기준을 고정하세요.',ACCEPTANCE_CONFIGURATION:'등록된 보호 파일 설정을 확인할 수 없습니다. 검증 명령 설정을 확인하세요.',ACCEPTANCE_CONFIGURATION_INCOMPLETE:'일부 검증 명령의 보호 파일 설정이 빠져 있습니다. 등록된 명령 설정을 확인하세요.',ACCEPTANCE_FILE_UNAVAILABLE:'보호 파일을 안전하게 읽을 수 없습니다. 파일 경로·링크·읽기 권한을 확인하세요.',ACCEPTANCE_SOURCE_UNAVAILABLE:'현재 작업 공간의 소스를 안전하게 확인할 수 없습니다.',ACCEPTANCE_BASELINE_UNAVAILABLE:'실행에 고정된 기준을 읽을 수 없습니다. 새 실행과 승인을 중단하고 기록을 확인하세요.',ACCEPTANCE_CONTEXT_CHANGED:'작업 공간 또는 기획이 바뀌었습니다. 현재 Task 기준을 다시 확인하세요.'};
 
 const errors:Record<string,string>={STATE_PERSISTENCE_FAILED:'실행 상태를 저장하지 못해 새 실행을 차단했습니다. 기록을 보존한 상태로 저장 공간과 오류를 확인하세요.',SOLO_RECOVERY_REQUIRED:'종료를 확인하지 못한 실행이 있어 새 실행을 차단했습니다. 기록 조회는 가능하며 안전한 복구 기능은 준비 중입니다.',PERSONAL_DATA_BLOCKED:'개인정보 패턴이 감지되어 전송을 차단했습니다. 실제 개인정보를 입력하지 마세요.',DESTINATION_BLOCKED:'현재 목적지의 반출 정책으로 차단됐습니다.',CHATGPT_LOGIN_REQUIRED:'터미널에서 codex login으로 ChatGPT 계정에 로그인하세요.',CODEX_NOT_INSTALLED:'Codex 실행 파일을 찾지 못했습니다. README의 AICC_CODEX_BIN 설정을 확인하세요.',CONNECTION_FAILED:'Codex에 연결하지 못했습니다. CLI 로그인과 정상 사용자 환경을 확인한 뒤 다시 연결하세요.',SUBMIT_UNCERTAIN:'전송 결과를 확인하지 못했습니다. 자동으로 재전송하지 않습니다.',RUN_ACTIVE:'다른 실행이 진행 중입니다.',CREDENTIAL_LIKE_INPUT:'인증정보로 보이는 내용은 전송할 수 없습니다.',CSRF_REJECTED:'웹 연결이 만료됐습니다. 새로고침하세요.',NOT_CONNECTED:'먼저 Codex를 연결하세요.',POLICY_MISMATCH:'읽기 전용·네트워크·승인 정책이 일치하지 않아 연결을 차단했습니다.',MCP_ISOLATION_REQUIRED:'MCP 도구 격리를 확인하지 못해 연결을 차단했습니다. README의 MCP 격리 안내를 확인하세요.',THREAD_STILL_ACTIVE:'저장된 세션이 아직 실행 중입니다. 기존 실행 상태를 확인하세요.'};
@@ -100,7 +101,7 @@ export function App(){
   async function interrupt(id:string){cancelTask();setBusy(true);setError('');try{await post('/api/runs/'+id+'/interrupt',{});}catch(e){setError((e as Error).message);}finally{setBusy(false);}}
   async function runTask(task:SavedTask){
     if(submitting.current||taskIntentRef.current||!taskContext.current.allowed||task.projectId!==projectId||!state?.selectedWorkspaceId)return;
-    const intent={task,workspaceId:state.selectedWorkspaceId,scope:taskContext.current.scope,generation:generation.current};taskIntentRef.current=intent;setTaskIntent(intent);setError('');
+    const intent:TaskIntent={task,workspaceId:state.selectedWorkspaceId,scope:taskContext.current.scope,generation:generation.current,returnPage:page==='start'?'start':'agents'};taskIntentRef.current=intent;setTaskIntent(intent);setError('');
   }
   function cancelTask(){taskIntentRef.current=null;setTaskIntent(null);}
   async function startTask(intent:TaskIntent,expectedAcceptanceDigest?:string){
@@ -110,7 +111,7 @@ export function App(){
     const requestId=crypto.randomUUID();
     try{sessionStorage.setItem('aicc.pending',requestId);}catch{setError('브라우저가 전송 상태 보존을 허용하지 않아 요청을 보내지 않았습니다.');return;}
     submitting.current=true;setPending(requestId);setBusy(true);setError('');
-    try{await post(`/api/projects/${intent.task.projectId}/tasks/${intent.task.id}/run`,{requestId,workspaceId:intent.workspaceId,...(expectedAcceptanceDigest===undefined?{}:{expectedAcceptanceDigest})});sessionStorage.removeItem('aicc.pending');setPending(null);navigate('agents');}
+    try{await post(`/api/projects/${intent.task.projectId}/tasks/${intent.task.id}/run`,{requestId,workspaceId:intent.workspaceId,...(expectedAcceptanceDigest===undefined?{}:{expectedAcceptanceDigest})});sessionStorage.removeItem('aicc.pending');setPending(null);navigate(intent.returnPage);}
     catch(error){setError((error as Error).message);}
     finally{submitting.current=false;setBusy(false);}
   }
@@ -118,7 +119,8 @@ export function App(){
   const projectId=resolveProject(state?.projects??[],preferredProject,state);
   const selectedProject=state?.projects?.find(project=>project.id===projectId);
   const matches=workspaceMatchesProject(state,projectId);
-  const locked=busy||!!state?.soloRecoveryRequired||!!active||!!state?.verificationBusy||!!state?.modelHubBusy||!!state?.mergeBusy||!!state?.workflowBusy||!!state?.planningBusy||!!state?.reviewBusy||!!state?.extensionBusy||state?.provider==='connecting';
+  const planningBlocked=busy||!!state?.soloRecoveryRequired||!!active||!!state?.verificationBusy||!!state?.modelHubBusy||!!state?.mergeBusy||!!state?.workflowBusy||!!state?.reviewBusy||!!state?.extensionBusy||state?.provider==='connecting';
+  const locked=planningBlocked||!!state?.planningBusy;
   const taskScope=JSON.stringify([projectId,state?.selectedWorkspaceId,state?.threadId,generation.current]);
   const taskAllowed=online&&!locked&&!pending&&matches&&state?.provider==='ready'&&!!state.selectedWorkspaceId;
   taskContext.current={scope:taskScope,allowed:taskAllowed};
@@ -141,6 +143,7 @@ export function App(){
       {error&&<div className="banner error" role="alert">{error}</div>}
       {taskIntent&&taskAllowed&&taskIntent.scope===taskScope&&<TaskVerificationPreviewPanel projectId={taskIntent.task.projectId} workspaceId={taskIntent.workspaceId} taskId={taskIntent.task.id} taskTitle={taskIntent.task.title} scopeKey={taskIntent.scope} active={taskAllowed} onCancel={cancelTask} onRun={digest=>startTask(taskIntent,digest)}/>}
       {page==='dashboard'&&<Dashboard key={projectId} state={state} projectId={projectId} onNavigate={navigate}/>}
+      {page==='start'&&<StartPage state={state} projectId={projectId} online={online} locked={locked||!!pending} planningBlocked={planningBlocked||!!pending} canRunTask={taskAllowed&&!taskIntent} post={post} onNavigate={navigate} onProject={selectProject} workspaceAction={workspaceAction} onConnect={connect} onRunTask={runTask} onInterrupt={interrupt}/>}
       {page==='projects'&&<WorkspacePanel state={state} projectId={projectId} onProject={selectProject} onPlanning={()=>navigate('planning')} online={online} locked={!online||locked} action={workspaceAction} post={post}/>}
       {(['planning','visualization'] as const).map(studio=>visited.has(studio)&&<div key={studio} hidden={page!==studio}><StudioPage projectId={projectId} page={studio} post={post} online={online} busy={busy} state={state} canRunTask={taskAllowed&&!taskIntent} onRunTask={runTask} onResult={openResult}/></div>)}
       {page==='agents'&&<><ExecutionModes/>{agent}{matches&&anchor&&state&&(anchor.selectedWorkspaceId??null)===(state.selectedWorkspaceId??null)&&<RunTimeline view={buildTimeline(anchor,events)} snapshot={state} onReload={()=>reload.current()}/>}

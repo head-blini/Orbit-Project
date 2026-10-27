@@ -1,5 +1,14 @@
 # Orbit 전체 구현·검증 증거
 
+## Task34c — 기본 시작 화면의 기획·개발·검증·결과 연결 (2026-10-27)
+
+- 시작 HEAD `062d2aa`, 기존 branch와 단일 worktree, Darwin arm64/Node24.22.1. `#/start`를 기본 화면으로 추가하고 기존12개 고급 화면과 URL을 유지했다. `web/start.tsx`에서 기존 프로젝트 생성·PlanningAgent·Task 실행·VerificationPanel·DevelopmentResultPanel을 연결한다. 새 실행 엔진·의존성·권한 변경은 없다. 기획 검토→작업 준비, 작업별 개발, 테스트 등록/실행, 결과/추가 요청은 명시적 사용자 동작이며 전체 자동 실행 완료는 아니다.
+- `web/start-flow.ts`는 프로젝트의 현재 lineage head만 선택하며 승인/Task 준비의 기존 API를 순서대로 호출한다. 정확한 기획·작업 연결, 중복 클릭 잠금, offline/blocked/scope 변경 차단, 불확실 요청의 수동 조회, 새로고침 시 자동 POST 없음, 실제 Studio의 idempotent Task 저장을 재사용한다. 부분 재기획이 있으면 모든 요구사항을 채우고 기존 Task ID/이력을 보존한다. 코딩은 기존 부모 Task preview/CAS/pending 경로를 거쳐 시작 화면에 남는다.
+- 기획 도우미의 simple 표시를 추가했으며 기본 advanced 표시는 유지했다. 전송 원문과 범위·동의는 기존 coordinator를 유지하고 상세 설명을 접었다. 자체 planningBusy가 응답을 무효화하지 않도록 다른 작업의 잠금과 분리했다. online/locked 전환은 기획 패널을 교체하지 않으며 저장과 이미 진행 중인 조회가 겹쳐도 새 기획을 선택한다. 실행 중 내부 입력은 접고 작업명·응답을 먼저 보여준다.
+- 신규26개 회귀를 포함한 최종 `.local/verification/start-flow-reviewed-verify.log`: **1048total/1046pass/2 Windows-only skip/0fail, type0/build0/exit0**,41.25초. 초기 전체는 새 메뉴 수13에 대한 기존 고정값12 assertion1개 실패 후 기대값을 수정했다. 자체busy·패널 분기·저장/조회 경합은 실제 TSX hook 회귀 RED→GREEN, partial replan은 실제 Studio/SQLite RED→GREEN. 독립 재검토 추가 actionable finding 없음. `git diff --check` 통과.
+- 첫 실제 검증은 제품 오류가 아닌 전용 fixture 상태 수집 오류로 중단됐다. 실행 중 Run을 `verification.view`의 terminal 인자로 전달해 서버61546이 exit1이었다. 실제 기획1회 완료/저장/승인/Task 준비 및 코딩1회 dispatch까지 수행했으나 코딩 결과는 unknown이다. 소유 Codex PID61859 및 직접 자식 부재를 확인했고 새 서버87047/같은DB에서 lost·미검증·추가 실행 차단을 Chrome으로 확인했다. 기존DB·원본·기록을 보존하고 recovery 상태를 강제로 해제하지 않았다. 이 실행을 성공 E2E로 집계하지 않는다. 증거 `.local/ui-e2e/start-flow-20261027/interrupted-fixture`.
+- 검증 fixture의 nonterminal 조회를 수정하고 겹치지 않는 새 임시 프로젝트에서 실제 전체 흐름을 재검증 중이다. 최종 브라우저·Node 검사·재시작 증거는 아래에 이어 기록한다.
+
 ## Task34b — 화면에서 실제 Node 검증 명령 준비 (2026-10-27)
 
 - 시작 HEAD `7c563a2`, branch `codex/orbit-mac-handoff-2026-10-26`, clean 단일 worktree, Darwin arm64/Node24.22.1. 전체 목표 파일을 다시 읽고 Task34a 이후의 검증 설정을 구현했다. `server/verification-setup.ts`, `shared/verification-setup.ts`, `web/verification-setup.tsx`가 실제 Git-visible `*.test.js/mjs/cjs` 최대60개를 찾아 서버 Node의 고정 `--test --` 프리셋으로 등록한다. 등록은 파일·Run·Check·프로세스를 만들지 않는다. 테스트가 없거나 기존 root manifest가 ignored인 경우 등록을 차단한다. 선택한 테스트와 존재하는 root package.json/package-lock.json은 보호 목록으로 고정한다. 테스트 작성·품질·전 요구사항 충족을 자동 판정하는 기능은 아니다.

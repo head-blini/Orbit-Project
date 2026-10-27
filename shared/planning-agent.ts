@@ -20,6 +20,7 @@ export interface StartPlanningSuggestionInput {
 }
 export interface PlanningAgentPanelProps {
   projectId:string;workspaceId:string|null;online:boolean;busy:boolean;
+  presentation?:'advanced'|'simple';
   post:(path:string,body:object)=>Promise<unknown>;
   onSaved:(version:PlanningVersion)=>void;
 }
