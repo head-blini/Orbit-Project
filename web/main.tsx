@@ -24,6 +24,9 @@ import { WorkflowsPanel } from './workflows.tsx';
 import { GoalTrackingPanel } from './goals.tsx';
 import {TaskVerificationPreviewPanel} from './task-verification-preview.tsx';
 import {StartPage} from './start.tsx';
+import {ProjectProgressPanel,lastEventTime} from './project-progress.tsx';
+import {connectionFreshness} from '../shared/project-progress.ts';
+import './project-progress.css';
 
 type TaskIntent={task:SavedTask;workspaceId:string;scope:string;generation:number;returnPage:'start'|'agents'};
 const acceptanceErrors:Record<string,string>={ACCEPTANCE_PREVIEW_STALE:'확인한 인수 조건·명령 설정·보호 파일이 바뀌었습니다. 실행 기록을 확인한 뒤 Task 기준을 다시 확인하세요.',ACCEPTANCE_BASELINE_CHANGED:'실행 시 고정한 기준이 현재 상태와 다릅니다. 기존 기준을 복원하거나 새 Task 실행에서 기준을 고정하세요.',ACCEPTANCE_CONFIGURATION:'등록된 보호 파일 설정을 확인할 수 없습니다. 검증 명령 설정을 확인하세요.',ACCEPTANCE_CONFIGURATION_INCOMPLETE:'일부 검증 명령의 보호 파일 설정이 빠져 있습니다. 등록된 명령 설정을 확인하세요.',ACCEPTANCE_FILE_UNAVAILABLE:'보호 파일을 안전하게 읽을 수 없습니다. 파일 경로·링크·읽기 권한을 확인하세요.',ACCEPTANCE_SOURCE_UNAVAILABLE:'현재 작업 공간의 소스를 안전하게 확인할 수 없습니다.',ACCEPTANCE_BASELINE_UNAVAILABLE:'실행에 고정된 기준을 읽을 수 없습니다. 새 실행과 승인을 중단하고 기록을 확인하세요.',ACCEPTANCE_CONTEXT_CHANGED:'작업 공간 또는 기획이 바뀌었습니다. 현재 Task 기준을 다시 확인하세요.'};
@@ -142,6 +145,7 @@ export function App(){
       {!online&&<div className="banner" role="status">서버 연결을 기다리고 있습니다. 다시 연결될 때 기록만 복원하며 프롬프트는 재전송하지 않습니다.</div>}
       {error&&<div className="banner error" role="alert">{error}</div>}
       {taskIntent&&taskAllowed&&taskIntent.scope===taskScope&&<TaskVerificationPreviewPanel projectId={taskIntent.task.projectId} workspaceId={taskIntent.workspaceId} taskId={taskIntent.task.id} taskTitle={taskIntent.task.title} scopeKey={taskIntent.scope} active={taskAllowed} onCancel={cancelTask} onRun={digest=>startTask(taskIntent,digest)}/>}
+      {page==='progress'&&<ProjectProgressPanel key={projectId} projectId={projectId} online={online} lastSeq={state?.lastSeq??0} lastEventAt={lastEventTime(events)} freshness={connectionFreshness({online,lastEventAt:lastEventTime(events),now:Date.now()})}/>}
       {page==='dashboard'&&<Dashboard key={projectId} state={state} projectId={projectId} onNavigate={navigate}/>}
       {page==='start'&&<StartPage state={state} projectId={projectId} online={online} locked={locked||!!pending} planningBlocked={planningBlocked||!!pending} canRunTask={taskAllowed&&!taskIntent} post={post} onNavigate={navigate} onProject={selectProject} workspaceAction={workspaceAction} onConnect={connect} onRunTask={runTask} onInterrupt={interrupt}/>}
       {page==='projects'&&<WorkspacePanel state={state} projectId={projectId} onProject={selectProject} onPlanning={()=>navigate('planning')} online={online} locked={!online||locked} action={workspaceAction} post={post}/>}

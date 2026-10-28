@@ -3,6 +3,7 @@ import type { Project, Snapshot } from '../shared/types.ts';
 export const pages = [
   {id:'start', label:'시작하기', name:'Start', icon:'bolt', group:'main', description:'만들고 싶은 프로그램을 설명하고 기획부터 결과까지 이어가세요.'},
   {id:'dashboard', label:'대시보드', name:'Dashboard', icon:'dashboard', group:'main', description:'프로젝트와 현재 작업 상태를 한눈에 확인하세요.'},
+  {id:'progress', label:'진행 현황', name:'Progress', icon:'chart', group:'main', description:'프로젝트·작업·실행의 현재 단계, 담당 AI, 대기 이유와 검증 결과를 확인하세요.'},
   {id:'projects', label:'프로젝트', name:'Projects', icon:'folder', group:'main', description:'로컬 저장소를 등록하고 격리된 작업 공간을 관리하세요.'},
   {id:'planning', label:'기획 스튜디오', name:'Planning Studio', icon:'plan', group:'main', description:'기획안을 작성하고 저장·승인한 뒤 Task 초안으로 연결하세요.'},
   {id:'agents', label:'에이전트 센터', name:'Agent Center', icon:'agent', group:'main', description:'Codex 대화와 실행 상태를 관리하세요.'},
