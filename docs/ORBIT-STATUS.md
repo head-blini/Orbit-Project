@@ -1,3 +1,26 @@
+# 현재 재개 요약 (2026-10-28 · 담당 Codex · CLI 모델 식별 계약 연결)
+
+- **현재 작업:** 사용자 요청에 따라 기존 Quality Loop 커밋 `f987fd9935111419284400a04c7af5d144e8a529`를 재사용하여 Codex 모델 식별 계약을 조사하고 실행기·DB·HTTP·진행판에 연결했다. 실제 모델 식별 성공을 선언하지 않는다. 아래 이전 요약의 `bbc2736`/미커밋 상태는 이전 시점 기록이다.
+- **기준 원문:** `ORBIT-VISION.md`, `ORBIT-SCOPE-2026-10-27.md`, `ORBIT-IMPLEMENTATION-PLAN-2026-10-27.md`, `ORBIT-COLLABORATION.md`, `AGENTS.md`. 이번 계약 조사 원문과 재현 방법은 [ORBIT-CODEX-MODEL-IDENTITY-2026-10-28.md](ORBIT-CODEX-MODEL-IDENTITY-2026-10-28.md).
+- **현재 Git:** 브랜치 `codex/orbit-mac-handoff-2026-10-26`, 시작 HEAD `f987fd9`, 루트 worktree 하나. 시작 시 `.DS_Store`, `docs/.DS_Store` 외 변경 없음. 두 파일 보존. 이번 수정은 미커밋이며 Push/main 병합 없음. 인증정보·사용자 DB/로그를 열거나 변경하지 않았다.
+- **확인 사실:** 설치된 CLI는 `codex-cli 0.162.1`. `--version`, help, 오프라인 `app-server generate-ts`(stable/experimental), `generate-json-schema`만 실행. `Thread.model`은 현재/최근 저장된 설정이며 명시적으로 per-turn telemetry가 아니다. `Turn`에는 실제 model 필드가 없다. `model/verification`은 cyber 접근 검증으로 모델 신원 증거가 아니다.
+- **구현:** 선택값·요청값·서버 설정값·출처·시점·thread/session/turn ID를 구분한다. 실제 모델은 `unknown/unavailable` 고정. 현재 기존 실행 요청은 모델 override가 없으므로 선택/요청은 null이며 서버 기본값을 복사하지 않는다. 설정 변경·reroute·재개·응답 이전 이벤트·누락·중단을 관측한다. 저장된 Codex 근거가 있으면 Quality Loop는 이전 모델 주장도 승격하지 않고 `modelId:null/source:unknown`을 반환한다.
+- **영속/복구:** `run_model_attributions` 테이블과 최소 이벤트 기록, 저장 실패 시 불완전 overlay, 재시작 시 진행 중/완료 저장 간극의 관측 불완전 처리. 실행 자동 재호출 없음. 기존 승인·격리·계정·사용량·idempotency·보호 검사 정책 유지. code/general 경로 모두 기존 구조 보존.
+- **화면/API:** 인증된 `GET /api/runs/:runId/model-identity`는 조회만 한다. 진행판 고급 모드에서 선택/요청/서버 설정/실제 unknown과 thread/native session/turn 근거를 표시한다. 간편 모드 상세 근거 숨김 유지. `model/list`/`thread/read`는 오프라인 계약·모의 테스트만 수행했으며 새 실서버 요청을 추가하지 않았다.
+- **검증:** Node24.22.1 전체 `node --test tests/*.test.ts spikes/phase0/*.test.mjs` 1276개 / 1274 pass / 0 fail / 2 Windows-only skip, exit 0 (`/tmp/orbit-codex-model-final-tests.log`). `tsc --noEmit`, `node scripts/build.mjs`, `git diff --check` exit 0. `node tests/quality-loop.browser.mjs` 모의 Chrome 검사 exit 0. 모든 테스트는 모의/임시 저장소/로컬 검증이다. 실제 모델 호출 0회.
+- **남은 제한/다음 행동:** 실제 서버에서 설정 응답·이벤트 전달·재개·중단을 확인하려면 별도 실모델 사용 승인이 필요하다. 그러나 0.162.1의 공식 계약에는 실제 실행 모델 증명이 없으므로 승인만으로 독립 검증 차단을 해제할 수 없다. 공식 per-turn/response 모델 귀속 계약이 제공되어야 재평가할 수 있다. 비공식 인증 데이터나 유료 API 전환은 하지 않는다. collector의 프로세스 내 실행 관측 map은 기존 telemetry처럼 실행 수에 따라 누적되며 장수 프로세스의 보존 한도는 이번 범위에서 변경하지 않았다.
+
+### 이번 단계 변경·검증 기록
+
+| 단계 | 변경 파일 | 검증 | 미검증/제한 |
+|---|---|---|---|
+| 설치 계약 확인 | `docs/ORBIT-CODEX-MODEL-IDENTITY-2026-10-28.md`, `tests/fixtures/codex-0.162.1-model-schema.json`, `tests/codex-model-schema.test.ts` | 실제 생성 스키마 19개 정의 투영/원본 SHA-256 대조, 계약 4개 통과 | 실제 서버 응답 수집 없음 |
+| 모델 근거 수집 | `shared/codex-model-attribution.ts`, `server/codex-model-attribution.ts`, `tests/codex-model-attribution.test.ts` | 변경/재개/라우팅/누락/중단/혼선/민감값/저장 실패 13개 통과 | actual model unknown |
+| 실행·품질 연결 | `server/controller.ts`, `server/codex-review.ts`, `server/runtimes/model-identity.ts`, `server/quality-loop-native.ts`, `shared/quality-loop-record.ts`, 관련 controller/native tests | native 29개 통과, Controller/HTTP 검사는 전체 스위트 포함 | production Codex 독립 검증 사전 차단 유지 |
+| DB/HTTP/진행판 | `server/store.ts`, `server/http.ts`, `server/project-progress.ts`, `shared/project-progress.ts`, `web/project-progress.tsx`, `tests/codex-model-store.test.ts`, `tests/project-progress-service.test.ts`, `tests/project-progress-ui.test.ts`, `tests/quality-loop.browser.mjs` | 재시작·완료 저장 간극/DB 실패 및 진행판 9개 통과, 모의 Chrome 간편→고급→펼침→간편 exit 0 | 실제 모델 포함 전체 앱 E2E 미실행 |
+
+검증 과정의 실패/수정: HTTP 초기 제한 환경 실행은 `listen EPERM`으로 실패하여 허용된 loopback 환경에서 전체 검사했다. 읽기 전용 리뷰로 완료 Run과 attribution 저장 간극을 발견하고 회귀 테스트 실패를 확인한 후 복구를 수정했다. 수정 직후 타입 검사에서 기존 `terminal()`의 boolean 반환이 union을 좁히지 못해 exit 2; 명시적 terminal 상태 조건으로 고치고 타입 검사 exit 0을 확인했다. 최초 전체 검사 1274개/1272 pass/0 fail/2 Windows-only skip, exit 0. 복구 보완·회귀 2개 추가 후 최종 전체 검사는 1276개/1274 pass/0 fail/2 Windows-only skip, exit 0이었다. 최종 타입 검사·빌드·diff 검사도 exit 0. 기존 테스트 삭제/완화 없음.
+
 # Orbit 개발 현황 (F01~F11)
 
 ## 재개 요약 (2026-10-28 · 담당 Codex · Quality Loop 연결)

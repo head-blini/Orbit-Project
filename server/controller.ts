@@ -30,6 +30,7 @@ import { collectExtensions,unknownExtensions } from './extensions.ts';
 import type { ExtensionInventory } from '../shared/extensions.ts';
 import {projectAnalytics} from './project-analytics.ts';
 import {RunTelemetry} from './run-telemetry.ts';
+import {CodexModelTracker} from './codex-model-attribution.ts';
 import {getDevelopmentResult} from './development-results.ts';
 import {staticAppPreviewCapability} from './app-preview-policy.ts';
 import {listDeliverables,previewDeliverable} from './deliverables.ts';
@@ -60,6 +61,7 @@ export class Controller {
   private extensionCache:ExtensionInventory|null=null;private extensionPending:Promise<ExtensionInventory>|null=null;
   private knownMcpNames:readonly string[]|null=null;
   private telemetry:RunTelemetry;
+  private modelTracker:CodexModelTracker;
   private soloLost=false;
   private claudeTasks:ClaudeTaskService;
   private readonly ownerIncarnation=randomUUID();
@@ -74,6 +76,7 @@ export class Controller {
     this.aiPreferences=new ProjectAiPreferencesService(store);
     this.soloLost=store.unresolvedNativeConnections();
     this.telemetry=new RunTelemetry(metrics=>this.store.saveRunMetrics(metrics));
+    this.modelTracker=new CodexModelTracker((runId,value)=>this.store.saveCodexModelAttribution(runId,value));
     const selected=projects?.workspaces().find(w=>w.id===store.getMeta('selectedWorkspace'));if(selected){this.workspaceId=selected.id;this.workspace=selected.path;}
     this.modelHub=new ModelHubService(store,modelHubConfig,undefined,undefined,()=>this.assertExecutionAvailable());
     this.verificationSetup=new VerificationSetupService(store,projects,verificationConfig);
@@ -262,7 +265,7 @@ export class Controller {
           this.soloLost=true;void this.failTransport('STATE_PERSISTENCE_FAILED');
         }
       };
-      rpc.on('closed',()=>receive(()=>{++this.generation;this.rpc=null;this.loseActive();this.telemetry.disconnect();this.status('disconnected','TRANSPORT_CLOSED');}));
+      rpc.on('closed',()=>receive(()=>{++this.generation;this.rpc=null;this.loseActive();this.telemetry.disconnect();this.modelTracker.disconnect();this.status('disconnected','TRANSPORT_CLOSED');}));
       rpc.on('notification',(e:any)=>receive(()=>this.onEvent(e)));
       rpc.on('approval',(e:any)=>receive(()=>{this.store.append('approval.denied',this.active()?.id??null,{kind:e.method,decision:'deny'});}));
       try{recordProcess();}catch{observationFailed=true;this.soloLost=true;throw new Error('STATE_PERSISTENCE_FAILED');}
@@ -297,6 +300,7 @@ export class Controller {
       ))throw new Error('MCP_ISOLATION_REQUIRED');
       if(this.rpc!==rpc)throw new Error('TRANSPORT_CLOSED');
       this.telemetry.connect(t.thread.id,t.model,t.modelProvider);
+      this.modelTracker.connect(id?'thread/resume':'thread/start',t,null,null);
       this.knownMcpNames=Object.freeze(Object.keys(config.mcp_servers));this.launchValidated=true;this.store.setThread(t.thread.id,this.workspaceId);this.status('ready');this.store.append(id?'session.resumed':'session.created',null,{threadId:t.thread.id,workspaceId:this.workspaceId??null});
     }catch(e){
       const code=e instanceof Error?e.message:'';
@@ -371,7 +375,7 @@ export class Controller {
       if(acceptance.state!=='current'||!acceptance.baseline)throw new AppError('ACCEPTANCE_BASELINE_CHANGED',409);
       // Native review-model attribution is unknown today; never spend another call under an unproven repair identity.
       if(qualityRunEvidence(this.store,source).source!=='native_observed')throw new AppError('QUALITY_REPAIR_MODEL_UNKNOWN',409);
-      const rpc=this.rpc;this.rpc=null;++this.generation;if(rpc)await rpc.close();this.telemetry.disconnect();this.status('disconnected');
+      const rpc=this.rpc;this.rpc=null;++this.generation;if(rpc)await rpc.close();this.telemetry.disconnect();this.modelTracker.disconnect();this.status('disconnected');
       this.store.setThread('',workspaceId);
       await this.ownQualityStep(()=>this.connect());
       if(request.signal.aborted)throw new AppError('QUALITY_PROCESS_STOP_UNCONFIRMED',409);
@@ -462,14 +466,19 @@ export class Controller {
     const sessionId=this.thread();if(!sessionId)throw new AppError('NOT_CONNECTED');
     const run=this.store.createRun(input.requestId,digest,safeText(input.prompt),this.workspaceId,task,{runtimeId:'codex',ownerIncarnation:this.ownerIncarnation,generation:this.generation,nativeSessionId:sessionId},acceptance);const rpc=this.rpc;
     this.telemetry.begin(run.id);
+    this.modelTracker.begin(run.id,{selectedModelId:null,requestedModelId:null});
     this.output.clear();this.deadline=setTimeout(()=>{void this.failTransport('RUN_TIMEOUT');},120000);
     try{
       const result=await rpc.request('turn/start',{threadId:this.thread(),cwd:this.workspace,input:[{type:'text',text:input.prompt}],sandboxPolicy:this.sandbox(),approvalPolicy:this.approvalPolicy(),approvalsReviewer:'user'});
       if(typeof result.turn?.id!=='string')throw new Error('INVALID_TURN');
       this.telemetry.acknowledge(run.id,result.turn.id);
+      this.modelTracker.acknowledge(run.id,result);
       this.store.updateRun(run.id,{turnId:result.turn.id,execution:this.store.getRun(run.id)?.execution==='interrupting'?'interrupting':'running'},'run.accepted');
       const accepted=this.store.getRun(run.id)!;
-      if(terminal(accepted.execution))this.telemetry.finish(run.id,accepted.execution==='lost'||accepted.turnId!==result.turn.id);
+      if(terminal(accepted.execution)){
+        this.telemetry.finish(run.id,accepted.execution==='lost'||accepted.turnId!==result.turn.id);
+        this.modelTracker.finish(run.id,accepted.execution==='completed'?'completed':accepted.execution==='interrupted'?'interrupted':accepted.execution==='failed'?'failed':'lost');
+      }
       return this.store.getRun(run.id)!;
     }catch{
       const current=this.store.getRun(run.id)!;
@@ -492,7 +501,7 @@ export class Controller {
     }
   }
   private onEvent(e:any){
-    this.telemetry.event(e);
+    this.telemetry.event(e);this.modelTracker.event(e);
     const p=e.params;if(!p||p.threadId!==this.thread())return;
     const r=this.active();if(!r)return;const turnId=p.turn?.id??p.turnId;
     if(r.turnId&&turnId&&r.turnId!==turnId)return;
@@ -509,6 +518,7 @@ export class Controller {
       const execution:Execution=['completed','interrupted','failed'].includes(p.turn?.status)?p.turn.status:'failed';
       this.store.updateRun(r.id,{execution,response:this.safeOutput(true),...(typeof turnId==='string'?{turnId}:{})},'run.'+execution);this.clearDeadline();
       this.telemetry.finish(r.id);
+      this.modelTracker.finish(r.id,execution==='completed'?'completed':execution==='interrupted'?'interrupted':'failed');
     }
     if(e.method==='item/completed'&&p.item?.type==='fileChange')this.store.append('workspace.changed',r.id,{workspaceId:this.workspaceId??null,status:['completed','failed','declined'].includes(p.item.status)?p.item.status:'unknown'});
     if(e.method==='error')this.store.append('provider.error',r.id,{retrying:p.willRetry===true});
@@ -524,15 +534,15 @@ export class Controller {
     this.soloLost=true;
     try{this.store.updateRun(r.id,{execution:'lost'},'run.lost');}
     catch{/* Keep the volatile denial; the durable nonterminal Run is quarantined on restart. */}
-    this.telemetry.finish(r.id,true);
+    this.telemetry.finish(r.id,true);this.modelTracker.finish(r.id,'lost');
   }
   private async failTransport(issue:string){
     const rpc=this.rpc;this.rpc=null;++this.generation;
     try{this.loseActive();}catch{this.soloLost=true;}
-    this.telemetry.disconnect();
+    this.telemetry.disconnect();this.modelTracker.disconnect();
     try{this.status('error',issue);}catch{this.launchValidated=false;this.usage=unknownUsage();}
     // Closing the connection is best effort, never evidence permitting a new dispatch.
     try{if(rpc)await rpc.close();}catch{/* The generation remains fenced and recovery stays required. */}
   }
-  async close(){await this.qualityLoops.close();await this.claudeTasks.close();await this.planningSuggestions.close();await this.reviews.close();await this.workflows.close();await this.modelHub.close();await this.verification.close();this.loseActive();this.telemetry.disconnect();const rpc=this.rpc;this.rpc=null;++this.generation;if(rpc)await rpc.close();this.provider='disconnected';this.launchValidated=false;this.clearExtensions();}
+  async close(){await this.qualityLoops.close();await this.claudeTasks.close();await this.planningSuggestions.close();await this.reviews.close();await this.workflows.close();await this.modelHub.close();await this.verification.close();this.loseActive();this.telemetry.disconnect();this.modelTracker.disconnect();const rpc=this.rpc;this.rpc=null;++this.generation;if(rpc)await rpc.close();this.provider='disconnected';this.launchValidated=false;this.clearExtensions();}
 }

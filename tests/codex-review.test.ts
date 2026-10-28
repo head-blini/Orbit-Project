@@ -28,7 +28,14 @@ test('thread configuration is not evidence of the actual review model',async()=>
   const f=setup();f.rpc.patch=(method,value)=>method==='thread/start'?{...value,model:'configured-model',modelProvider:'openai'}:value;
   const result=await runCodexReview(f.input,f.factory);
   assert.equal(result.execution,'completed');
-  assert.deepEqual(result.identity,{providerId:'openai',modelId:'unknown',sessionId:threadId,executionId:turnId,modelEvidence:'unknown'});
+  assert.equal(result.identity?.modelId,'unknown');assert.equal(result.identity?.modelEvidence,'unknown');
+  assert.equal(result.identity?.sessionId,null);assert.equal(result.identity?.executionId,turnId);
+  assert.equal(result.identity?.codex?.serverModelId,'configured-model');
+  assert.equal(result.identity?.codex?.threadId,threadId);
+  assert.equal(result.identity?.codex?.selectedModelId,null);assert.equal(result.identity?.codex?.requestedModelId,null);
+  assert.equal(result.identity?.codex?.actualModelId,'unknown');
+  assert.ok(result.identity?.codex?.observations.some(o=>o.source==='review/start'&&o.semantics==='request'));
+  assert.equal(result.identity?.codex?.observationIncomplete,true); // No turn/started event was emitted.
 });
 
 test('fresh readonly protocol orders policy/MCP validation before exactly one inline custom review',async()=>{
@@ -116,4 +123,31 @@ test('oversized raw final reviews fail rather than completing with a silently tr
     const result=await runCodexReview(f.input,f.factory);assert.equal(result.execution,'failed');assert.equal(result.issue,'REVIEW_OUTPUT_LIMIT');assert.equal(result.response,'');assert.equal(result.processStopped,true);assert.ok(f.rpc.calls.some(c=>c.method==='turn/interrupt'));
   }
   const exact=setup();exact.rpc.onReview=()=>exact.rpc.emitReview('한'.repeat(64000));const result=await runCodexReview(exact.input,exact.factory);assert.equal(result.execution,'completed');assert.equal(result.response.length,64000);
+});
+
+
+test('native review retains session and early routing evidence without promoting actual model',async()=>{
+  const f=setup();f.rpc.patch=(method,value)=>method==='thread/start'?{...value,model:'configured-model',modelProvider:'openai',thread:{...value.thread,sessionId:'native-session'}}:value;
+  f.rpc.onReview=()=>{
+    f.rpc.emit('notification',{method:'turn/started',params:{threadId,turn:{id:turnId}}});
+    f.rpc.emit('notification',{method:'model/rerouted',params:{threadId,turnId,fromModel:'configured-model',toModel:'routed-model',reason:'highRiskCyberActivity'}});
+    f.rpc.emitReview();
+  };
+  const result=await runCodexReview(f.input,f.factory),codex=result.identity?.codex;
+  assert.equal(result.execution,'completed');assert.equal(result.identity?.sessionId,'native-session');
+  assert.equal(codex?.nativeSessionId,'native-session');assert.equal(codex?.turnId,turnId);
+  assert.equal(codex?.modelChanged,true);assert.equal(codex?.observationIncomplete,false);
+  assert.equal(codex?.serverModelId,'configured-model');assert.equal(codex?.actualModelId,'unknown');
+  assert.equal(result.identity?.modelEvidence,'unknown');
+  assert.ok(codex?.observations.some(o=>o.source==='model/rerouted'&&o.modelId==='routed-model'));
+});
+
+test('native review abort keeps configuration evidence and incomplete execution attribution',async()=>{
+  const f=setup(),abort=new AbortController();
+  f.rpc.patch=(method,value)=>method==='thread/start'?{...value,model:'configured-model',modelProvider:'openai'}:value;
+  f.rpc.onReview=()=>setTimeout(()=>abort.abort(),0);
+  const result=await runCodexReview({...f.input,signal:abort.signal},f.factory);
+  assert.equal(result.execution,'interrupted');assert.equal(result.identity?.codex?.status,'interrupted');
+  assert.equal(result.identity?.codex?.serverModelId,'configured-model');
+  assert.equal(result.identity?.codex?.observationIncomplete,true);assert.equal(result.identity?.modelId,'unknown');
 });

@@ -1,3 +1,4 @@
+import {CodexModelTracker} from '../server/codex-model-attribution.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
@@ -77,5 +78,17 @@ test('the collector reads per-run last event time and tool name from recorded ev
     const progress=f.service.read('project-a',{});
     assert.equal(progress.tasks[0].runs[0].lastActivity,'Write');
     assert.ok(progress.tasks[0].lastObservedAt!>=run.updatedAt);
+  }finally{f.store.close();}
+});
+
+test('progress reads persisted Codex configuration without treating it as actual model evidence',()=>{
+  const f=fixture();try{
+    const task=f.tasks[0],run=f.store.createRun(randomUUID(),'d'.repeat(64),'collect','ws-a',{taskId:task.id,planningVersionId:f.plan.id});
+    const tracker=new CodexModelTracker((id,value)=>f.store.saveCodexModelAttribution(id,value));
+    tracker.connect('thread/start',{model:'configured-model',modelProvider:'openai',thread:{id:'thread',sessionId:'session'}});tracker.begin(run.id);
+    const seq=f.store.lastSeq(),progress=f.service.read('project-a',{});
+    assert.equal(progress.tasks[0].runs[0].modelAttribution?.serverModelId,'configured-model');
+    assert.equal(progress.tasks[0].runs[0].modelAttribution?.actualModelId,'unknown');
+    assert.equal(progress.totals.verifiedTasks,0);assert.equal(f.store.lastSeq(),seq);
   }finally{f.store.close();}
 });

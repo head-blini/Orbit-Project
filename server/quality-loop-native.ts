@@ -18,10 +18,12 @@ const hash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).d
 const fail=(code:string):never=>{throw new AppError(code,409);};
 function outbound(text:string){const issue=containsCredential(text)?'CREDENTIAL_LIKE_INPUT':outboundDenial(text);if(issue)fail(issue);if(text.length>64000||Buffer.byteLength(text)>256*1024)fail('QUALITY_INPUT_TOO_LARGE');}
 export function qualityModelEvidence(identity:NativeIdentity|undefined,runId:string):QualityModelEvidence{
-  const known=identity?.modelEvidence==='assistant_message'&&nativeModelId(identity.modelId)&&identity.sessionId;
-  return {providerId:identity?.providerId??'unknown',modelId:known?identity!.modelId:null,sessionId:identity?.sessionId??null,runId,executionId:identity?.executionId??null,source:known?'native_observed':'unknown'};
+  const known=!identity?.codex&&identity?.modelEvidence==='assistant_message'&&nativeModelId(identity.modelId)&&identity.sessionId;
+  return {providerId:identity?.providerId??'unknown',modelId:known?identity!.modelId:null,sessionId:identity?.sessionId??null,runId,executionId:identity?.executionId??null,source:known?'native_observed':'unknown',...(identity?.codex?{codex:identity.codex}:{})};
 }
 export function qualityRunEvidence(store:Store,run:Run):QualityModelEvidence{
+  const codex=store.getCodexModelAttribution(run.id);
+  if(codex)return {providerId:'openai',modelId:null,sessionId:codex.nativeSessionId,runId:run.id,executionId:codex.turnId,source:'unknown',codex};
   const row=store.db.prepare("SELECT data FROM events WHERE kind='run.identity' AND run_id=? ORDER BY seq DESC LIMIT 1").get(run.id);
   const identity=row?JSON.parse(String(row.data)) as NativeIdentity:undefined;
   return qualityModelEvidence(identity,run.id);

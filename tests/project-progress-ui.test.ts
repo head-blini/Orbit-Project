@@ -95,3 +95,14 @@ test('quality loop simple labels and advanced evidence stay separate from check 
  const simple=renderToStaticMarkup(createElement(QualityLoopStatus,{loop,advanced:false}));assert.match(simple,/재검증 중/);assert.match(simple,/문제 1개/);assert.match(simple,/unknown/);assert.match(simple,/사용자 승인과 별개/);assert.doesNotMatch(simple,/repair-session|baseline-digest|근거 없음/);
  const advanced=renderToStaticMarkup(createElement(QualityLoopStatus,{loop,advanced:true}));assert.match(advanced,/repair-session/);assert.match(advanced,/수정자/);assert.match(advanced,/baseline-digest/);assert.match(advanced,/근거 없음/);
 });
+
+test('Codex configuration is shown separately from actual execution evidence',async()=>{
+  const {CodexModelEvidence}=await view();
+  const html=renderToStaticMarkup(createElement(CodexModelEvidence,{value:{selectedModelId:'selected-model',requestedModelId:'requested-model',
+    serverModelId:'configured-model',serverProviderId:'openai',serverSource:'thread/resume',actualModelId:'unknown',actualModelEvidence:'unavailable',
+    threadId:'thread-identity',nativeSessionId:'session-identity',turnId:'turn-identity',status:'lost',modelChanged:true,observationIncomplete:true,resumed:true,observations:[]}}));
+  assert.match(html,/사용자 선택: selected-model/);assert.match(html,/요청 모델: requested-model/);
+  assert.match(html,/서버 설정 모델: configured-model/);assert.match(html,/실제 실행 모델: unknown/);
+  assert.match(html,/독립 모델 검증 근거 없음/);assert.match(html,/관측 불완전/);
+  assert.match(html,/thread-identity/);assert.match(html,/session-identity/);assert.match(html,/turn-identity/);
+});

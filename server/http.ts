@@ -84,6 +84,12 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
         if(url.search)throw new AppError('INVALID_FIELDS',400);
         json(res,200,handoff.build(taskHandoff[1],taskHandoff[2]));return;
       }
+      const modelIdentity=url.pathname.match(/^\/api\/runs\/([a-f0-9-]{36})\/model-identity$/);
+      if(req.method==='GET'&&modelIdentity){
+        if(url.search)throw new AppError('INVALID_FIELDS',400);
+        if(!controller.store.getRun(modelIdentity[1]))throw new AppError('RUN_NOT_FOUND',404);
+        json(res,200,{runId:modelIdentity[1],attribution:controller.store.getCodexModelAttribution(modelIdentity[1])});return;
+      }
       const soloOperation=url.pathname.match(/^\/api\/runs\/([a-f0-9-]{36})\/operation$/);
       if(req.method==='GET'&&soloOperation){
         if(url.search)throw new AppError('INVALID_FIELDS',400);

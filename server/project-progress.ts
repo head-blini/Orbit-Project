@@ -25,6 +25,7 @@ export class ProjectProgressService {
       const records=this.store.db.prepare('SELECT body FROM quality_loops WHERE project_id=? ORDER BY rowid DESC').all(projectId).map(row=>JSON.parse(String(row.body)) as QualityLoopRecord);
       for(const task of progress.tasks)task.qualityLoops=records.filter(record=>record.taskId===task.id).slice(0,20);
     }
+    for(const task of progress.tasks)for(const run of task.runs)run.modelAttribution=this.store.getCodexModelAttribution(run.id);
     return progress;
   }
   /** Latest event time per run plus the most recent tool name; other event payloads are never read out. */

@@ -1,3 +1,4 @@
+import type {CodexModelAttribution} from '../shared/codex-model-attribution.ts';
 import type {QualityLoopRecord} from '../shared/quality-loop-record.ts';
 import {getUiMode,subscribeUiMode} from './ui-mode.ts';
 import {useEffect,useRef,useState} from 'react';
@@ -62,7 +63,7 @@ function TaskRow({task,actions,advanced}:{task:ProgressTask;actions?:TaskActions
     {actions&&<TaskButtons task={task} actions={actions}/>}
     {task.runs.length>0?<table className="progress-runs"><caption>실행 기록 {task.runsTotal}개{task.runsTotal>task.runs.length?` 중 최근 ${task.runs.length}개`:''}</caption>
       <thead><tr><th>실행</th><th>담당</th><th>실행 상태</th><th>최근 도구</th><th>검증</th><th>마지막 관측</th></tr></thead>
-      <tbody>{task.runs.map(run=><tr key={run.id}><td><code>{run.id.slice(0,8)}</code></td><td>{runtime(run.assignee)}</td><td>{run.execution}</td><td>{run.lastActivity??'—'}</td><td>{verificationLabels[run.verification]}{run.checks>1?` (${run.checks}회)`:''}</td><td>{time(run.lastObservedAt)}</td></tr>)}</tbody>
+      <tbody>{task.runs.map(run=><tr key={run.id}><td><code>{run.id.slice(0,8)}</code></td><td>{runtime(run.assignee)}{advanced&&run.modelAttribution&&<CodexModelEvidence value={run.modelAttribution}/>}</td><td>{run.execution}</td><td>{run.lastActivity??'—'}</td><td>{verificationLabels[run.verification]}{run.checks>1?` (${run.checks}회)`:''}</td><td>{time(run.lastObservedAt)}</td></tr>)}</tbody>
     </table>:<p className="progress-empty">아직 실행 기록이 없습니다.</p>}
   </details>;
 }
@@ -183,12 +184,26 @@ export function QualityLoopStatus({loop,advanced}:{loop:QualityLoopRecord;advanc
     {advanced&&<details><summary>품질 검증 상세 증거</summary>
       <p>기준 {loop.version.id} · {loop.baseline.digest}</p>
       <p>실행 세션 {loop.producer.sessionId??'unknown'} · Orbit 실행 ID {loop.producer.runId??'unknown'} · 네이티브 실행 ID {loop.producer.executionId??'unknown'}</p>
+      {loop.producer.codex&&<CodexModelEvidence value={loop.producer.codex}/>}
       <ul>{issues.map((f,i)=><li key={i}>{f.criterion??'발견 문제'}: {f.evidence}</li>)}</ul>
       {loop.steps.map(step=><div key={step.id}><strong>{step.kind==='repair'?'수정자':step.kind==='review'?'검증자':'필수 검사'} · {step.state}</strong>
         {step.evidence&&<p>{identity(step.evidence)} · 세션 {step.evidence.sessionId??'unknown'} · Orbit 실행 {step.evidence.runId??'unknown'} · 네이티브 실행 {step.evidence.executionId??'unknown'} · 근거 {step.evidence.source}</p>}
+        {step.evidence?.codex&&<CodexModelEvidence value={step.evidence.codex}/>}
         {step.issue&&<p>{step.issue}</p>}
       </div>)}
       <pre>{JSON.stringify({rounds:loop.result.rounds,verification:loop.verification},null,2)}</pre>
     </details>}
   </section>;
+}
+
+/** Official server configuration is deliberately labelled separately from execution proof. */
+export function CodexModelEvidence({value}:{value:CodexModelAttribution}){
+  return <details><summary>Codex 모델 식별 근거</summary>
+    <p>사용자 선택: {value.selectedModelId??'미지정'} · 요청 모델: {value.requestedModelId??'미지정'}</p>
+    <p>서버 설정 모델: {value.serverModelId??'unknown'} · 공급자: {value.serverProviderId??'unknown'} · 근거: {value.serverSource??'없음'}</p>
+    <p>실제 실행 모델: unknown · 독립 모델 검증 근거 없음</p>
+    <p>스레드: {value.threadId??'unknown'} · 네이티브 세션: {value.nativeSessionId??'unknown'} · 턴: {value.turnId??'unknown'}</p>
+    <p>관측 상태: {value.status}{value.resumed?' · 재개된 세션':''}{value.modelChanged?' · 모델 변경 관측':''}{value.observationIncomplete?' · 관측 불완전':''}</p>
+    <pre>{JSON.stringify(value.observations,null,2)}</pre>
+  </details>;
 }

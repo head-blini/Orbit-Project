@@ -1,3 +1,4 @@
+import type {CodexModelAttribution} from './codex-model-attribution.ts';
 import type {QualityLoopRecord} from './quality-loop-record.ts';
 import type {Run,ProviderStatus} from './types.ts';
 import {terminal} from './types.ts';
@@ -22,6 +23,7 @@ export interface ProgressInput {
   activity?:Readonly<Record<string,{at:string;tool:string|null}>>;
 }
 export interface ProgressRun {
+  modelAttribution?:CodexModelAttribution|null;
   id:string;assignee:string;execution:Run['execution'];startedAt:string;lastObservedAt:string;
   verification:ProgressVerification;checks:number;planningVersionId:string|null;lastActivity:string|null;
 }

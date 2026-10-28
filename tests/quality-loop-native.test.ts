@@ -1,3 +1,4 @@
+import {CodexModelTracker} from '../server/codex-model-attribution.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtempSync,writeFileSync,rmSync,mkdirSync} from 'node:fs';
@@ -5,7 +6,7 @@ import {join} from 'node:path';
 import {tmpdir} from './temp.ts';
 import {Store} from '../server/store.ts';
 import {Projects} from '../server/projects.ts';
-import {createQualityNativePorts,qualityRunEvidence,qualityVerifyGeneral,type QualityNativeOptions} from '../server/quality-loop-native.ts';
+import {createQualityNativePorts,qualityModelEvidence,qualityRunEvidence,qualityVerifyGeneral,type QualityNativeOptions} from '../server/quality-loop-native.ts';
 import type {QualityStepContext,QualityStep} from '../shared/quality-loop-record.ts';
 import type {ClaudeOutcome,ClaudeEvent} from '../server/runtimes/claude-code.ts';
 
@@ -105,5 +106,22 @@ test('Codex model observation gap blocks before spending quota; injected protoco
     let calls=0;f.context.stepId='codex-fixture';
     const ports=createQualityNativePorts({...f.options,codexReview:async()=>{calls++;return {execution:'completed',threadId:'thread',turnId:'turn',response:f.outcome.response,issue:null,processStopped:true,identity:{providerId:'openai',modelId:'unknown',sessionId:'thread',executionId:'turn',modelEvidence:'unknown'}};}});
     const result=await ports.review(request,f.context,{id:'reviewer',providerId:'openai',modelId:'model-c'});assert.equal(result.evidence.source,'unknown');assert.equal(result.review.modelKey,'unknown');assert.equal(calls,1);
+  }finally{f.close();}
+});
+
+
+test('persisted Codex settings remain unknown and override stale claimed actual identity',()=>{
+  const f=fixture();try{
+    const tracker=new CodexModelTracker((runId,value)=>f.store.saveCodexModelAttribution(runId,value));
+    tracker.connect('thread/resume',{thread:{id:'thread',sessionId:'session'},model:'configured-model',modelProvider:'openai'});
+    tracker.begin(f.run.id);tracker.acknowledge(f.run.id,{turn:{id:'turn'}});tracker.finish(f.run.id,'interrupted');
+    f.store.append('run.identity',f.run.id,{providerId:'openai',modelId:'claimed-model',sessionId:'old-session',executionId:'old-turn',modelEvidence:'assistant_message'});
+    const evidence=qualityRunEvidence(f.store,f.run);
+    assert.equal(evidence.modelId,null);assert.equal(evidence.source,'unknown');
+    assert.equal(evidence.sessionId,'session');assert.equal(evidence.executionId,'turn');
+    assert.equal(evidence.codex?.serverModelId,'configured-model');assert.equal(evidence.codex?.resumed,true);
+    assert.equal(evidence.codex?.actualModelId,'unknown');
+    const native=qualityModelEvidence({providerId:'openai',modelId:'claimed-model',sessionId:'session',executionId:'turn',modelEvidence:'assistant_message',codex:evidence.codex},'step');
+    assert.equal(native.modelId,null);assert.equal(native.source,'unknown');assert.deepEqual(native.codex,evidence.codex);
   }finally{f.close();}
 });

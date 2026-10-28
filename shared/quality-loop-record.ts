@@ -1,3 +1,4 @@
+import type {CodexModelAttribution} from './codex-model-attribution.ts';
 import type {QualityArtifact,QualityBaseline,QualityLoopInput,QualityLoopResult,QualityReview,QualityReviewRequest,QualityRepairRequest} from './quality-loop.ts';
 import type {PlanningVersion,SavedTask} from './parallel.ts';
 import type {Run} from './types.ts';
@@ -6,6 +7,7 @@ import type {Run} from './types.ts';
 export interface QualityModelEvidence {
   providerId:string;modelId:string|null;sessionId:string|null;runId:string|null;executionId?:string|null;
   source:'native_observed'|'unknown';
+  codex?:CodexModelAttribution;
 }
 export interface QualitySelection {id:string;providerId:string;modelId:string}
 export interface QualityLoopStart {

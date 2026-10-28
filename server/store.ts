@@ -1,3 +1,4 @@
+import type {CodexModelAttribution} from '../shared/codex-model-attribution.ts';
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
@@ -18,6 +19,7 @@ export class Store extends EventEmitter {
   db:DatabaseSync;
   private pendingEvents:AppEvent[]|null=null;
   private volatileMetrics=new Map<string,RunMetrics>();
+  private volatileModels=new Map<string,CodexModelAttribution>();
   constructor(path:string) {
     super();this.db=new DatabaseSync(path);
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
@@ -25,6 +27,7 @@ export class Store extends EventEmitter {
       CREATE TABLE IF NOT EXISTS projects(id TEXT PRIMARY KEY,body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS workspaces(id TEXT PRIMARY KEY,body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY,request_id TEXT NOT NULL UNIQUE,digest TEXT NOT NULL,body TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS run_model_attributions(run_id TEXT PRIMARY KEY,body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS run_metrics(run_id TEXT PRIMARY KEY,body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS run_acceptance_baselines(run_id TEXT PRIMARY KEY,digest TEXT NOT NULL,body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS events(seq INTEGER PRIMARY KEY AUTOINCREMENT,kind TEXT NOT NULL,at TEXT NOT NULL,run_id TEXT,data TEXT NOT NULL);`);
@@ -34,8 +37,17 @@ export class Store extends EventEmitter {
       }
       migrateSoloOperations(this.db);migrateNativeConnections(this.db);
     }catch(error){this.db.close();throw error;}
-    for(const r of this.runs()) if(!terminal(r.execution)||r.execution==='lost') {
+    for(const r of this.runs()) {
+      const previous=this.getCodexModelAttribution(r.id);
+      if((r.execution==='completed'||r.execution==='interrupted'||r.execution==='failed')&&previous&&(previous.status==='starting'||previous.status==='running')){
+        try{this.saveCodexModelAttribution(r.id,{...previous,status:r.execution,observationIncomplete:true});}catch{/* Persisted execution is authoritative; metadata stays incomplete in the overlay. */}
+      }
+      if(terminal(r.execution)&&r.execution!=='lost')continue;
       if(!terminal(r.execution))this.updateRun(r.id,{execution:'lost'},'run.lost',r.runtime==='claude-code'?{reason:'SERVER_RESTART'}:undefined);
+      const attribution=this.getCodexModelAttribution(r.id);
+      if(attribution&&(attribution.status!=='lost'||!attribution.observationIncomplete)){
+        try{this.saveCodexModelAttribution(r.id,{...attribution,status:'lost',observationIncomplete:true});}catch{/* Keep the incomplete overlay; never replay execution. */}
+      }
       const metrics=this.getRunMetrics(r.id);
       if(metrics&&(metrics.tokens!==null||metrics.tokenStatus!=='incomplete'||metrics.tokenIssue!=='CONNECTION_LOST'||metrics.durationMs!==null||metrics.finishedAt!==null)){
         try{this.saveRunMetrics({...metrics,tokens:null,tokenStatus:'incomplete',tokenIssue:'CONNECTION_LOST',durationMs:null,finishedAt:null});}catch{/* The volatile metrics quarantine remains readable; execution recovery already succeeded. */}
@@ -75,6 +87,23 @@ export class Store extends EventEmitter {
     if(!this.getRun(metrics.runId))throw new Error('RUN_NOT_FOUND');
     try{this.db.prepare('INSERT INTO run_metrics VALUES(?,?) ON CONFLICT(run_id) DO UPDATE SET body=excluded.body').run(metrics.runId,JSON.stringify(metrics));this.volatileMetrics.delete(metrics.runId);}
     catch(error){this.volatileMetrics.set(metrics.runId,{...structuredClone(metrics),tokens:null,tokenStatus:'incomplete',tokenIssue:'STORAGE_UNAVAILABLE'});throw error;}
+  }
+  getCodexModelAttribution(id:string):CodexModelAttribution|null {
+    const pending=this.volatileModels.get(id);if(pending)return structuredClone(pending);
+    const row=this.db.prepare('SELECT body FROM run_model_attributions WHERE run_id=?').get(id);
+    return row?JSON.parse(String(row.body)):null;
+  }
+  /** Configuration observations remain separate from actual execution identity. */
+  saveCodexModelAttribution(id:string,value:CodexModelAttribution){
+    if(!this.getRun(id))throw new Error('RUN_NOT_FOUND');
+    const safe={...structuredClone(value),actualModelId:'unknown' as const,actualModelEvidence:'unavailable' as const};
+    try{
+      this.transaction(()=>{
+        this.db.prepare('INSERT INTO run_model_attributions VALUES(?,?) ON CONFLICT(run_id) DO UPDATE SET body=excluded.body').run(id,JSON.stringify(safe));
+        this.append('run.model_attribution',id,{status:safe.status,actualModelId:'unknown',observationIncomplete:safe.observationIncomplete});
+      });
+      this.volatileModels.delete(id);
+    }catch(error){this.volatileModels.set(id,{...safe,observationIncomplete:true});throw error;}
   }
   findRequest(id:string):{run:Run;digest:string}|null {
     const row=this.db.prepare('SELECT body,digest FROM runs WHERE request_id=?').get(id);
