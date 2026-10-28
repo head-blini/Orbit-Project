@@ -9,7 +9,11 @@ import { WorkspacePanel } from './workspaces.tsx';
 import { StudioPage, MockProviders } from './studios.tsx';
 import { AgentCenter } from './agent-center.tsx';
 import { Navigation,TopBar,CommandPanel } from './shell.tsx';
-import { Dashboard,Development,PrivacySecurity,UnavailablePage } from './pages.tsx';
+import { Dashboard,Development,PrivacySecurity,SettingsPage } from './pages.tsx';
+import {HomePage} from './home.tsx';
+import {ProjectWorkPage} from './project-work.tsx';
+import {ResultsPage} from './results.tsx';
+import {getUiMode,subscribeUiMode} from './ui-mode.ts';
 import { pages,parsePage,resolveProject,workspaceMatchesProject,readPreference,writePreference,projectPreferenceKey,readOnlyPreference,providerLabels,type PageId } from './navigation.ts';
 import './orbit.css';
 import { RunTimeline,buildTimeline } from './visualization/index.tsx';
@@ -23,7 +27,6 @@ import { ModelHubPanel } from './model-hub.tsx';
 import { WorkflowsPanel } from './workflows.tsx';
 import { GoalTrackingPanel } from './goals.tsx';
 import {TaskVerificationPreviewPanel} from './task-verification-preview.tsx';
-import {StartPage} from './start.tsx';
 import {ProjectProgressPanel,lastEventTime} from './project-progress.tsx';
 import {DeliverablesPanel} from './deliverables.tsx';
 import {AiPreferencesPanel} from './ai-preferences.tsx';
@@ -40,6 +43,8 @@ export function App(){
   const [visited,setVisited]=useState<Set<PageId>>(()=>new Set([parsePage(window.location.hash)]));
   const [preferredProject,setPreferredProject]=useState(()=>{try{return readPreference(window.localStorage,projectPreferenceKey);}catch{return '';}});
   const [sidebarOpen,setSidebarOpen]=useState(false),[commandOpen,setCommandOpen]=useState(false);
+  const [uiMode,setUiModeState]=useState(getUiMode);useEffect(()=>subscribeUiMode(()=>setUiModeState(getUiMode())),[]);
+  const advanced=uiMode==='advanced';
   useEffect(()=>{document.title=(pages.find(item=>item.id===page)?.label??'대시보드')+' · Orbit';window.scrollTo({top:0});},[page]);
   useEffect(()=>{const sync=()=>{const next=parsePage(window.location.hash);setPage(next);setVisited(old=>new Set([...old,next]));setSidebarOpen(false);setCommandOpen(false);};window.addEventListener('hashchange',sync);return()=>window.removeEventListener('hashchange',sync);},[]);
   function navigate(next:PageId){window.location.hash='/'+next;setPage(next);setVisited(old=>new Set([...old,next]));setSidebarOpen(false);setCommandOpen(false);}
@@ -138,6 +143,8 @@ export function App(){
   useEffect(()=>{setDevelopmentSelection(null);},[projectId,state?.selectedWorkspaceId]);
   function openResult(selection:DevelopmentSelection){if(matches&&state?.selectedWorkspaceId===selection.workspaceId&&state.runs.some(run=>run.id===selection.runId&&run.workspaceId===selection.workspaceId)){setDevelopmentSelection(selection);navigate('development');}}
   const currentPage=pages.find(item=>item.id===page)!;
+  const freshness=connectionFreshness({online,lastEventAt:lastEventTime(events),now:Date.now()});
+  function openProject(id:string){selectProject(id);navigate('projects');}
   const agent=<AgentCenter state={state} online={online} busy={busy||!!state?.soloRecoveryRequired||!!state?.verificationBusy||!!state?.modelHubBusy||!!state?.mergeBusy||!!state?.workflowBusy||!!state?.planningBusy||!!state?.reviewBusy||!!state?.extensionBusy} matches={matches} prompt={prompt} setPrompt={setPrompt} pending={pending} connect={connect} submit={submit} interrupt={interrupt} clearPending={()=>{try{sessionStorage.removeItem('aicc.pending');}catch{}setPending(null);}} onProjects={()=>navigate('projects')} onActiveSession={()=>selectProject(state?.workspaces?.find(workspace=>workspace.id===state.selectedWorkspaceId)?.projectId??'')} onResult={openResult} issueMessage={state?.issue?errors[state.issue]??'연결이 종료됐습니다. 세션 이어받기로 다시 연결하세요.':''}/>;
   return <div className="shell">
     <a className="skip-link" href="#page-content" onClick={event=>{event.preventDefault();document.getElementById('page-content')?.focus();}}>본문으로 이동</a>
@@ -145,16 +152,20 @@ export function App(){
     <div className="app-body"><TopBar state={state} online={online} projectId={projectId} locked={busy||state?.provider==='connecting'} onProject={selectProject} onMenu={()=>setSidebarOpen(value=>!value)} onCommand={()=>{if(page!=='agents')setCommandOpen(true);else document.getElementById('prompt')?.focus();}} onSettings={()=>navigate('settings')}/>
     <main id="page-content" tabIndex={-1}>
       {state?.soloRecoveryRequired&&<div className="banner error" role="alert">종료를 확인하지 못한 Solo 실행이 있어 이 서버의 새 실행을 차단했습니다. 기록 조회는 가능합니다. 안전한 복구 기능은 준비 중이며 재시작이나 작업 공간 변경으로 자동 해제하지 않습니다.</div>}
-      <header className="page-heading"><div><span className="eyebrow">{currentPage.name}</span><h1>{currentPage.label}</h1><p>{currentPage.description}</p></div>{selectedProject&&<span className="badge project-badge">{selectedProject.name}</span>}</header>
+      {page!=='start'&&!(page==='projects'&&selectedProject)&&<header className="page-heading"><div><span className="eyebrow">{currentPage.name}</span><h1>{currentPage.label}</h1><p>{currentPage.description}</p></div>{selectedProject&&<span className="badge project-badge">{selectedProject.name}</span>}</header>}
       {!online&&<div className="banner" role="status">서버 연결을 기다리고 있습니다. 다시 연결될 때 기록만 복원하며 프롬프트는 재전송하지 않습니다.</div>}
       {error&&<div className="banner error" role="alert">{error}</div>}
       {taskIntent&&taskAllowed&&taskIntent.scope===taskScope&&<TaskVerificationPreviewPanel projectId={taskIntent.task.projectId} workspaceId={taskIntent.workspaceId} taskId={taskIntent.task.id} taskTitle={taskIntent.task.title} scopeKey={taskIntent.scope} active={taskAllowed} onCancel={cancelTask} onRun={digest=>startTask(taskIntent,digest)}/>}
-      {page==='progress'&&selectedProject&&<AiPreferencesPanel key={'ai:'+projectId} projectId={projectId} kind={selectedProject.kind} online={online} post={rawPost}/>}
-      {page==='progress'&&<ProjectProgressPanel key={projectId} projectId={projectId} projectKind={selectedProject?.kind??null} post={rawPost} online={online} lastSeq={state?.lastSeq??0} lastEventAt={lastEventTime(events)} freshness={connectionFreshness({online,lastEventAt:lastEventTime(events),now:Date.now()})}/>}
-      {page==='progress'&&selectedProject?.kind==='general'&&<DeliverablesPanel key={'deliverables:'+projectId} projectId={projectId} online={online} lastSeq={state?.lastSeq??0}/>}
+      {/* Simple mode: AI choice lives on the project screen and files on 결과물; advanced keeps the original combined board. */}
+      {page==='progress'&&advanced&&selectedProject&&<AiPreferencesPanel key={'ai:'+projectId} projectId={projectId} kind={selectedProject.kind} online={online} post={rawPost}/>}
+      {page==='progress'&&<ProjectProgressPanel key={projectId} projectId={projectId} projectKind={selectedProject?.kind??null} post={rawPost} online={online} lastSeq={state?.lastSeq??0} lastEventAt={lastEventTime(events)} freshness={freshness}/>}
+      {page==='progress'&&advanced&&selectedProject?.kind==='general'&&<DeliverablesPanel key={'deliverables:'+projectId} projectId={projectId} online={online} lastSeq={state?.lastSeq??0}/>}
+      {page==='progress'&&!advanced&&selectedProject&&<div className="page-links"><button onClick={()=>navigate('projects')}>프로젝트 화면으로</button>{selectedProject.kind==='general'&&<button onClick={()=>navigate('results')}>결과물 보기</button>}</div>}
       {page==='dashboard'&&<Dashboard key={projectId} state={state} projectId={projectId} onNavigate={navigate}/>}
-      {page==='start'&&<StartPage state={state} projectId={projectId} online={online} locked={locked||!!pending} planningBlocked={planningBlocked||!!pending} canRunTask={taskAllowed&&!taskIntent} post={post} onNavigate={navigate} onProject={selectProject} workspaceAction={workspaceAction} onConnect={connect} onRunTask={runTask} onInterrupt={interrupt}/>}
-      {page==='projects'&&<WorkspacePanel state={state} projectId={projectId} onProject={selectProject} onPlanning={()=>navigate('planning')} online={online} locked={!online||locked} action={workspaceAction} post={post}/>}
+      {page==='start'&&<HomePage state={state} projectId={projectId} online={online} locked={locked||!!pending} post={post} onOpenProject={openProject} onProject={selectProject} workspaceAction={workspaceAction}/>}
+      {page==='projects'&&<ProjectWorkPage state={state} projectId={projectId} online={online} locked={locked||!!pending} planningBlocked={planningBlocked||!!pending} canRunTask={taskAllowed&&!taskIntent} post={post} rawPost={rawPost} onNavigate={navigate} onProject={selectProject} workspaceAction={workspaceAction} onConnect={connect} onRunTask={runTask} onInterrupt={interrupt}
+        lastEventAt={lastEventTime(events)} freshness={freshness}><WorkspacePanel state={state} projectId={projectId} onProject={selectProject} onPlanning={()=>navigate('planning')} online={online} locked={!online||locked} action={workspaceAction} post={post}/></ProjectWorkPage>}
+      {page==='results'&&<ResultsPage state={state} projectId={projectId} online={online} onNavigate={navigate}/>}
       {(['planning','visualization'] as const).map(studio=>visited.has(studio)&&<div key={studio} hidden={page!==studio}><StudioPage projectId={projectId} page={studio} post={post} online={online} busy={busy} state={state} canRunTask={taskAllowed&&!taskIntent} onRunTask={runTask} onResult={openResult}/></div>)}
       {page==='agents'&&<><ExecutionModes/>{agent}{matches&&anchor&&state&&(anchor.selectedWorkspaceId??null)===(state.selectedWorkspaceId??null)&&<RunTimeline view={buildTimeline(anchor,events)} snapshot={state} onReload={()=>reload.current()}/>}
       <details className="events"><summary>최근 작업 이벤트 <span>{state?.lastSeq??0}개 보존</span></summary>{events.length?events.map(event=><div key={event.seq}><code>#{event.seq}</code> {event.kind}<time>{new Date(event.at).toLocaleTimeString('ko-KR')}</time></div>):<p>현재 연결 이후 발생한 이벤트가 표시됩니다. 이전 실행 기록은 대화에 복원됩니다.</p>}</details></>}
@@ -164,7 +175,7 @@ export function App(){
       {page==='security'&&<PrivacySecurity state={state}/>}
       {page==='usage'&&<><ProjectAnalyticsPanel projectId={projectId} online={online}/><UsagePanel state={state} online={online} post={post}/></>}
       {page==='automation'&&<><GoalTrackingPanel projectId={projectId||null} online={online} post={post}/><WorkflowsPanel projectId={projectId} workspaceId={matches?state?.selectedWorkspaceId??null:null} online={online} busy={busy||!!state?.soloRecoveryRequired||!!active||!!state?.verificationBusy||!!state?.modelHubBusy||!!state?.mergeBusy||!!state?.planningBusy||!!state?.reviewBusy||!!state?.extensionBusy||state?.provider==='connecting'} post={post}/></>}
-      {page==='settings'&&<UnavailablePage page={page}/>}
+      {page==='settings'&&<SettingsPage/>}
     </main></div>
     {commandOpen&&page!=='agents'&&<CommandPanel onClose={()=>setCommandOpen(false)}>{error&&<div className="banner error" role="alert">{error}</div>}{!online&&<div className="banner">로컬 서버 연결을 기다리는 중입니다.</div>}{agent}</CommandPanel>}
   </div>;

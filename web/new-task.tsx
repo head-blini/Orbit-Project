@@ -26,7 +26,7 @@ function readReceipt():Receipt|null{try{const value=JSON.parse(sessionStorage.ge
 function writeReceipt(value:Receipt|null){try{if(value)sessionStorage.setItem(storageKey,JSON.stringify(value));else sessionStorage.removeItem(storageKey);}catch{throw new Error('RECEIPT_UNAVAILABLE');}}
 
 export function NewTaskPanel({online,locked,post,onProject}:{online:boolean;locked:boolean;post:(path:string,body:object)=>Promise<any>;onProject:(id:string)=>void}){
-  const [text,setText]=useState(''),[files,setFiles]=useState<File[]>([]),[busy,setBusy]=useState(false),[issue,setIssue]=useState('');
+  const [text,setText]=useState(''),[files,setFiles]=useState<File[]>([]),[busy,setBusy]=useState(false),[issue,setIssue]=useState(''),[note,setNote]=useState('');
   const sending=useRef(false);
   const fileIssue=materialIssue(files);
   const disabled=!online||locked||busy;
@@ -51,22 +51,42 @@ export function NewTaskPanel({online,locked,post,onProject}:{online:boolean;lock
       setIssue(messages[code]??(code==='RECEIPT_UNAVAILABLE'?'브라우저가 요청 기록을 보존하지 못해 보내지 않았습니다.':`작업을 준비하지 못했습니다(${code||'응답 확인 불가'}). 다시 시작하면 같은 요청으로 확인하며 새 프로젝트를 중복으로 만들지 않습니다.`));
     }finally{sending.current=false;setBusy(false);}
   }
+  const fileInput=useRef<HTMLInputElement>(null);
   return <section className="new-task" aria-label="새 작업">
-    <h3>무엇을 해 드릴까요?</h3>
-    <label htmlFor="new-task-text">요청</label>
-    <textarea id="new-task-text" rows={4} maxLength={maxText} value={text} disabled={disabled} placeholder="예: 첨부한 자료를 비교해서 표와 요약 보고서를 만들어 줘." onChange={event=>setText(event.target.value)}/>
-    <div className="new-task-row">
-      <label className="new-task-files">자료 첨부 <span className="subtle">(텍스트 {extensions.join(' ')} · 파일당 128 KB · 최대 {maxFiles}개)</span>
-        <input type="file" multiple accept={extensions.join(',')} disabled={disabled} onChange={event=>setFiles([...(event.target.files??[])])}/></label>
-      <fieldset className="new-task-ai"><legend>기획 AI</legend>
-        <label><input type="radio" name="new-task-planner" checked readOnly/> Claude Code</label>
-        <label className="unavailable" title="일반 작업 기획은 현재 Claude Code만 연결돼 있습니다."><input type="radio" name="new-task-planner" disabled/> Codex <span className="subtle">— 일반 작업에서는 Git 작업 공간이 필요해 아직 사용할 수 없음</span></label>
-      </fieldset>
+    <label htmlFor="new-task-text" className="sr-only">요청</label>
+    <div className="task-composer">
+      <textarea id="new-task-text" rows={5} maxLength={maxText} value={text} disabled={disabled} placeholder="예: 첨부한 견적서 두 개를 비교해서 표와 요약 보고서를 만들어 줘." onChange={event=>setText(event.target.value)}
+        onKeyDown={event=>{if(event.key==='Enter'&&(event.metaKey||event.ctrlKey)){event.preventDefault();void start();}}}/>
+      {!!files.length&&<ul className="task-composer-files" aria-label="첨부한 자료">{files.map(file=><li key={file.name}><span>{file.name}</span><small>{(file.size/1024).toFixed(1)} KB</small>
+        <button type="button" className="chip-remove" aria-label={file.name+' 첨부 취소'} disabled={disabled} onClick={()=>setFiles(old=>old.filter(item=>item!==file))}>×</button></li>)}</ul>}
+      <div className="task-composer-bar">
+        <button type="button" className="ghost" disabled={disabled} onClick={()=>fileInput.current?.click()}>＋ 자료 첨부</button>
+        <input ref={fileInput} className="sr-only" type="file" multiple accept={extensions.join(',')} disabled={disabled} aria-label="자료 첨부" tabIndex={-1}
+          onChange={event=>{const picked=[...(event.target.files??[])];setFiles(old=>[...old.filter(item=>!picked.some(file=>file.name===item.name)),...picked]);event.target.value='';}}/>
+        <label className="task-composer-ai">기획 AI
+          <select value="claude-code" disabled={disabled} onChange={()=>{}}>
+            <option value="claude-code">Claude Code</option>
+            <option value="codex" disabled>Codex — 일반 작업은 Git 작업 공간이 없어 사용할 수 없음</option>
+          </select></label>
+        <button className="primary task-composer-start" disabled={disabled||!text.trim()||!!fileIssue} onClick={()=>void start()}>{busy?'준비 중…':'작업 시작'}</button>
+      </div>
     </div>
-    {!!files.length&&<ul className="materials-list">{files.map(file=><li key={file.name}>{file.name} · {(file.size/1024).toFixed(1)} KB</li>)}</ul>}
+    <p className="task-composer-hint">텍스트 자료({extensions.join(' ')}) · 파일당 128 KB · 최대 {maxFiles}개. 기획 AI 자동 추천은 아직 없어 직접 선택합니다. AI에 보내기 전에 보낼 내용을 보여 주고 동의를 받습니다. 비밀번호·API 키·개인정보는 넣지 마세요.</p>
     {fileIssue&&<p role="alert" className="notice">{fileIssue}</p>}
-    <button className="primary" disabled={disabled||!text.trim()||!!fileIssue} onClick={()=>void start()}>{busy?'준비 중…':'시작'}</button>
-    <p className="subtle">시작하면 Git 없는 프로젝트를 만들고 자료를 그 폴더에 저장합니다. AI에 보내기 전에 기획 요청을 미리 보고 동의를 받습니다. 실행 AI는 기획 승인 후 고릅니다. 비밀번호·API 키·개인정보는 넣지 마세요.</p>
     {issue&&<p role="alert" className="notice">{issue}</p>}
+    <div className="examples" aria-label="예시">
+      <span>예시</span>
+      {examples.map(example=><button type="button" key={example.label} className="example" disabled={disabled||!example.text} title={example.note} onClick={()=>{if(example.text){setText(example.text);setNote(example.note??'');}}}>{example.label}{!example.text&&<small> · 미연결</small>}</button>)}
+    </div>
+    {note&&<p className="task-composer-hint" role="status">{note}</p>}
   </section>;
 }
+
+const examples:{label:string;text:string;note?:string}[]=[
+  {label:'자료 분석',text:'첨부한 자료를 비교해서 표와 요약 보고서를 만들어 줘.'},
+  {label:'문서 정리',text:'첨부한 회의 메모를 정리해서 결정 사항과 할 일 목록 문서로 만들어 줘.'},
+  {label:'조사 계획',text:'신규 서비스 시장 조사를 위한 질문 목록과 조사 계획 문서를 만들어 줘.',note:'현재 일반 작업 실행기는 웹 검색 도구를 쓰지 않습니다. 계획과 문서는 만들 수 있지만 외부 자료 수집은 하지 않습니다.'},
+  {label:'업무 자동화',text:'매주 반복하는 보고서 작성 업무를 자동화할 수 있는 단계별 계획을 만들어 줘.',note:'자동 실행 연결은 아직 없습니다. 계획 문서까지 만듭니다.'},
+  {label:'프로그램 개발',text:'팀이 할 일을 추가하고 진행 상태를 볼 수 있는 간단한 웹 앱을 만들고 싶어.',note:'실제 코드 실행·테스트는 Git 저장소가 있는 코드 작업 프로젝트에서 합니다. 아래 ‘코드 작업 프로젝트 만들기’를 사용하세요.'},
+  {label:'이미지',text:'',note:'이미지 생성 도구는 아직 연결되지 않았습니다.'},
+];

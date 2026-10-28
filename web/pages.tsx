@@ -1,3 +1,4 @@
+import {useUiMode,setUiMode} from './ui-mode.ts';
 import { useEffect,useState } from 'react';
 import type { Snapshot } from '../shared/types.ts';
 import { terminal } from '../shared/types.ts';
@@ -57,6 +58,18 @@ export function PrivacySecurity({state}:{state:Snapshot|null}) {
   return <><ControlPlanePanel refreshKey={state?.provider??'unknown'}/><div className="notice"><b>기존 Codex 연결은 별도입니다</b><p>Codex는 공식 CLI와 기존 로그인을 사용합니다. AI 추론까지 이 컴퓨터 안에서 수행된다는 의미는 아닙니다.</p></div><section className="surface"><h2>현재 보호 정책</h2><dl className="policy-list">{policies.map(([title,status,description])=><div key={title}><dt>{title}</dt><dd><b>{status}</b><p>{description}</p></dd></div>)}</dl></section><section className="surface"><h2>현재 연결 상태</h2><p>{state?providerLabels[state.provider]:'상태를 불러오는 중입니다.'}</p>{state?.issue&&<p className="hint">차단·연결 진단: {state.issue}</p>}<p className="subtle">기획 저장·승인은 코드 실행 권한을 부여하지 않습니다. 응답 완료와 검증 성공은 별도로 표시합니다.</p></section></>;
 }
 
+/** Settings: the simple/advanced switch is real; other settings are still unavailable and say so. */
+export function SettingsPage(){
+  const mode=useUiMode();
+  return <>
+    <section className="surface"><h2>화면 모드</h2><p>두 모드는 같은 프로젝트·실행 기록·승인·보안 정책을 씁니다. 보이는 정보의 양만 다릅니다.</p>
+      <fieldset className="mode-switch"><legend className="sr-only">화면 모드</legend>
+        <label><input type="radio" name="ui-mode" checked={mode==='simple'} onChange={()=>setUiMode('simple')}/><span><b>간편 모드</b> — 새 작업·프로젝트·진행 현황·결과물·설정만 보입니다.</span></label>
+        <label><input type="radio" name="ui-mode" checked={mode==='advanced'} onChange={()=>setUiMode('advanced')}/><span><b>고급 모드</b> — 기획 스튜디오·에이전트 센터·개발·시각화·자동화·모델 제공자·확장·사용량·보안 화면과 기술 상세를 함께 봅니다.</span></label>
+      </fieldset></section>
+    <UnavailablePage page="settings"/>
+  </>;
+}
 export function UnavailablePage({page}:{page:'automation'|'extensions'|'usage'|'settings'}) {
   const content={automation:['자동화 기능 준비 중','예약 실행과 자동 Runner는 아직 제공하지 않습니다.'],extensions:['확장 기능 관리 준비 중','MCP · Skills · Plugins의 설치·연결 관리 UI는 아직 제공하지 않습니다. 현재 Codex 실행의 MCP 격리 정책은 유지됩니다.'],usage:['사용량 및 분석 준비 중','토큰·비용·할당량 집계가 연결되지 않았습니다. 추정치나 가상 사용량을 표시하지 않습니다.'],settings:['추가 설정 준비 중','테마와 언어 전환, 개인 설정 편집은 아직 제공하지 않습니다.']}[page];
   return <>{page==='settings'&&<section className="surface"><h2>현재 인터페이스</h2><dl className="policy-list"><div><dt>테마</dt><dd>다크</dd></div><div><dt>기본 언어</dt><dd>한국어</dd></div><div><dt>페이지 기억</dt><dd>URL에 현재 메뉴 유지</dd></div><div><dt>프로젝트 기억</dt><dd>이 브라우저에 선택한 프로젝트 ID 저장 · 저장소 접근이 차단되면 현재 화면에서만 유지</dd></div></dl></section>}<section className="empty-state"><span className="badge">준비 중</span><h2>{content[0]}</h2><p>{content[1]}</p></section></>;
