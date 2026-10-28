@@ -25,6 +25,7 @@ import { GoalTrackingPanel } from './goals.tsx';
 import {TaskVerificationPreviewPanel} from './task-verification-preview.tsx';
 import {StartPage} from './start.tsx';
 import {ProjectProgressPanel,lastEventTime} from './project-progress.tsx';
+import {DeliverablesPanel} from './deliverables.tsx';
 import {connectionFreshness} from '../shared/project-progress.ts';
 import './project-progress.css';
 
@@ -148,6 +149,7 @@ export function App(){
       {error&&<div className="banner error" role="alert">{error}</div>}
       {taskIntent&&taskAllowed&&taskIntent.scope===taskScope&&<TaskVerificationPreviewPanel projectId={taskIntent.task.projectId} workspaceId={taskIntent.workspaceId} taskId={taskIntent.task.id} taskTitle={taskIntent.task.title} scopeKey={taskIntent.scope} active={taskAllowed} onCancel={cancelTask} onRun={digest=>startTask(taskIntent,digest)}/>}
       {page==='progress'&&<ProjectProgressPanel key={projectId} projectId={projectId} projectKind={selectedProject?.kind??null} post={rawPost} online={online} lastSeq={state?.lastSeq??0} lastEventAt={lastEventTime(events)} freshness={connectionFreshness({online,lastEventAt:lastEventTime(events),now:Date.now()})}/>}
+      {page==='progress'&&selectedProject?.kind==='general'&&<DeliverablesPanel key={'deliverables:'+projectId} projectId={projectId} online={online} lastSeq={state?.lastSeq??0}/>}
       {page==='dashboard'&&<Dashboard key={projectId} state={state} projectId={projectId} onNavigate={navigate}/>}
       {page==='start'&&<StartPage state={state} projectId={projectId} online={online} locked={locked||!!pending} planningBlocked={planningBlocked||!!pending} canRunTask={taskAllowed&&!taskIntent} post={post} onNavigate={navigate} onProject={selectProject} workspaceAction={workspaceAction} onConnect={connect} onRunTask={runTask} onInterrupt={interrupt}/>}
       {page==='projects'&&<WorkspacePanel state={state} projectId={projectId} onProject={selectProject} onPlanning={()=>navigate('planning')} online={online} locked={!online||locked} action={workspaceAction} post={post}/>}
