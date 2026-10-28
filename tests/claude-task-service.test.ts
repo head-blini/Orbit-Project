@@ -46,8 +46,10 @@ test('stale and unapproved baselines are rejected before launch or Run creation'
 
 test('Claude events project session, tool and quota only; the last sanitized message is capped outside events',async()=>{
   const f=claudeFixture();try{
-    const secret='sk-abcdefghijklmnop0123456789',input={...planningInput,text:planningInput.text.replace('Write a report',`Write a report ${secret}`)};
-    const {task}=f.plan(input),run=await f.controller.submitTask(f.project.id,task.id,{requestId:randomUUID()}),runner=f.runners[0];
+    // A credential in the plan itself is now refused before launch (Codex-equivalent gate, tested below);
+    // here the secret only appears in model output and tool input, which must never reach events.
+    const secret='sk-abcdefghijklmnop0123456789';
+    const {task}=f.plan(),run=await f.controller.submitTask(f.project.id,task.id,{requestId:randomUUID()}),runner=f.runners[0];
     runner.emit(session);
     for(const event of parseClaudeLine(JSON.stringify({type:'assistant',message:{content:[{type:'tool_use',name:'Write',input:{prompt:secret}},{type:'text',text:`Result ${secret}`}]}}))!)runner.emit(event);
     assert.doesNotMatch(f.store.getRun(run.id)!.response,new RegExp(secret));
@@ -204,5 +206,27 @@ test('one active Claude run per general project: another task in the same folder
     assert.equal(f.launches.length,1);
     f.runners[0].finish();await tick();assert.equal(f.store.getRun(run.id)?.execution,'completed');
     await f.controller.submitTask(f.project.id,second.task.id,{requestId:randomUUID()});assert.equal(f.launches.length,2);
+  }finally{await f.close();}
+});
+test('Claude task prompts face the same credential and personal-data blocks as Codex runs',async()=>{
+  for(const [goal,code] of [['연락처 010-1234-5678로 보낸다','PERSONAL_DATA_BLOCKED'],['키 sk-abcdefghijklmnopqrstuvwx 사용','CREDENTIAL_LIKE_INPUT']] as const){
+    const f=claudeFixture();try{
+      const input={format:'json',source:'manual',text:JSON.stringify({schema_version:'1.0',title:'Report',goal,requirements:[{id:'REQ-1',description:'Write',acceptance_criteria:['Done']}],constraints:[],open_questions:[]})};
+      const version=f.studio.mutate(f.project.id,'plans',undefined,undefined,{requestId:randomUUID(),input}) as any;
+      f.studio.mutate(f.project.id,'plans',version.id,'approve',{expectedRevision:1});
+      const [task]=f.studio.mutate(f.project.id,'plans',version.id,'task-drafts',{}) as any[];
+      const seq=f.store.lastSeq();
+      await assert.rejects(f.controller.submitTask(f.project.id,task.id,{requestId:randomUUID()}),error(code,400));
+      assert.equal(f.launches.length,0);assert.equal(f.store.runs().length,0);
+      assert.deepEqual(f.store.eventsAfter(seq).map(e=>[e.kind,e.data.providerId,e.data.code]),[['guardrail.denied','claude-code',code]]);
+    }catch(e){if(String(e).includes('INVALID')||String(e).includes('PLANNING'))throw new Error('fixture plan rejected: '+String(e));throw e;}finally{await f.close();}
+  }
+});
+test('task dispatch follows the stored execution preference and never silently swaps runtimes',async()=>{
+  const f=claudeFixture();try{
+    const {task}=f.plan();
+    assert.equal(f.controller.aiPreferences.read(f.project.id).execution,'claude-code');
+    await f.controller.submitTask(f.project.id,task.id,{requestId:randomUUID()});
+    assert.equal(f.store.runs()[0].runtime,f.controller.aiPreferences.read(f.project.id).execution);
   }finally{await f.close();}
 });

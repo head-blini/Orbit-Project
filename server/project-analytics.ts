@@ -47,6 +47,7 @@ function query(kind:AnalyticsKind){
   if(kind==='coding')return codingQuery();
   const table={model_hub:'model_hub_requests',planning:'planning_suggestions',review:'native_reviews',workflow:'workflow_runs'}[kind];
   let extra='',join='';
+  if(kind==='planning')extra=','+fields('r',['runtime']);
   if(kind==='model_hub')extra=','+fields('r',['providerId','model','usage.source','usage.promptTokens','usage.completionTokens','usage.totalTokens']);
   if(kind==='workflow'){
     extra=`,json_extract(r.body,'$.status') AS status,CASE
@@ -57,7 +58,8 @@ function query(kind:AnalyticsKind){
         ${['workspaceId','workflowId','versionId','sourceDigest','configDigest'].map(key=>`AND json_extract(p.body,'$.${key}')=json_extract(r.body,'$.${key}')`).join(' ')} THEN 1 ELSE NULL END AS retryCount`;
     join=" LEFT JOIN workflow_runs p ON p.id=json_extract(r.body,'$.retryOfId')";
   }
-  const ownership=kind==='model_hub'?'':" AND EXISTS(SELECT 1 FROM workspaces w WHERE w.id=json_extract(r.body,'$.workspaceId') AND json_extract(w.body,'$.projectId')=$project)";
+  const workspaceOwnership="EXISTS(SELECT 1 FROM workspaces w WHERE w.id=json_extract(r.body,'$.workspaceId') AND json_extract(w.body,'$.projectId')=$project)";
+  const ownership=kind==='model_hub'?'':kind==='planning'?` AND (${workspaceOwnership} OR (json_extract(r.body,'$.workspaceId') IS NULL AND json_extract(r.body,'$.runtime')='claude-code' AND EXISTS(SELECT 1 FROM projects p WHERE p.id=$project AND p.kind='general')))`:` AND ${workspaceOwnership}`;
   return `SELECT r.id,${fields('r',base)}${extra} FROM ${table} r${join} WHERE r.project_id=$project AND json_extract(r.body,'$.projectId')=$project${ownership}`;
 }
 function record(kind:AnalyticsKind,row:Row,overlay?:Overlay):AnalyticsRecord {
@@ -69,7 +71,7 @@ function record(kind:AnalyticsKind,row:Row,overlay?:Overlay):AnalyticsRecord {
   if(kind==='coding')for(const key of Object.keys(checks) as (keyof CheckCounts)[])checks[key]=number(row['check_'+key])??0;
   const override=kind==='planning'?overlay?.(String(row.id)):null,execution=override?.execution??(kind==='workflow'?row.status:row.execution);
   return {id:String(row.id),kind,workspaceId:kind==='model_hub'?null:id(row.workspaceId),taskId:kind==='coding'?id(row.taskId):null,
-    providerId:kind==='workflow'?null:kind==='model_hub'?identifier(row.providerId):'codex',model:kind==='coding'?(changed?null:identifier(row.modelAtStart)):kind==='model_hub'?identifier(row.model):null,modelChanged:changed,
+    providerId:kind==='workflow'?null:kind==='model_hub'?identifier(row.providerId):kind==='planning'&&row.runtime==='claude-code'?'claude-code':'codex',model:kind==='coding'?(changed?null:identifier(row.modelAtStart)):kind==='model_hub'?identifier(row.model):null,modelChanged:changed,
     execution:typeof execution==='string'&&states.includes(execution)?execution:'unknown',createdAt:time(row.createdAt)??'',finishedAt:codingLost?null:time(override?override.finishedAt:row.finishedAt),
     durationMs:kind==='workflow'||codingLost?null:number(override?override.durationMs:row.durationMs),tokens,tokenSource:observed?(knownCoding?'codex_observed_delta':'provider'):'unknown',
     tokenStatus:kind==='coding'&&(codingLost||row.tokenStatus==='incomplete')?'incomplete':observed?'observed':'unknown',observedAt:time(knownCoding?row.observedAt:knownHub?row.finishedAt:null),

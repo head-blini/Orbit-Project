@@ -23,6 +23,8 @@ import { MergeService } from './merge-service.ts';
 import { WorkflowService } from './workflow-service.ts';
 import { ReviewService } from './review-service.ts';
 import { PlanningAgentService } from './planning-agent-service.ts';
+import {ProjectAiPreferencesService} from './project-ai-preferences.ts';
+import type {ClaudePlanningOptions} from './claude-planning.ts';
 import { collectExtensions,unknownExtensions } from './extensions.ts';
 import type { ExtensionInventory } from '../shared/extensions.ts';
 import {projectAnalytics} from './project-analytics.ts';
@@ -44,6 +46,7 @@ export class Controller {
   private readonly verificationSetup:VerificationSetupService;
   readonly reviews:ReviewService;
   readonly planningSuggestions:PlanningAgentService;
+  readonly aiPreferences:ProjectAiPreferencesService;
   private usage:CodexUsage=unknownUsage();private usagePending:Promise<CodexUsage>|null=null;
   private extensionCache:ExtensionInventory|null=null;private extensionPending:Promise<ExtensionInventory>|null=null;
   private knownMcpNames:readonly string[]|null=null;
@@ -53,9 +56,10 @@ export class Controller {
   private readonly ownerIncarnation=randomUUID();
   private soloRecoveryRequired(){return this.soloLost||this.store.runs().some(run=>run.runtime!=='claude-code'&&run.execution==='lost');}
   assertExecutionAvailable(){if(this.soloRecoveryRequired())throw new AppError('SOLO_RECOVERY_REQUIRED',409);}
-  constructor(store:Store,workspace:string,factory:(workspace:string,write:boolean)=>RpcPort,projects?:Projects,verificationConfig:VerificationConfiguration[]=[],modelHubConfig:readonly ModelHubConfiguration[]=[],claudeOptions:ClaudeTaskServiceOptions={}){
+  constructor(store:Store,workspace:string,factory:(workspace:string,write:boolean)=>RpcPort,projects?:Projects,verificationConfig:VerificationConfiguration[]=[],modelHubConfig:readonly ModelHubConfiguration[]=[],claudeOptions:ClaudeTaskServiceOptions={},claudePlanningOptions:ClaudePlanningOptions={}){
     this.store=store;this.workspace=workspace;this.factory=factory;this.projects=projects;
     this.claudeTasks=new ClaudeTaskService(store,projects,claudeOptions);
+    this.aiPreferences=new ProjectAiPreferencesService(store);
     this.soloLost=store.unresolvedNativeConnections();
     this.telemetry=new RunTelemetry(metrics=>this.store.saveRunMetrics(metrics));
     const selected=projects?.workspaces().find(w=>w.id===store.getMeta('selectedWorkspace'));if(selected){this.workspaceId=selected.id;this.workspace=selected.path;}
@@ -67,7 +71,7 @@ export class Controller {
     this.merges=new MergeService(store,projects,this.verification,()=>this.soloRecoveryRequired()||!!this.extensionPending||!!this.active()||!!this.connecting||this.switching||this.modelHub.active||!!this.workflows?.active||!!this.reviews?.active||!!this.planningSuggestions?.active);
     this.workflows=new WorkflowService(store,projects,commandResolver,()=>this.soloRecoveryRequired()||!!this.extensionPending||!!this.active()||!!this.connecting||this.switching||this.modelHub.active||this.verification.active||this.merges.active||!!this.reviews?.active||!!this.planningSuggestions?.active,id=>{this.merges.ensureAvailable(id);this.verification.ensureAvailable(id);this.planningSuggestions.ensureAvailable(id);this.reviews.ensureAvailable(id);});
     this.reviews=new ReviewService(store,projects,factory,()=>this.soloRecoveryRequired()||!!this.extensionPending||!!this.active()||!!this.connecting||this.switching||this.modelHub.active||this.verification.active||this.merges.active||this.workflows.active||!!this.planningSuggestions?.active,id=>{this.planningSuggestions.ensureAvailable(id);this.merges.ensureAvailable(id);this.verification.ensureAvailable(id);this.workflows.ensureAvailable(id);});
-    this.planningSuggestions=new PlanningAgentService(store,projects,factory,()=>this.soloRecoveryRequired()||!!this.extensionPending||!!this.active()||!!this.connecting||this.switching||this.modelHub.active||this.verification.active||this.merges.active||this.workflows.active||this.reviews.active,id=>{this.merges.ensureAvailable(id);this.verification.ensureAvailable(id);this.workflows.ensureAvailable(id);this.reviews.ensureAvailable(id);});
+    this.planningSuggestions=new PlanningAgentService(store,projects,factory,projectId=>this.soloRecoveryRequired()||store.runs().some(run=>run.runtime==='claude-code'&&(!terminal(run.execution)||run.execution==='lost'&&run.projectId===projectId))||!!this.extensionPending||!!this.active()||!!this.connecting||this.switching||this.modelHub.active||this.verification.active||this.merges.active||this.workflows.active||this.reviews.active,id=>{this.merges.ensureAvailable(id);this.verification.ensureAvailable(id);this.workflows.ensureAvailable(id);this.reviews.ensureAvailable(id);},undefined,claudePlanningOptions);
   }
   snapshot():Snapshot{return {soloRecoveryRequired:this.soloRecoveryRequired(),provider:this.provider,issue:this.issue,threadId:this.thread(),workspace:basename(this.workspace),readOnly:!this.workspaceId,runs:this.store.runs().filter(r=>r.workspaceId===this.workspaceId),lastSeq:this.store.lastSeq(),connections:providerConnections,externalApiEnabled:this.modelHub.externalEnabled,modelHubConfigured:this.modelHub.configured,modelHubBusy:this.modelHub.active,extensionBusy:!!this.extensionPending,verificationBusy:this.verification.active,mergeBusy:this.merges.active,workflowBusy:this.workflows.active,reviewBusy:this.reviews.active,planningBusy:this.planningSuggestions.active,...(this.projects?{projectCreationAvailable:this.projects.creationAvailable,selectedWorkspaceId:this.workspaceId??null,projects:this.projects.list(),workspaces:this.projects.workspaces()}:{})};}
   private thread(){return this.store.getThread(this.workspaceId);}
@@ -168,11 +172,17 @@ export class Controller {
   startReview(input:Parameters<ReviewService['start']>[0]){this.extensionIdle();assertGitProject(this.store,input.workspaceId);if(input.workspaceId!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);return this.reviews.start(input);}
   interruptReview(workspaceId:string,reviewId:string){if(workspaceId!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);return this.reviews.interrupt(workspaceId,reviewId);}
   recoverReview(input:Parameters<ReviewService['recover']>[0]){this.extensionIdle();this.planningSuggestions.ensureAvailable(this.workspaceId);if(this.reviews.record(input.reviewId).workspaceId!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);return this.reviews.recover(input);}
-  previewPlanning(projectId:string,input:Parameters<PlanningAgentService['preview']>[1]){this.extensionIdle();assertGitProject(this.store,projectId);assertGitProject(this.store,input.workspaceId);if(input.workspaceId!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);return this.planningSuggestions.preview(projectId,input);}
-  startPlanning(projectId:string,input:Parameters<PlanningAgentService['start']>[1]){this.extensionIdle();assertGitProject(this.store,projectId);assertGitProject(this.store,input.workspaceId);if(input.workspaceId!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);return this.planningSuggestions.start(projectId,input);}
-  interruptPlanning(projectId:string,id:string,workspaceId:string){if(workspaceId!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);return this.planningSuggestions.interrupt(projectId,id,workspaceId);}
-  recoverPlanning(projectId:string,input:Parameters<PlanningAgentService['recover']>[1]){if(input.workspaceId!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);return this.planningSuggestions.recover(projectId,input);}
-  savePlanningDraft(projectId:string,id:string,input:Parameters<PlanningAgentService['saveDraft']>[2]){if(input.workspaceId!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);return this.planningSuggestions.saveDraft(projectId,id,input);}
+  private planningWorkspace(projectId:string,workspaceId?:string|null){
+    if(this.store.projects().some(project=>project.id===projectId&&project.kind==='general')){
+      if(workspaceId!==null&&workspaceId!==undefined)throw new AppError('GIT_REQUIRED',409);return;
+    }
+    assertGitProject(this.store,workspaceId);if(workspaceId!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);
+  }
+  previewPlanning(projectId:string,input:Parameters<PlanningAgentService['preview']>[1]){this.extensionIdle();this.planningWorkspace(projectId,input?.workspaceId);return this.planningSuggestions.preview(projectId,input);}
+  startPlanning(projectId:string,input:Parameters<PlanningAgentService['start']>[1]){this.extensionIdle();this.planningWorkspace(projectId,input?.workspaceId);return this.planningSuggestions.start(projectId,input);}
+  interruptPlanning(projectId:string,id:string,workspaceId?:string|null){this.planningWorkspace(projectId,workspaceId);return this.planningSuggestions.interrupt(projectId,id,workspaceId);}
+  recoverPlanning(projectId:string,input:Parameters<PlanningAgentService['recover']>[1]){this.planningWorkspace(projectId,input?.workspaceId);return this.planningSuggestions.recover(projectId,input);}
+  savePlanningDraft(projectId:string,id:string,input:Parameters<PlanningAgentService['saveDraft']>[2]){this.planningWorkspace(projectId,input?.workspaceId);return this.planningSuggestions.saveDraft(projectId,id,input);}
   refreshUsage():Promise<CodexUsage>{
     if(this.provider!=='ready'||!this.rpc)throw new AppError('NOT_CONNECTED',409);
     if(this.usagePending)return this.usagePending;
@@ -288,8 +298,12 @@ export class Controller {
   async submitTask(projectId:string,taskId:string,input:{requestId:string;workspaceId?:string;expectedAcceptanceDigest?:string}):Promise<Run>{
     if(this.store.projects().some(project=>project.id===projectId&&project.kind==='general')&&!Object.hasOwn(input,'workspaceId')){
       if(Object.keys(input).length!==1||!Object.hasOwn(input,'requestId'))throw new AppError('INVALID_FIELDS',400);
+      this.planningSuggestions.ensureAvailable(projectId);
+      // Dispatch must match the stored execution choice; never swap runtimes silently.
+      if(this.aiPreferences.read(projectId).execution!=='claude-code')throw new AppError('RUNTIME_NOT_SUPPORTED',409);
       return this.claudeTasks.submit(projectId,taskId,input.requestId);
     }
+    if(this.store.projects().some(project=>project.id===projectId&&project.kind==='code')&&this.aiPreferences.read(projectId).execution!=='codex')throw new AppError('RUNTIME_NOT_SUPPORTED',409);
     assertGitProject(this.store,projectId);assertGitProject(this.store,input.workspaceId);
     if(typeof input.requestId!=='string'||!/^[a-zA-Z0-9-]{8,80}$/.test(input.requestId))throw new AppError('INVALID_REQUEST_ID',400);
     const workspace=this.projects?.workspaces().find(workspace=>workspace.id===input.workspaceId);

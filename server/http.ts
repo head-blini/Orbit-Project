@@ -83,6 +83,11 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
       const goalRoute=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/goals(?:\/([a-f0-9-]{36})\/(state|history))?$/);
       const appPreviewRoute=url.pathname.match(/^\/api\/workspaces\/([a-f0-9-]{36})\/app-preview$/);
       const verificationSetupRoute=url.pathname.match(/^\/api\/workspaces\/([a-f0-9-]{36})\/verification-setup$/);
+      const aiPreferencesRoute=url.pathname.match(/^\/api\/projects\/([a-f0-9-]{36})\/ai-preferences$/);
+      if(req.method==='GET'&&aiPreferencesRoute){
+        if(url.search)throw new AppError('INVALID_FIELDS',400);
+        json(res,200,controller.aiPreferences.read(aiPreferencesRoute[1]));return;
+      }
       const gitWorkspaceRoute=url.pathname.match(/^\/api\/workspaces\/([a-f0-9-]{36})(?:\/|$)/);
       if(req.method==='GET'&&gitWorkspaceRoute)assertGitProject(controller.store,gitWorkspaceRoute[1]);
       if(req.method==='POST'){
@@ -91,6 +96,10 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
         const largeStudioInput=studioRoute&&studioRoute[2]!=='tasks'&&(!studioRoute[3]||studioRoute[4]==='revisions');
         const planningSuggestion=url.pathname.match(/^\/api\/projects\/([a-f0-9-]{36})\/planning-suggestions\/(preview|start|recover|([a-f0-9-]{36})\/(interrupt|save))$/);
         const data=await body(req,largeStudioInput?6*256*1024+256*1024:planningSuggestion?64000:18000);
+        if(aiPreferencesRoute){
+          if(url.search)throw new AppError('INVALID_FIELDS',400);exact(data,['expectedRevision','planning','execution']);
+          json(res,200,controller.aiPreferences.update(aiPreferencesRoute[1],data as unknown as Parameters<Controller['aiPreferences']['update']>[1]));return;
+        }
         if(gitWorkspaceRoute)assertGitProject(controller.store,gitWorkspaceRoute[1]);
         if(verificationSetupRoute){
           if(url.search)throw new AppError('INVALID_FIELDS',400);exact(data,['requestId','profileId','expectedPreviewDigest','confirmed']);
@@ -108,8 +117,10 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
         }
         if(planningSuggestion){
           if(url.search)throw new AppError('INVALID_FIELDS',400);
-          assertGitProject(controller.store,planningSuggestion[1]);
           const projectId=planningSuggestion[1],action=planningSuggestion[2],id=planningSuggestion[3];
+          // Only general projects may omit the workspace; the controller/service
+          // retain project ownership and selected-workspace validation.
+          if(controller.store.projects().some(project=>project.id===projectId&&project.kind==='general')&&!Object.hasOwn(data,'workspaceId'))data.workspaceId=null;
           if(action==='preview'){
             exact(data,['workspaceId','text']);json(res,200,controller.previewPlanning(projectId,data as unknown as Parameters<Controller['previewPlanning']>[1]));return;
           }
@@ -120,7 +131,7 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
             exact(data,['workspaceId','suggestionId','confirmedStopped']);json(res,200,controller.recoverPlanning(projectId,data as unknown as Parameters<Controller['recoverPlanning']>[1]));return;
           }
           if(planningSuggestion[4]==='interrupt'){
-            exact(data,['workspaceId']);json(res,200,controller.interruptPlanning(projectId,id,data.workspaceId as string));return;
+            exact(data,['workspaceId']);json(res,200,controller.interruptPlanning(projectId,id,data.workspaceId as string|null));return;
           }
           exact(data,['workspaceId','expectedOutputDigest']);json(res,200,controller.savePlanningDraft(projectId,id,data as unknown as Parameters<Controller['savePlanningDraft']>[2]));return;
         }
@@ -324,9 +335,9 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
       }
       const planningSuggestionsView=url.pathname.match(/^\/api\/projects\/([a-f0-9-]{36})\/planning-suggestions$/);
       if(req.method==='GET'&&planningSuggestionsView){
-        assertGitProject(controller.store,planningSuggestionsView[1]);
         const workspaceId=url.searchParams.get('workspaceId');
-        if([...url.searchParams.keys()].join(',')!=='workspaceId'||!workspaceId||!/^[a-f0-9-]{36}$/.test(workspaceId))throw new AppError('INVALID_FIELDS',400);
+        const general=controller.store.projects().some(project=>project.id===planningSuggestionsView[1]&&project.kind==='general');
+        if(!(general&&!url.search)&&([...url.searchParams.keys()].join(',')!=='workspaceId'||!workspaceId||!/^[a-f0-9-]{36}$/.test(workspaceId)))throw new AppError('INVALID_FIELDS',400);
         json(res,200,controller.planningSuggestions.view(planningSuggestionsView[1],workspaceId));return;
       }
       const verificationView=url.pathname.match(/^\/api\/workspaces\/([a-f0-9-]{36})\/verification$/);
