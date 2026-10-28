@@ -99,7 +99,7 @@ test('durable dispatch intent survives database reopen and only observed termina
  await service.start('p',p.id,{confirmed:true,expectedPlanDigest:p.planDigest});f.store.close();
  const store=new Store(path);try{let calls=0;controller.submitTask=async()=>{calls++;throw Error();};const resumed=new CapabilityExecutionService(store,controller,()=>f.registry);
  await resumed.start('p',p.id,{confirmed:true,expectedPlanDigest:p.planDigest});assert.equal(calls,0);await assert.rejects(resumed.recover('p',p.id),/EXECUTION_UNCONFIRMED/);
- const run=store.createRun(p.dispatchRequestId,'known','approved',undefined,{runtime:'claude-code',projectId:'p',taskId:f.task.id});store.updateRun(run.id,{execution:'failed'},'run.failed');
+ const run=store.createRun(p.dispatchRequestId,'known','approved',undefined,{runtime:'claude-code',projectId:'p',taskId:f.task.id,planningVersionId:p.baseline.planningVersionId,planningContentHash:p.baseline.planningContentHash});store.updateRun(run.id,{execution:'failed'},'run.failed');
  const recovered=await resumed.recover('p',p.id);assert.equal(recovered.recoveryRequired,false);assert.equal(recovered.status,'failed');assert.equal(calls,0);
  }finally{store.close();rmSync(dir,{recursive:true,force:true});}
 });
@@ -113,5 +113,44 @@ test('history display limits cannot hide an older unresolved dispatch from the s
  const insert=f.store.db.prepare('INSERT INTO capability_executions VALUES(?,?,?,?,?)');
  for(let i=0;i<201;i++)insert.run('other-'+i,'p','request-'+i,'digest',JSON.stringify({...p,id:'other-'+i,taskId:'other',status:'awaiting_approval'}));
  assert.throws(()=>f.plan(),/EXECUTION_RECOVERY_REQUIRED/);
+ }finally{f.store.close();}
+});
+
+test('restart reconciles the original terminal dispatch without demanding recovery or launching again',async()=>{
+ for(const execution of ['completed','failed','interrupted'] as const){
+  const f=setup();try{
+   const p=f.plan();await f.service.start('p',p.id,{confirmed:true,expectedPlanDigest:p.planDigest});
+   const run=f.store.findRequest(p.dispatchRequestId)!.run;f.store.updateRun(run.id,{execution},'run.'+execution);
+   const reopened=new CapabilityExecutionService(f.store,f.controller,()=>f.registry,f.adapters),record=reopened.record('p',p.id);
+   assert.equal(record.recoveryRequired,false);assert.equal(record.issue,null);assert.equal(record.status,execution==='completed'?'execution_completed':execution);
+   assert.equal(record.runId,run.id);assert.doesNotThrow(()=>f.plan());assert.equal(f.calls,1);
+  }finally{f.store.close();}
+ }
+});
+test('restart and explicit recovery never release a mismatched receipt or an unconfirmed process',async()=>{
+ for(const field of ['requestId','runId','taskId','projectId','runtime','workspaceId','planningVersionId','planningContentHash','acceptanceDigest','lost','running'] as const){
+  const f=setup();try{
+   const p=f.plan();await f.service.start('p',p.id,{confirmed:true,expectedPlanDigest:p.planDigest});
+   const run=f.store.findRequest(p.dispatchRequestId)!.run;
+   if(field==='runId')f.store.db.prepare("UPDATE capability_executions SET body=json_set(body,'$.runId',?) WHERE id=?").run(randomUUID(),p.id);
+   else if(field!=='lost'&&field!=='running')(run as unknown as Record<string,unknown>)[field]=field==='runtime'?'codex':'mismatch';
+   run.execution=field==='lost'?'lost':field==='running'?'running':'completed';
+   f.store.db.prepare('UPDATE runs SET body=? WHERE id=?').run(JSON.stringify(run),run.id);
+   const reopened=new CapabilityExecutionService(f.store,f.controller,()=>f.registry,f.adapters);
+   assert.equal(reopened.record('p',p.id).recoveryRequired,true,field);
+   await assert.rejects(reopened.recover('p',p.id),/EXECUTION_UNCONFIRMED/,field);assert.throws(()=>f.plan(),/EXECUTION_RECOVERY_REQUIRED/);assert.equal(f.calls,1);
+  }finally{f.store.close();}
+ }
+});
+
+test('restart finds a completed receipt after dispatch journal loss and preserves reconciliation across another restart',async()=>{
+ const f=setup();try{
+  const p=f.plan();await f.service.start('p',p.id,{confirmed:true,expectedPlanDigest:p.planDigest});
+  const run=f.store.findRequest(p.dispatchRequestId)!.run;f.store.updateRun(run.id,{execution:'completed'},'run.completed');
+  f.store.db.prepare("UPDATE capability_executions SET body=json_set(body,'$.runId',null,'$.status','recovery_required','$.recoveryRequired',json('true')) WHERE id=?").run(p.id);
+  const reopened=new CapabilityExecutionService(f.store,f.controller,()=>f.registry,f.adapters),record=reopened.record('p',p.id);
+  assert.equal(record.runId,run.id);assert.equal(record.recoveryRequired,false);assert.equal(record.status,'execution_completed');
+  const seq=f.store.lastSeq();new CapabilityExecutionService(f.store,f.controller,()=>f.registry,f.adapters);
+  assert.equal(f.store.lastSeq(),seq);assert.equal(f.calls,1);
  }finally{f.store.close();}
 });

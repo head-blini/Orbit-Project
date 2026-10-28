@@ -1,3 +1,14 @@
+# Phase 4 재개 상태 (2026-10-28)
+
+- 기준 `c5400c28972a69e9907eb3ccff36b900a9bcef3f`. 이번 사용자 승인으로 Codex App Server0.165.0 실제 작업 **1건**, Orbit 재시도0, reviewer0 실행. [실제 검증 보고서](ORBIT-CAPABILITY-PHASE4-2026-10-28.md), [보존 증거](evidence/phase4-native-e2e-2026-10-28.json).
+- 격리 worktree result.txt 내용/digest 확인, 원본 clean, 변경파일 result.txt만. 실제 실행7,703ms/전체10,034ms. HTTP·DB·진행판·동일요청 멱등성 확인. 저장된 native 증거로 UI 렌더링 확인.
+- 서버 설정 모델 gpt-6-astra는 실제 관측 모델이 아니다. actual unknown 유지. Quality Loop `QUALITY_PRODUCER_MODEL_UNKNOWN`, steps0, livePipelineVerified=false. 전체 독립 품질 검증 통과로 보고하지 않는다.
+- 실제 DB 복사 재시작에서 terminal Run을 불필요 복구 대상으로 분류하는 결함 발견. dispatch/baseline/acceptance가 일치하는 terminal만 reconcile하도록 좁게 수정. full Controller/HTTP 재시작 proof: recoveryRequired=false, run1, provider0, original DB unchanged.
+- Claude 실행파일32후보 미발견. URL Handler는 누락된 ~/.local/bin/claude 대상의 broken link. 인증 문제로 단정하지 않음. 설치/인증변경 없음.
+- 원본 상세 증거 `/private/tmp/orbit-phase4-X9bcYu` 보존. 이미 완료된 모델 작업을 재실행하지 말고 DB 복사본으로 재검증한다. 실제 장애/한도/강제중단 경로는 추가로 유도하지 않았으며 Mock 회귀와 분리한다.
+
+- 최종 Node24 `npm run verify` exit0: **1361 tests /1359 pass /0 fail /2 Windows-only skip**, 타입·빌드·diff 통과. 수동 harness 별도 strict 타입·승인 flag 가드 확인. 실제 기록 Chrome 렌더링 pass.
+
 # Phase 3 재개 상태 (2026-10-28)
 
 - 기준: Phase 2 `1651cd55f0b1371a5dfbdc751f4073a7c007d77d`. [Phase 3 구현·검증·승인 절차](ORBIT-CAPABILITY-PHASE3-2026-10-28.md). 기존 실행/승인/Quality Loop 재사용, 실제 모델 unknown·독립 리뷰 차단 유지.

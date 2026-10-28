@@ -17,6 +17,16 @@ const hash=(v:unknown)=>createHash('sha256').update(JSON.stringify(v)).digest('h
 const validId=(v:unknown)=>typeof v==='string'&&/^[A-Za-z0-9-]{1,80}$/.test(v)&&!containsCredential(v);
 function fail(code:string):never{throw new AppError(code,409);}
 const unknownModels=()=>({selectedModelId:null,requestedModelId:null,serverModelId:null,actualModelId:'unknown',source:'unknown' as const});
+function terminalDispatch(store:Store,record:CapabilityExecutionRecord){
+ const run=store.findRequest(record.dispatchRequestId)?.run;
+ if(!run||run.requestId!==record.dispatchRequestId||record.runId!==null&&record.runId!==run.id
+  ||run.taskId!==record.taskId||(run.runtime??'codex')!==record.runtimeId||(run.workspaceId??null)!==record.workspaceId
+  ||(run.projectId??store.workspaces().find(workspace=>workspace.id===run.workspaceId)?.projectId)!==record.projectId
+  ||run.planningVersionId!==record.baseline.planningVersionId||run.planningContentHash!==record.baseline.planningContentHash
+  ||(run.acceptanceDigest??null)!==record.expectedAcceptanceDigest||!['completed','failed','interrupted'].includes(run.execution))return null;
+ return run;
+}
+
 
 /** Owns the plan/approval journal only. Controller and QualityLoopService own all execution. */
 export class CapabilityExecutionService {
@@ -28,8 +38,11 @@ export class CapabilityExecutionService {
   store.db.exec('CREATE TABLE IF NOT EXISTS capability_executions(id TEXT PRIMARY KEY,project_id TEXT NOT NULL,request_id TEXT NOT NULL UNIQUE,input_digest TEXT NOT NULL,body TEXT NOT NULL)');
   for(const row of store.db.prepare('SELECT body FROM capability_executions').all()){
    const r=JSON.parse(String(row.body)) as CapabilityExecutionRecord;
-   if(['dispatching','running','interrupt_requested'].includes(r.status)){
-    r.recoveryRequired=true;r.status='recovery_required';r.issue='EXECUTION_RESTART_RECOVERY_REQUIRED';this.save(r);
+   if(['dispatching','running','interrupt_requested','recovery_required'].includes(r.status)){
+    const run=terminalDispatch(store,r);
+    if(run){r.runId=run.id;r.recoveryRequired=false;r.issue=null;r.status=run.execution==='completed'?'execution_completed':run.execution==='failed'?'failed':'interrupted';}
+    else{r.recoveryRequired=true;r.status='recovery_required';r.issue='EXECUTION_RESTART_RECOVERY_REQUIRED';}
+    this.save(r);
    }
   }
  }
@@ -121,8 +134,8 @@ export class CapabilityExecutionService {
   await this.adapters.interrupt(r.runtimeId,r.runId!);return this.record(projectId,id);
  }
  async recover(projectId:string,id:string){
-  const r=this.raw(projectId,id),run=this.store.findRequest(r.dispatchRequestId)?.run;
-  if(!run||!['completed','failed','interrupted'].includes(run.execution))fail('EXECUTION_UNCONFIRMED');
+  const r=this.raw(projectId,id),run=terminalDispatch(this.store,r);
+  if(!run)fail('EXECUTION_UNCONFIRMED');
   r.runId=run.id;r.recoveryRequired=false;r.issue=null;r.status=run.execution==='completed'?'execution_completed':run.execution==='failed'?'failed':'interrupted';this.save(r);return this.record(projectId,id);
  }
  qualityPreview(projectId:string,id:string,reviewers:QualitySelection[],limits:QualityLoopInput['limits']){
