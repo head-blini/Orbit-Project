@@ -169,7 +169,7 @@ function PlanningProject(props: PlanningStudioProps) {
         if(alive.current)setMessage(`저장된 버전 r${version.revision}의 ${format==='json'?'JSON':'Markdown'} 다운로드를 요청했습니다.`);
       }):undefined}/>
     <div className="planning-toolbar">
-      <button disabled={busy || !parsed.ok || (!!selected && !dirty)} onClick={() => void save()}>{selected ? '새 버전 저장' : '초안 저장'}</button>
+      <button disabled={busy || !parsed.ok || (!!selected && !dirty)} onClick={() => void save()}>{selected ? '새 버전 저장' : '편집 내용을 초안으로 저장'}</button>
       <button disabled={busy || !selected || dirty || selected.state !== 'draft' || !parsed.ok || (parsed.ok && approvalIssues(parsed.draft).length > 0)} onClick={() => void approve()}>저장된 버전 승인</button>
       <button disabled={busy || !selected || dirty || selected.state !== 'approved'} onClick={() => {
         if (!selected || dirty) return;

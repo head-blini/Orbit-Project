@@ -383,7 +383,7 @@ try{
     await step(names[10],async()=>{
       await navigate('planning');await expectUI(`!!$('.planning-editor textarea:enabled')`,'Planning editor not ready');
       await fill('.planning-editor textarea',planSource);await expectUI(`$('.planning-preview')?.innerText.includes(${JSON.stringify(planTitle)})`,'Planning preview missing');
-      await button('초안 저장');await expectUI(`$('.planning-studio [role="status"]')?.textContent.includes('초안을 저장했습니다.')`,'Plan was not saved');
+      await button('편집 내용을 초안으로 저장');await expectUI(`$('.planning-studio [role="status"]')?.textContent.includes('초안을 저장했습니다.')`,'Plan was not saved');
       await button('저장된 버전 승인');await expectUI(`$('.planning-studio [role="status"]')?.textContent.includes('승인했습니다.')`,'Plan not approved');
       await button('Task 초안 생성');await expectUI(`$('.saved-tasks article')?.innerText.includes('REQ-01')&&$('.saved-tasks').innerText.includes('검증 미실행')`,'Persisted Task missing');
     });
@@ -554,7 +554,7 @@ try{
         const text=readFileSync(file.path,'utf8');
         await expectUI(`$('.planning-editor textarea')?.value===${JSON.stringify(text)}&&$('.planning-preview h4')?.textContent===${JSON.stringify(planTitle)}&&$$('.planning-export-actions button').every(node=>node.disabled)&&$('.planning-studio')?.getAttribute('aria-busy')==='false'`,'Downloaded planning file did not reimport as an unsaved new draft');
       }
-      await button('초안 저장');await expectUI(`$('.planning-studio [role="status"]')?.textContent.includes('초안을 저장했습니다.')`,'Reimported JSON did not save as a separate draft');
+      await button('편집 내용을 초안으로 저장');await expectUI(`$('.planning-studio [role="status"]')?.textContent.includes('초안을 저장했습니다.')`,'Reimported JSON did not save as a separate draft');
       const importedId=await evaluate(`$('.planning-studio > .planning-toolbar select').value`);assert.notEqual(importedId,plan.id);
       const after=await planningRecords(),original=after.find(value=>value.id===plan.id),imported=after.find(value=>value.id===importedId);
       assert.equal(original.state,'approved');assert.equal(original.contentHash,plan.contentHash);assert.equal(imported.state,'draft');assert.deepEqual(imported.draft,{...plan.draft,source:'import'});

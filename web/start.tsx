@@ -20,11 +20,24 @@ const steps:readonly [Step,string][]=[['plan','기획'],['develop','개발'],['v
 export function StartPage(props:Props){
   const {state,projectId,online,locked}=props,project=state?.projects?.find(p=>p.id===projectId);
   if(!state)return <section className="surface"><h2>작업을 불러오고 있습니다</h2><p>서버 연결 후 프로젝트를 선택할 수 있습니다.</p></section>;
-  if(!project)return <section className="surface start-welcome"><span className="eyebrow">YOUR NEXT IDEA</span><h2>아이디어를 프로그램으로 만들어 보세요</h2><p>프로젝트를 준비하면 만들고 싶은 내용을 입력할 수 있습니다.</p>
+  if(!project)return <section className="surface start-welcome"><span className="eyebrow">YOUR NEXT IDEA</span><h2>목표를 말하면 기획부터 결과물까지 함께 만듭니다</h2><p>문서·조사·분석 같은 일반 작업이나 코드 작업 프로젝트를 준비하면 원하는 내용을 자연어로 입력할 수 있습니다.</p>
     {state.projectCreationAvailable&&<ProjectCreatePanel projectId={projectId} projectCount={state.projects?.length??0} selectedWorkspaceId={state.selectedWorkspaceId??null} online={online} locked={locked} onProject={props.onProject} action={props.workspaceAction} post={props.post}/>}
     <button onClick={()=>props.onNavigate('projects')}>기존 프로젝트 선택</button></section>;
+  if(project.kind==='general')return <StartGeneral key={projectId} {...props} projectName={project.name}/>;
   if(!workspaceMatchesProject(state,projectId)||!state.selectedWorkspaceId||!project.writeEnabled||state.readOnly)return <section className="surface"><h2>{project.name}의 작업 공간을 준비하세요</h2><p>프로젝트에 연결된 쓰기 가능한 작업 공간을 선택하면 기획부터 개발까지 이어갈 수 있습니다.</p><button className="primary" onClick={()=>props.onNavigate('projects')}>작업 공간 선택</button><button onClick={()=>props.onNavigate('planning')}>기획만 작성하기</button></section>;
   return <StartWorkspace key={projectId+':'+state.selectedWorkspaceId} {...props} workspaceId={state.selectedWorkspaceId}/>;
+}
+
+/** General (non-Git) projects: natural-language request → AI plan draft → approve in Planning → run from Progress. */
+export function StartGeneral(props:Props&{projectName:string}){
+  const [saved,setSaved]=useState<PlanningVersion|null>(null);
+  return <div className="start-general">
+    <section className="surface"><PlanningAgentPanel presentation="simple" general projectId={props.projectId} workspaceId={null} online={props.online} busy={props.planningBlocked} post={props.post} onSaved={version=>setSaved(version)}/></section>
+    {saved&&<section className="surface" role="status"><h3>기획 초안을 저장했습니다</h3><p>{saved.draft.title} · 아직 승인되지 않았습니다. 기획 스튜디오에서 내용을 확인하고 승인하면 작업이 만들어집니다.</p>
+      <button className="primary" onClick={()=>props.onNavigate('planning')}>기획 확인·승인하기</button></section>}
+    <section className="surface"><h3>{props.projectName} 진행 상황</h3><p>승인된 작업의 실행·결과물·검증 상태는 진행 현황에서 확인하고 실행합니다.</p>
+      <button onClick={()=>props.onNavigate('progress')}>진행 현황 열기</button></section>
+  </div>;
 }
 
 export function StartWorkspace(props:Props&{workspaceId:string}){

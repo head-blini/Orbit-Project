@@ -68,3 +68,13 @@ test('a completed foreign or older-plan Run cannot replace the current planning 
   const oldRun={id:'old',workspaceId:workspace.id,taskId:task.id,planningVersionId:'old-plan',execution:'completed',prompt:'old',response:'',createdAt:'',updatedAt:''};
   const f=fixture({state:{...state,runs:[oldRun]}});const html=f.render(true);assert.match(html,/이 작업 개발하기/);assert.doesNotMatch(html,/검증 단계로/);
 });
+test('a general project starts from a natural-language request without any workspace or code execution',()=>{
+  const general={...project,id:'project-g',name:'시장 조사',kind:'general' as const};
+  const f=fixture({projectId:general.id,state:{...state,projects:[general],workspaces:[],selectedWorkspaceId:null}});const html=f.render();
+  assert.match(html,/PlanningAgentPanel/);assert.match(html,/진행 현황 열기/);
+  assert.doesNotMatch(html,/작업 공간을 준비하세요/);assert.doesNotMatch(html,/이 작업 개발하기/);assert.equal(f.executed.length,0);
+});
+test('the empty-catalog welcome describes general and code work, not only programs',()=>{
+  const f=fixture({projectId:'',state:{...state,projects:[],workspaces:[],selectedWorkspaceId:null,projectCreationAvailable:true}});
+  assert.match(f.render(),/문서·조사·분석/);
+});

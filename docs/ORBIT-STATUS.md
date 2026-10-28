@@ -16,17 +16,22 @@ HEAD `d39679e`: `npm ci` → `npm run typecheck` exit 0, `npm run build` exit 0,
 
 | ID | 구현 상태 | 단위/통합 | 브라우저 | 실연동 | 관련 A | 증거 | 차단 이유 | 다음 행동 |
 |---|---|---|---|---|---|---|---|---|
-| F01 입력·AI 기획 | **구현(일반 프로젝트)**: 자연어 → Claude 기획 제안(읽기 전용, 미리보기·별도 동의·명시 저장=새 초안). 코드 프로젝트는 Codex/Claude 선택. 간소/상세 명세 구분은 미구현 | general-planning·claude-planning·planning-agent-ui | **Chrome: 일반 프로젝트에서 실제 Claude 기획 제안 → 결정 6개(이유 포함) 초안 저장, 승인본 불변** | Claude Code live 1회. Codex 기획 0.163.0 미검증 | A01 | `fbb7cf5`, `05c98e6` | — | 간소/상세 명세, Start 화면의 일반 프로젝트 흐름 |
+| F01 입력·AI 기획 | **구현(일반 프로젝트)**: 시작하기 화면에서 자연어 입력 → Claude 기획 제안(읽기 전용, 미리보기·별도 동의·명시 저장=새 초안) → 기획 승인 안내 → 진행 현황. 코드 프로젝트는 Codex/Claude 선택. 간소/상세 명세 구분은 미구현 | general-planning·claude-planning·planning-agent-ui | **Chrome: 일반 프로젝트에서 실제 Claude 기획 제안 → 결정 6개(이유 포함) 초안 저장, 승인본 불변** | Claude Code live 1회. Codex 기획 0.163.0 미검증 | A01 | `fbb7cf5`, `05c98e6` | — | 간소/상세 명세, Start 화면의 일반 프로젝트 흐름 |
 | F02 범용 프로젝트 | **구현**: `kind: general`(폴더만), Git 전용 기능 `GIT_REQUIRED`, 생성 UI 작업 종류 선택 | project-general·creation-ui | Chrome: 생성→기획→승인→Task→재시작 보존 | — | A01,A16 | `977a564`, `2c4f3b3` | — | 기존 폴더를 일반 프로젝트로 등록(현재는 Orbit 생성만) |
 | F03 기준·변경 관리 | **대부분 구현**: 버전·승인·CAS·stale 거부·결정 이유, `nonGoals`(기존 해시 불변, Claude 기획이 제안 가능), Run에 기준 해시 결속, 현재성은 lineage head | planning-baseline·general-planning(전환 후 유지) | 수동 승인 | — | A02,A03 | `4cc977b`, `4eef10c` | Codex 기획 스키마의 `non_goals`는 live 검증 전까지 미추가 | 진행 중 실행의 기준 변경 표시(A03 화면), 영향 작업 재검증 표시 |
 | F04 세 도구 연동 | Codex: 기존. **Claude Code: 어댑터·일반 프로젝트 실행·기획**. ChatGPT 웹: 없음 | 어댑터·task·service·HTTP | Chrome: Claude 실행 2회·기획 1회 | **Claude Code 2.1.312 live**(완료·중단·쓰기·Task·기획). **Codex 0.163.0 미검증** | A04~A06 | `scripts/verify-claude-runtime.mjs` | ChatGPT 웹 자동화 **차단**(이용 조건·공식 경로 미확인) | Codex 0.163.0 smoke(사용량 승인 필요), 코드 프로젝트 Claude 실행 |
-| F05 AI 간 인계 | **부분**: 구조화 인계 패키지·Markdown·진행판 보기, Claude 실행 지시문에 기준·결정·nonGoals 포함, 같은 프로젝트 Claude 순차 작업 | handoff·general-planning(전환 후 brief·handoff 동일) | 인계 자료 표시 | Claude→Claude 순차 확인. **Codex↔Claude 인계 미구현·미검증** | A07 | `4cc977b` | — | 인계 수신 기록(목적지·시각·확인), 다른 실행기로 인계 실행 |
+| F05 AI 간 인계 | **부분**: 구조화 인계 패키지·Markdown·진행판 보기, Claude 실행 지시문에 기준·결정·nonGoals 포함, 같은 프로젝트 Claude 순차 작업, **교차 모델 검토 지시문·엄격 파서(`claude-review.ts`, 연결 대기)** | handoff·general-planning(전환 후 brief·handoff 동일) | 인계 자료 표시 | Claude→Claude 순차 확인. **Codex↔Claude 인계 미구현·미검증** | A07 | `4cc977b` | — | 인계 수신 기록(목적지·시각·확인), 다른 실행기로 인계 실행 |
 | F06 진행 상태 | **구현(일반 프로젝트)**: 3단계 진행판, 실행별 마지막 이벤트·최근 도구, 실행/중단/다시 실행(요청 ID 고정, lost 재시도 금지), 실행기별 신호(일반=Claude 한도, Codex 로그인 미반영) | 진행판 30+·HTTP | Chrome: 실시간 실행·도구·완료, 재시작 보존 | Claude live | A09,A10,A11 | `cca18d7`, `3c4aff4` | — | 코드 프로젝트 실행의 실시간 확인, 브라우저 세션 이벤트 연결 |
 | F07 실행·검토 | **부분**: Codex Solo + 같은 Codex 리뷰, 일반 프로젝트 Claude 단일·순차 실행 | 있음 | Claude 순차 | — | A08 | — | — | 교차 검토(Codex↔Claude), 결과물 기반 수정 작업 |
 | F08 결과물·검증 | 코드: 구현. **일반 프로젝트: 결과물 목록·작업 출처·크기·digest·형식 검사·안전 미리보기 구현**. 내용 적합성은 `unverified`로 표시 | deliverables 4·UI 3·HTTP 1 | **Chrome: 결과물 3개 목록·미리보기** | Claude 결과물 | A13 | `f542633`, `3c4aff4` | — | 결과물 버전 이력, 완료 조건별 문서 검사(필수 항목), 내보내기 |
 | F09 중단·복구 | **부분**: lost/quarantine/interrupt/중복 방지, Claude 실행은 해당 작업만 격리, Claude 한도 이벤트→진행판 `quota_wait`, keep-alive 연결 끊김 수정 | 있음 | — | Claude live 중단(스크립트) | A10 | `afd7747`, `3c4aff4` | — | 명시적 복구 API(Claude 작업), 한도 초기화 후 재개 안내 |
 | F10 모델·사용량·도구 | **부분**: 프로젝트별 기획/실행 AI 선택(실행 가능한 조합만 저장, 실행 시 재확인), Model Hub(env 등록만), Codex·Claude 사용량 관측. **사용자 정의 모델·제공자 등록 미구현** | ai-preferences·UI | AI 선택 화면 표시 | 외부 모델 미검증 | A14,A15 | `fbb7cf5`, `05c98e6` | — | **사용자 정의 Registry(DB·UI)**, 프로젝트 도구 프로필 |
 | F11 간편·고급 | **부분**: 진행판 요약/펼침, Start/Studio 표현 | 있음 | — | — | A12 | — | — | 같은 데이터로 모드 전환 검증(A12) |
+
+## 현재 차단 (2026-10-28)
+
+- **Codex 사용 불가:** C5(사용자 정의 모델 Registry, F10) 실행 직후 Codex CLI가 `Your workspace is out of credits`로 종료됐다. Codex worktree(`codex/core-model-registry`)에 변경 없음. 지시에 따라 Codex 소유 공유 파일(서버·DB·공통 계약)은 수정하지 않고 독립 작업만 진행 중. 재개 지점: 크레딧 충전 후 `scratchpad/codex-c5-brief.md` 지시문으로 C5 재실행, 또는 사용자 승인 시 Claude Code가 C5를 순차 수행.
+- 교차 검토 모듈(`server/runtimes/claude-review.ts`)은 구현·테스트됐으나 Controller/HTTP 연결은 위 사유로 대기.
 
 ## C4 통합 검토 결과 (사용자 요청 6항목)
 
