@@ -16,7 +16,10 @@ test('progress HTTP is authenticated, project scoped, read-only and reflects obs
   const approved=studio.mutate('project-a','plans',plan.id,'approve',{expectedRevision:1}) as PlanningVersion;
   studio.mutate('project-a','plans',approved.id,'task-drafts',{});
   const usage:CodexUsage={status:'available',source:'codex_app_server',checkedAt:'2026-10-28T00:00:00.000Z',buckets:[{id:'codex',primary:{usedPercent:100,remainingPercent:0,windowDurationMins:300,resetsAt:null},secondary:null}],summary:null,daily:null,billing:'chatgpt_subscription',apiCostUsd:null};
-  const controller={store,snapshot:()=>({provider:'auth_required',soloRecoveryRequired:false}),usageSnapshot:()=>usage,submit:async()=>{execution++;}} as unknown as Controller;
+  // General projects run on Claude Code: Codex login and Codex quota do not describe them.
+  const available:CodexUsage={...usage,buckets:[{id:'codex',primary:{usedPercent:10,remainingPercent:90,windowDurationMins:300,resetsAt:null},secondary:null}]};
+  let claudeQuota:unknown={kind:'quota',status:'rejected',windows:[{id:'five_hour',utilization:1,resetsAt:null,status:'rejected'}]};
+  const controller={store,snapshot:()=>({provider:'auth_required',soloRecoveryRequired:false}),usageSnapshot:()=>available,claudeQuota:()=>claudeQuota,submit:async()=>{execution++;}} as unknown as Controller;
   const server=createHttpServer(controller,'unused');await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
   const origin='http://127.0.0.1:'+(server.address() as {port:number}).port,path='/api/projects/project-a/progress';
   try{
@@ -29,7 +32,10 @@ test('progress HTTP is authenticated, project scoped, read-only and reflects obs
     const progress=await response.json() as ProjectProgress;
     assert.equal(progress.projectId,'project-a');assert.equal(progress.plan?.title,'Report');
     assert.equal(progress.totals.tasks,1);assert.equal(progress.tasks[0].stage,'quota_wait');
-    assert.deepEqual(progress.blockers.map(b=>b.code).sort(),['LOGIN_REQUIRED','QUOTA_EXHAUSTED']);
+    assert.deepEqual(progress.blockers.map(b=>b.code),['QUOTA_EXHAUSTED'],'Claude quota applies; Codex login does not');
+    claudeQuota=null;
+    const unknown=await (await fetch(origin+path,{headers:{cookie}})).json() as ProjectProgress;
+    assert.deepEqual(unknown.blockers,[]);assert.equal(unknown.tasks[0].stage,'not_started','unobserved quota stays unknown');
     assert.equal(store.lastSeq(),seq,'GET appends no events');assert.equal(execution,0);assert.equal(store.runs().length,0);
   }finally{server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));store.close();}
 });

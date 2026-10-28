@@ -11,6 +11,7 @@ import { AppError } from './errors.ts';
 import { Projects,assertGitProject } from './projects.ts';
 import { evaluateLaunch,outboundDenial,providerConnections } from './providers/policy.ts';
 import { Studio } from './studio.ts';
+import type { SavedTask } from '../shared/parallel.ts';
 import { VerificationService,type VerificationConfiguration } from './verification-service.ts';
 import {VerificationSetupService} from './verification-setup.ts';
 import type {TaskVerificationPreview} from '../shared/acceptance.ts';
@@ -31,6 +32,7 @@ import {projectAnalytics} from './project-analytics.ts';
 import {RunTelemetry} from './run-telemetry.ts';
 import {getDevelopmentResult} from './development-results.ts';
 import {staticAppPreviewCapability} from './app-preview-policy.ts';
+import {listDeliverables,previewDeliverable} from './deliverables.ts';
 import {ClaudeTaskService,type ClaudeTaskServiceOptions} from './claude-task-service.ts';
 export { AppError } from './errors.ts';
 export class Controller {
@@ -295,6 +297,13 @@ export class Controller {
     return this.verification.acceptance.preview(projectId,workspaceId,taskId);
   }
   claudeQuota(){return this.claudeTasks.quota();}
+  /** Read-only view of a general project's server-owned folder. */
+  deliverables(projectId:string){
+    if(!this.projects)throw new AppError('PROJECT_CREATION_UNAVAILABLE',409);
+    const project=this.projects.generalProject(projectId),tasks=(new Studio(this.store).read(projectId,'tasks') as SavedTask[]).map(task=>({id:task.id,title:task.title}));
+    return listDeliverables(project.path,tasks);
+  }
+  deliverablePreview(projectId:string,path:string){if(!this.projects)throw new AppError('PROJECT_CREATION_UNAVAILABLE',409);return previewDeliverable(this.projects.generalProject(projectId).path,path);}
   async submitTask(projectId:string,taskId:string,input:{requestId:string;workspaceId?:string;expectedAcceptanceDigest?:string}):Promise<Run>{
     if(this.store.projects().some(project=>project.id===projectId&&project.kind==='general')&&!Object.hasOwn(input,'workspaceId')){
       if(Object.keys(input).length!==1||!Object.hasOwn(input,'requestId'))throw new AppError('INVALID_FIELDS',400);

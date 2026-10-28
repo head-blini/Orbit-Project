@@ -17,6 +17,7 @@ import {AppPreviewHost} from './app-preview.ts';
 import {assertGitProject} from './projects.ts';
 import {ProjectProgressService} from './project-progress.ts';
 import {quotaSignal} from '../shared/project-progress.ts';
+import {quotaFromClaudeWindows} from './runtimes/claude-task.ts';
 
 function json(res:ServerResponse,status:number,value:unknown){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(value));}
 async function body(req:IncomingMessage,limit=18000):Promise<Record<string,unknown>>{
@@ -41,6 +42,10 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
     json(res,error?error.status:500,{error:error?error.message:'INTERNAL_ERROR'});
   });});
   server.requestTimeout=15000;server.headersTimeout=10000;
+  // Synchronous work (git) can stall this process for several seconds. With Node's 5 s default the
+  // server may close an idle keep-alive socket just as a client reuses it, failing that request
+  // with ECONNRESET. Request/header limits above still bound slow or incomplete requests.
+  server.keepAliveTimeout=60_000;
   server.once('listening',()=>{const address=server.address();if(address&&typeof address!=='string')previewReady=appPreview.listen('http://127.0.0.1:'+address.port).catch(()=>{});});
   const previewWorkspace=(event:{kind:string})=>{if(event.kind==='workspace.selected')appPreview.clear();};
   controller.store.on('event',previewWorkspace);
@@ -294,12 +299,22 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
         const match=url.pathname.match(/^\/api\/runs\/([a-f0-9-]{36})\/interrupt$/);
         if(match){if(Object.keys(data).length)throw new AppError('INVALID_FIELDS',400);await controller.interrupt(match[1]);json(res,200,controller.snapshot());return;}
       }
+      const deliverablesRoute=url.pathname.match(/^\/api\/projects\/([a-f0-9-]{36})\/deliverables(\/preview)?$/);
+      if(req.method==='GET'&&deliverablesRoute){
+        const keys=[...url.searchParams.keys()];
+        if(!deliverablesRoute[2]){if(keys.length)throw new AppError('INVALID_FIELDS',400);json(res,200,controller.deliverables(deliverablesRoute[1]));return;}
+        const path=url.searchParams.get('path');if(keys.join(',')!=='path'||!path)throw new AppError('INVALID_FIELDS',400);
+        json(res,200,controller.deliverablePreview(deliverablesRoute[1],path));return;
+      }
       const progressRoute=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/progress$/);
       if(req.method==='GET'&&progressRoute){
         // Read-only: signals come from the current snapshot and cached usage; nothing is refreshed or started.
         if(url.search)throw new AppError('INVALID_FIELDS',400);
         const state=controller.snapshot();
-        json(res,200,progress.read(progressRoute[1],{provider:state.provider,recoveryRequired:!!state.soloRecoveryRequired,quota:quotaSignal(controller.usageSnapshot())}));return;
+        // Signals follow the project's runtime: general projects run on Claude Code, code projects on Codex.
+        const general=controller.store.projects().some(project=>project.id===progressRoute[1]&&project.kind==='general');
+        json(res,200,progress.read(progressRoute[1],general?{recoveryRequired:!!state.soloRecoveryRequired,quota:quotaFromClaudeWindows(controller.claudeQuota())}
+          :{provider:state.provider,recoveryRequired:!!state.soloRecoveryRequired,quota:quotaSignal(controller.usageSnapshot())}));return;
       }
       if(req.method==='GET'&&goalRoute){
         if(url.search)throw new AppError('INVALID_FIELDS',400);
