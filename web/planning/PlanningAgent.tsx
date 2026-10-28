@@ -78,7 +78,7 @@ export function createPlanningAgentCoordinator(initial:Scope,deps:Dependencies){
         if(!current(request))return;
         if(!result||result.projectId!==requestScope.projectId||result.state!=='draft'||!result.id||!digest(result.contentHash)||(record!.savedPlanningVersionId&&record!.savedPlanningVersionId!==result.id))throw Error('SAVE_SCOPE_MISMATCH');
         deps.onSaved(result);if(!current(request))return;
-        putRecord({...record!,savedPlanningVersionId:result.id});publish({...discard,message:'별도의 기획 초안을 저장 목록에 추가했습니다. 승인·Task 생성·코딩 실행은 시작하지 않았습니다.'});
+        putRecord({...record!,savedPlanningVersionId:result.id});publish({...discard,message:'별도의 기획 초안을 저장 목록에 추가했습니다. 승인·Task 생성·실행은 시작하지 않았습니다.'});
       }else{
         await deps.post(kind==='interrupt'?path+'/'+encodeURIComponent(record!.id)+'/interrupt':path+'/recover',kind==='interrupt'?{workspaceId}:{workspaceId,suggestionId:record!.id,confirmedStopped:true});
         if(!current(request))return;

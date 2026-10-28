@@ -24,9 +24,14 @@ export function buildPlanningPrompt(text:unknown):{instructions:string;inputDige
   return {instructions,inputDigest:createHash('sha256').update(instructions).digest('hex')};
 }
 
-/** Claude has no App Server outputSchema argument, so include the same schema in its preview. */
+/** Claude's schema is advisory text, so it can also carry non_goals (out-of-scope items). The strict
+ * Codex outputSchema stays unchanged until that change is verified against a live App Server. */
+export const claudePlanningOutputSchema=freeze({...planningOutputSchema,properties:{...planningOutputSchema.properties,non_goals:list},
+  required:[...planningOutputSchema.required,'non_goals']});
+/** Claude has no App Server outputSchema argument, so include the schema in its preview. */
 export function buildClaudePlanningPrompt(text:unknown):{instructions:string;inputDigest:string}{
-  const instructions=buildPlanningPrompt(text).instructions+'\nOutput JSON schema: '+JSON.stringify(planningOutputSchema);
+  const instructions=buildPlanningPrompt(text).instructions+'\nPut anything the user does not want or that is explicitly out of scope in non_goals, not in constraints.'
+    +'\nOutput JSON schema: '+JSON.stringify(claudePlanningOutputSchema);
   return {instructions,inputDigest:createHash('sha256').update(instructions).digest('hex')};
 }
 

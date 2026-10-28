@@ -74,3 +74,12 @@ test('native Claude sanitization or truncation cannot turn altered output into a
     assert.equal(result.issue,issue);assert.equal(result.execution,issue?'failed':'completed');if(issue)assert.equal(result.proposal,null);
   }
 });
+test('Claude planning asks for non-goals separately and keeps them as nonGoals in the draft',async()=>{
+  const {buildClaudePlanningPrompt,parseClaudePlanningProposal,planningOutputSchema}=await import('../server/planning/agent-input.ts');
+  const prompt=buildClaudePlanningPrompt('시장 조사 보고서').instructions;
+  assert.match(prompt,/non_goals/);assert.match(prompt,/"non_goals"/,'the Claude schema lists non_goals');
+  assert.equal((planningOutputSchema.required as readonly string[]).includes('non_goals'),false,'the Codex strict schema is unchanged until verified live');
+  const draft=parseClaudePlanningProposal(JSON.stringify({schema_version:'1.0',title:'Report',goal:'Compare',requirements:[{id:'R1',description:'Write',acceptance_criteria:['Done']}],
+    constraints:['Local files only'],non_goals:['No new data collection'],open_questions:[],decisions:[{topic:'Scope',decision:'Use existing files',rationale:'No web tools'}]}));
+  assert.deepEqual(draft.nonGoals,['No new data collection']);assert.deepEqual(draft.constraints,['Local files only']);
+});

@@ -109,7 +109,7 @@ function PlanningProject(props: PlanningStudioProps) {
     {props.agentPlanning&&<PlanningAgentPanel {...props.agentPlanning} projectId={props.projectId} busy={busy||props.agentPlanning.busy} onSaved={version=>{
       if(!alive.current)return;
       setVersions(rows=>mergeStudioRecords(rows,[version]));
-      setMessage('Codex 제안을 별도 초안으로 추가했습니다. 현재 편집 내용은 유지했습니다.');
+      setMessage('AI 기획 제안을 별도 초안으로 추가했습니다. 현재 편집 내용은 유지했습니다.');
     }}/>}
     <header><h2>기획안 편집기</h2></header>
     <p role="status">{message}</p>
