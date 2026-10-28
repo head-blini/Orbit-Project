@@ -1,3 +1,4 @@
+import {CapabilityRouting,type CapabilityRoutePost} from './capability-routing.tsx';
 import type {CodexModelAttribution} from '../shared/codex-model-attribution.ts';
 import type {QualityLoopRecord} from '../shared/quality-loop-record.ts';
 import {getUiMode,subscribeUiMode} from './ui-mode.ts';
@@ -43,7 +44,7 @@ function TaskButtons({task,actions}:{task:ProgressTask;actions:TaskActions}){
   </div>;
 }
 
-function TaskRow({task,actions,advanced}:{task:ProgressTask;actions?:TaskActions;advanced:boolean}){
+function TaskRow({task,actions,advanced,projectId,routePost,routeDisabled}:{task:ProgressTask;actions?:TaskActions;advanced:boolean;projectId:string;routePost?:CapabilityRoutePost;routeDisabled?:boolean}){
   return <details className="progress-task">
     <summary>
       <span className="progress-task-title">{task.title}</span>
@@ -60,6 +61,7 @@ function TaskRow({task,actions,advanced}:{task:ProgressTask;actions?:TaskActions
     </dl>
     {nextActions[task.stage]&&<p className="progress-next">{nextActions[task.stage]}</p>}
     {task.qualityLoops?.map(loop=><QualityLoopStatus key={loop.id} loop={loop} advanced={advanced}/>)}
+    <CapabilityRouting key={`${projectId}/${task.id}`} projectId={projectId} taskId={task.id} records={task.capabilityRoutes} advanced={advanced} post={routePost} disabled={routeDisabled}/>
     {actions&&<TaskButtons task={task} actions={actions}/>}
     {task.runs.length>0?<table className="progress-runs"><caption>실행 기록 {task.runsTotal}개{task.runsTotal>task.runs.length?` 중 최근 ${task.runs.length}개`:''}</caption>
       <thead><tr><th>실행</th><th>담당</th><th>실행 상태</th><th>최근 도구</th><th>검증</th><th>마지막 관측</th></tr></thead>
@@ -69,7 +71,7 @@ function TaskRow({task,actions,advanced}:{task:ProgressTask;actions?:TaskActions
 }
 
 /** Pure view: renders only recorded state, no inferred percentages or ETA. */
-export function ProjectProgressView({progress,freshness,lastEventAt,actions,compact}:{progress:ProjectProgress;freshness:ConnectionFreshness;lastEventAt:string|null;actions?:TaskActions;
+export function ProjectProgressView({progress,freshness,lastEventAt,actions,compact,routePost,routeDisabled}:{progress:ProjectProgress;freshness:ConnectionFreshness;lastEventAt:string|null;actions?:TaskActions;routePost?:CapabilityRoutePost;routeDisabled?:boolean;
   /** The project screen shows its own summary; compact keeps only the task list. */compact?:boolean}){
   const {totals,criteria}=progress;
   const [mode,setMode]=useState(getUiMode);
@@ -93,7 +95,7 @@ export function ProjectProgressView({progress,freshness,lastEventAt,actions,comp
     </section>}
     <section className="surface" aria-label="작업별 진행">
       {!compact&&<div className="section-heading"><div><h2>작업</h2><p>작업을 펼치면 실행 기록과 검증 결과를 볼 수 있습니다.</p></div></div>}
-      {progress.tasks.length?progress.tasks.map(task=><TaskRow key={task.id} task={task} actions={actions} advanced={mode==='advanced'}/>):<p className="progress-empty">승인된 기획에서 만든 작업이 아직 없습니다.</p>}
+      {progress.tasks.length?progress.tasks.map(task=><TaskRow key={task.id} task={task} actions={actions} advanced={mode==='advanced'} projectId={progress.projectId} routePost={routePost} routeDisabled={routeDisabled}/>):<p className="progress-empty">승인된 기획에서 만든 작업이 아직 없습니다.</p>}
     </section>
   </div>;
 }
@@ -166,7 +168,7 @@ export function ProjectProgressPanel({projectId,projectKind,online,lastSeq,lastE
   return <>
     {error&&<div className="banner error" role="alert">{error}</div>}
     {projectKind==='code'&&!compact&&<p className="progress-note">코드 프로젝트 작업은 시작하기·에이전트 센터에서 검증 기준을 확인한 뒤 실행합니다.</p>}
-    {progress?<ProjectProgressView progress={progress} freshness={freshness} lastEventAt={lastEventAt} actions={actions} compact={compact}/>:!error&&<section className="surface"><p>진행 기록을 불러오는 중입니다.</p></section>}
+    {progress?<ProjectProgressView progress={progress} freshness={freshness} lastEventAt={lastEventAt} actions={actions} compact={compact} routePost={post} routeDisabled={!online}/>:!error&&<section className="surface"><p>진행 기록을 불러오는 중입니다.</p></section>}
   </>;
 }
 

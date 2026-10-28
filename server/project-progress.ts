@@ -1,3 +1,4 @@
+import type {CapabilityRouteDecision} from '../shared/capability-routing.ts';
 import type {QualityLoopRecord} from '../shared/quality-loop-record.ts';
 import type {Store} from './store.ts';
 import type {Studio} from './studio.ts';
@@ -24,6 +25,12 @@ export class ProjectProgressService {
     if(this.store.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='quality_loops'").get()){
       const records=this.store.db.prepare('SELECT body FROM quality_loops WHERE project_id=? ORDER BY rowid DESC').all(projectId).map(row=>JSON.parse(String(row.body)) as QualityLoopRecord);
       for(const task of progress.tasks)task.qualityLoops=records.filter(record=>record.taskId===task.id).slice(0,20);
+    }
+    if(this.store.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='capability_routes'").get()){
+      const query=this.store.db.prepare("SELECT body FROM capability_routes WHERE project_id=? AND json_valid(body) AND json_extract(body,'$.taskId')=? ORDER BY rowid DESC LIMIT 20");
+      for(const task of progress.tasks)task.capabilityRoutes=query.all(projectId,task.id).flatMap(row=>{
+        try{const record=JSON.parse(String(row.body)) as CapabilityRouteDecision;return record.projectId===projectId&&record.taskId===task.id?[record]:[];}catch{return [];}
+      });
     }
     for(const task of progress.tasks)for(const run of task.runs)run.modelAttribution=this.store.getCodexModelAttribution(run.id);
     return progress;

@@ -92,3 +92,19 @@ test('progress reads persisted Codex configuration without treating it as actual
     assert.equal(progress.totals.verifiedTasks,0);assert.equal(f.store.lastSeq(),seq);
   }finally{f.store.close();}
 });
+
+test('capability recommendations are scoped by project and task, limited to latest 20 and read-only',()=>{
+  const f=fixture();try{
+    f.store.db.exec('CREATE TABLE IF NOT EXISTS capability_routes(id TEXT PRIMARY KEY,project_id TEXT NOT NULL,request_id TEXT NOT NULL UNIQUE,input_digest TEXT NOT NULL,body TEXT NOT NULL)');
+    const insert=f.store.db.prepare('INSERT INTO capability_routes(id,project_id,request_id,input_digest,body) VALUES(?,?,?,?,?)');
+    for(let index=0;index<23;index++){
+      const projectId=index===22?'project-b':'project-a',id=`route-${index}`;
+      insert.run(id,projectId,id,'digest',JSON.stringify({id,projectId,taskId:f.tasks[0].id,status:'recommended',executionAuthorized:false,actualModel:'unknown'}));
+    }
+    const seq=f.store.lastSeq(),runs=f.store.runs().length;
+    const progress=f.service.read('project-a',{}),records=progress.tasks[0].capabilityRoutes!;
+    assert.equal(records.length,20);assert.equal(records[0].id,'route-21');assert.equal(records.at(-1)?.id,'route-2');
+    assert.ok(records.every(record=>record.projectId==='project-a'&&record.taskId===f.tasks[0].id));
+    assert.equal(f.store.lastSeq(),seq);assert.equal(f.store.runs().length,runs);assert.equal(progress.totals.verifiedTasks,0);
+  }finally{f.store.close();}
+});

@@ -1,3 +1,6 @@
+import {discoverCapabilities} from './capability-adapters.ts';
+import {CapabilityRoutingService} from './capability-routing.ts';
+import type {CapabilityRouteInput} from '../shared/capability-routing.ts';
 import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
@@ -33,6 +36,8 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
   const progress=new ProjectProgressService(controller.store,studio);
   const planningHandoff=new PlanningHandoffService(controller.store,(workspaceId,runId)=>controller.verification.view(workspaceId,runId),id=>controller.workspaceDiff(id));
   const nativeProbe=options.nativeProbe??createNativeProbeService();
+  const capabilityRouting=new CapabilityRoutingService(controller.store);
+  const capabilityRegistry=()=>discoverCapabilities({probe:nativeProbe.get(),codexReady:controller.snapshot().provider==='ready',extensions:controller.extensionSnapshot()});
   const sessions=new Map<string,{csrf:string;expires:number}>();
   const appPreview=new AppPreviewHost(id=>controller.appPreviewSnapshot(id));
   let previewReady:Promise<void>=Promise.resolve();
@@ -83,6 +88,15 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
       if(req.method==='GET'&&taskHandoff){
         if(url.search)throw new AppError('INVALID_FIELDS',400);
         json(res,200,handoff.build(taskHandoff[1],taskHandoff[2]));return;
+      }
+      if(req.method==='GET'&&url.pathname==='/api/capability-orchestration'){
+        if(url.search)throw new AppError('INVALID_FIELDS',400);json(res,200,capabilityRegistry());return;
+      }
+      const capabilityEvidence=url.pathname.match(/^\/api\/capability-orchestration\/evidence\/([a-f0-9]{64})$/);
+      if(req.method==='GET'&&capabilityEvidence){if(url.search)throw new AppError('INVALID_FIELDS',400);json(res,200,capabilityRouting.discovery(capabilityEvidence[1]));return;}
+      const capabilityRoutes=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/capability-routes$/);
+      if(req.method==='GET'&&capabilityRoutes){
+        if(url.search)throw new AppError('INVALID_FIELDS',400);json(res,200,{records:capabilityRouting.records(capabilityRoutes[1])});return;
       }
       const modelIdentity=url.pathname.match(/^\/api\/runs\/([a-f0-9-]{36})\/model-identity$/);
       if(req.method==='GET'&&modelIdentity){
@@ -208,6 +222,14 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
           if(url.search)throw new AppError('INVALID_FIELDS',400);exact(data,['workspaceId']);
           if(typeof data.workspaceId!=='string'||!/^[a-f0-9-]{36}$/.test(data.workspaceId))throw new AppError('INVALID_FIELDS',400);
           json(res,200,controller.interruptWorkflow(data.workspaceId,workflowInterrupt[1]));return;
+        }
+        if(url.pathname==='/api/capability-orchestration/refresh'){
+          if(url.search)throw new AppError('INVALID_FIELDS',400);exact(data,[]);
+          controller.assertExecutionAvailable();await nativeProbe.refresh();const registry=capabilityRegistry();capabilityRouting.recordDiscovery(registry);json(res,200,registry);return;
+        }
+        if(capabilityRoutes){
+          if(url.search)throw new AppError('INVALID_FIELDS',400);
+          json(res,200,capabilityRouting.recommend(capabilityRoutes[1],data as unknown as CapabilityRouteInput,capabilityRegistry()));return;
         }
         if(url.pathname==='/api/capabilities/probe'){
           exact(data,[]);

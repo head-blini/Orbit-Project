@@ -106,3 +106,28 @@ test('Codex configuration is shown separately from actual execution evidence',as
   assert.match(html,/독립 모델 검증 근거 없음/);assert.match(html,/관측 불완전/);
   assert.match(html,/thread-identity/);assert.match(html,/session-identity/);assert.match(html,/turn-identity/);
 });
+
+test('capability recommendation records keep provenance in advanced mode and never imply execution',async()=>{
+  await view();const {CapabilityRouting}=await import('../web/capability-routing.tsx');
+  const decision:import('../shared/capability-routing.ts').CapabilityRouteDecision={id:'route',requestId:'request',projectId:'p',taskId:'t',createdAt:'2026-10-28T01:00:00Z',intent:'review',status:'recommended',runtimeId:'codex',capabilityId:'review.text',reasons:['<script>untrusted reason</script>'],baseline:{planningVersionId:'approved-version',planningContentHash:'baseline-hash'},preferencesRevision:4,registryDigest:'registry-hash',textDigest:'text-hash',executionAuthorized:false,actualModel:'unknown'};
+  const props={projectId:'p',taskId:'t',records:[decision],post:async()=>{throw Error('SSR must not post');}};
+  const simple=renderToStaticMarkup(createElement(CapabilityRouting,{...props,advanced:false}));
+  assert.match(simple,/추천 기록이며 실행 승인이 아닙니다/);assert.match(simple,/추천할 작업 설명/);
+  assert.doesNotMatch(simple,/baseline-hash|registry-hash|untrusted reason|실제 실행 모델/);
+  const advanced=renderToStaticMarkup(createElement(CapabilityRouting,{...props,advanced:true}));
+  assert.match(advanced,/baseline-hash/);assert.match(advanced,/registry-hash/);assert.match(advanced,/href="\/api\/capability-orchestration\/evidence\/registry-hash"/);assert.match(advanced,/실제 실행 모델: unknown/);
+  assert.match(advanced,/&lt;script&gt;/);assert.doesNotMatch(advanced,/<script>/);
+});
+
+
+test('newer server recommendations supersede local results with stable deduplication and scope',async()=>{
+  await view();const {mergeCapabilityRoutes}=await import('../web/capability-routing.tsx');
+  const make=(id:string,createdAt:string,over:object={})=>({id,createdAt,projectId:'p',taskId:'t',...over}) as import('../shared/capability-routing.ts').CapabilityRouteDecision;
+  const local=make('local','2026-10-28T01:00:00.000Z');
+  const latest=make('newer','2026-10-28T02:00:00.000Z');
+  assert.equal(mergeCapabilityRoutes([latest],local,'p','t')[0],latest);
+  const sameTime=make('z-route',latest.createdAt),serverCopy={...local,reasons:['persisted']};
+  const merged=mergeCapabilityRoutes([local,latest,sameTime,serverCopy,make('foreign',latest.createdAt,{projectId:'other'})],local,'p','t');
+  assert.deepEqual(merged.map(record=>record.id),['z-route','newer','local']);assert.equal(merged[2],serverCopy);
+  assert.deepEqual(mergeCapabilityRoutes([sameTime,latest],null,'p','t').map(record=>record.id),['z-route','newer']);
+});

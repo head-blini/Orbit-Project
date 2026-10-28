@@ -1,4 +1,25 @@
-# 현재 재개 요약 (2026-10-28 · 담당 Codex · CLI 모델 식별 계약 연결)
+# 현재 재개 요약 (2026-10-28 · 담당 Codex · Capability Orchestration 시작)
+
+- **현재 완료 단위:** 모델 식별 변경 보안/회귀 리뷰 후 로컬 커밋, Capability Registry→Discovery 투영→Provider Adapter→자연어 추천→DB/HTTP/진행판의 초기 연결. 자동 실행 전체 계층 완료를 뜻하지 않는다.
+- **기준 원문:** `AGENTS.md`, `ORBIT-VISION.md`, `ORBIT-SCOPE-2026-10-27.md`, `ORBIT-IMPLEMENTATION-PLAN-2026-10-27.md`, `ORBIT-COLLABORATION.md`, [모델 식별 계약](ORBIT-CODEX-MODEL-IDENTITY-2026-10-28.md), [Capability 설계·구현 기록](ORBIT-CAPABILITY-ORCHESTRATION-2026-10-28.md). code/general 지원과 provider-neutral 범용 비전 유지.
+- **Git:** `codex/orbit-mac-handoff-2026-10-26`, 루트 worktree 하나. 모델 식별 24개 파일은 사용자 승인대로 `261c363cb2051a903d07c018729981a2e144c42f`에 로컬 커밋했다. 커밋 직전 49개 영향 테스트/타입 검사/빌드/diff 검사 exit 0 및 이전 전체 1276개 증거를 확인했다. 새 Capability 변경은 미커밋이다. `.DS_Store`, `docs/.DS_Store` 보존·커밋 제외. Push/main 병합 없음.
+- **구현 사실:** 기존 NativeProbeService/ExtensionInventory와 실행 경로를 읽는 두 metadata Provider Adapter. CLI 버전은 설치만, Codex ready는 연결/인증만 확인한다. core capability 관측은 별도 실행 증거 없으면 unknown. 설정된 Skill/Hook/MCP와 Slash Command를 지원·허용으로 승격하지 않는다.
+- **추천:** 승인된 저장 작업에 대해 제한적인 한/영 규칙으로 execution/planning/review intent를 분류한다. 프로젝트 AI 선택·버전 기준을 보존한다. 추천은 실행 승인·설정 변경이 아니다. 불명확 요청은 needs_clarification, 미지원 확장/이미지 생성/API 요청은 blocked. review는 기존 Quality Loop 모델 근거 확인이 필요하므로 blocked. Codex actual unknown/독립 검증 차단 정책 그대로다.
+- **영속·조회:** `capability_routes`, `capability_discoveries`에 원문 없는 추천/Registry 근거를 저장한다. 동일 요청은 같은 기록, 충돌은 거절, 재시작·GET은 실행하지 않는다. 새 HTTP 경로는 기존 session/Origin/CSRF 적용. 진행판 간편 최신 요약/고급 기준·근거 링크 및 늦은 응답·최신 추천 병합 연결.
+- **검증:** Node24.22.1 `node --test tests/*.test.ts spikes/phase0/*.test.mjs`: **1294개 / 1292 pass / 0 fail / 2 Windows-only skip**, exit 0 (`/tmp/orbit-capability-final-tests.log`). planning 선택 단언 추가 후 영향 테스트 6/6 pass. `tsc --noEmit`, `node scripts/build.mjs`, `git diff --check` exit 0. 모의 Chrome `tests/capability-routing.browser.mjs` exit 0. 실제 모델 호출·유료 API 전환·인증정보 조회 없음.
+- **리뷰/실패 기록:** ready text 세션을 execute.code confirmed로 표시하던 문제, 오래된 local 추천이 서버 최신 기록을 가리던 문제를 수정·회귀 검사했다. 잘못된 버전/관측 시각은 unknown. 최초 새 라우팅 테스트는 미구현 module 오류, 미지원 이미지 요청은 추천 오분류 실패를 재현한 뒤 수정했다. 브라우저는 제한 환경 SIGABRT 이후 허용된 임시 프로필 검사로 통과. 최종 리뷰 blocker 없음.
+- **다음 작업:** 자연어 규칙은 범용 의미 이해가 아니며 자동 dispatch·동적 외부 Adapter 등록·확장별 실행 capability probe/허용 절차·실제 Quality Loop dispatch 결합은 후속 구현이다. 실제 Claude/Codex discovery 응답·로그인/연결·실모델은 별도 승인/검증 전 미확인. 기존 종료 미확인 실행을 자동 재시도하거나 unknown 모델을 독립 검증 성공으로 변경하지 않는다.
+
+### 단계별 변경 파일·검증
+
+| 단계 | 변경 파일 | 검증 결과 | 남은 제한 |
+|---|---|---|---|
+| Registry/Discovery/Adapter | `shared/capability-orchestration.ts`, `server/capability-adapters.ts`, `tests/capability-adapters.test.ts` | 8개 모의 검사 pass, read-only 연결·invalid metadata·확장 신뢰 오인 방지 | 실제 기능 실행 discovery 및 외부 Adapter 등록 미연결 |
+| 자연어 추천/DB | `shared/capability-routing.ts`, `server/capability-routing.ts`, `tests/capability-routing.test.ts`, `tests/capability-fixtures.ts` | 6개 pass: code/general, 수동 선택·기획 선택, 불명확/미지원·Quality 차단, 기준 변경·재시작·멱등성 | 로컬 제한 규칙·추천만 구현 |
+| HTTP | `server/http.ts`, `tests/capability-routing-http.test.ts` | session/CSRF·위조 필드·조회 부작용·증거 조회 검사 pass, 전체 스위트 회귀 pass | 새로운 실행/인증/과금 경로 없음 |
+| 진행판 | `server/project-progress.ts`, `shared/project-progress.ts`, `web/project-progress.tsx`, `web/capability-routing.tsx`, 기존 progress 테스트 2개, `tests/capability-routing.browser.mjs` | project/task scope·최신20·간편/고급·늦은 응답·최신 기록 병합, 모의 Chrome pass | 실모델 전체 앱 E2E 미실행 |
+
+# 이전 재개 요약 (2026-10-28 · 담당 Codex · CLI 모델 식별 계약 연결)
 
 - **현재 작업:** 사용자 요청에 따라 기존 Quality Loop 커밋 `f987fd9935111419284400a04c7af5d144e8a529`를 재사용하여 Codex 모델 식별 계약을 조사하고 실행기·DB·HTTP·진행판에 연결했다. 실제 모델 식별 성공을 선언하지 않는다. 아래 이전 요약의 `bbc2736`/미커밋 상태는 이전 시점 기록이다.
 - **기준 원문:** `ORBIT-VISION.md`, `ORBIT-SCOPE-2026-10-27.md`, `ORBIT-IMPLEMENTATION-PLAN-2026-10-27.md`, `ORBIT-COLLABORATION.md`, `AGENTS.md`. 이번 계약 조사 원문과 재현 방법은 [ORBIT-CODEX-MODEL-IDENTITY-2026-10-28.md](ORBIT-CODEX-MODEL-IDENTITY-2026-10-28.md).
