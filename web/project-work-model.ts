@@ -1,10 +1,76 @@
-import type {ProjectProgress} from '../shared/project-progress.ts';
+import type {ProjectProgress,ProgressTask} from '../shared/project-progress.ts';
+import type {QualityLoopRecord,QualityModelEvidence} from '../shared/quality-loop-record.ts';
 
 /** Project screen read model: pure functions over recorded progress and file counts. */
-export type StepState='done'|'active'|'pending'|'unavailable';
-export interface Step {id:string;label:string;state:StepState;detail:string}
-export const stepStateLabel:Record<StepState,string>={done:'완료',active:'진행 중',pending:'대기',unavailable:'미연결'};
+export type StepState='done'|'active'|'pending'|'attention'|'blocked'|'unavailable';
+export interface Step {id:string;label:string;state:StepState;detail:string;evidence?:string[]}
+export const stepStateLabel:Record<StepState,string>={done:'완료',active:'진행 중',pending:'대기',attention:'확인 필요',blocked:'차단',unavailable:'미연결'};
 const responded=new Set(['response_unverified','verified','verification_failed','revalidation_required']);
+
+/** Where the recorded model identity came from. Only explicit native observation counts as native. */
+export type QualityOrigin='native'|'mock'|'unknown';
+export const qualityOriginLabel:Record<QualityOrigin,string>={native:'실제 실행 관측',mock:'모의 실행',unknown:'모델 미확인'};
+/** Latest Quality Loop phase per task. `passed` needs native identities, a current baseline and passed required checks. */
+export type QualityPhase='none'|'review'|'fix'|'retest'|'blocked'|'failed'|'stale'|'unverified'|'passed';
+export interface TaskQuality {taskId:string;title:string;phase:QualityPhase;origin:QualityOrigin;reason:string;loop:QualityLoopRecord|null}
+const phaseLabel:Record<QualityPhase,string>={none:'품질 기록 없음',review:'독립 검토 중',fix:'수정 중',retest:'재검증 중',blocked:'품질 검증 차단',failed:'품질 검증 실패',stale:'이전 기준 결과 · 재검증 필요',unverified:'통과로 보지 않음',passed:'독립 검토 일치 · 필수 검사 통과'};
+
+export function qualityOrigin(loop:QualityLoopRecord):QualityOrigin{
+  const evidence:(QualityModelEvidence|null)[]=[loop.producer,...loop.steps.filter(step=>step.kind!=='verification'&&step.state==='completed').map(step=>step.evidence)];
+  if(evidence.some(item=>item?.evidenceSource==='mock'))return 'mock';
+  // A missing evidenceSource is not proof of a native run; it stays unknown.
+  return evidence.every(item=>item?.evidenceSource==='native'&&item.source==='native_observed'&&!!item.modelId)?'native':'unknown';
+}
+/** Native origin alone is not review proof: every selected reviewer needs a completed review observed as that model,
+ * from a different model and run than the producer. */
+export function independentlyReviewed(loop:QualityLoopRecord):boolean{
+  const key=(e:QualityModelEvidence|null)=>e?.modelId?`${e.providerId}/${e.modelId}`:null,producer=key(loop.producer);
+  const reviews=loop.steps.filter(step=>step.kind==='review'&&step.state==='completed').map(step=>step.evidence);
+  return !!producer&&reviews.length>0&&!!loop.reviewers.length&&reviews.every(e=>!!key(e)&&key(e)!==producer&&e!.runId!==loop.producer.runId)
+    &&loop.reviewers.every(r=>reviews.some(e=>key(e)===`${r.providerId}/${r.modelId}`));
+}
+const blockReason=(loop:QualityLoopRecord)=>loop.recoveryRequired?'실행 종료 확인 필요':loop.result.issue==='INDEPENDENT_MODEL_REQUIRED'?'실행 AI와 다른 독립 검토 모델이 필요합니다':/MODEL.*UNKNOWN|MODEL_MISMATCH|MODEL_EVIDENCE/.test(loop.result.issue??'')?'모델 신원을 확인하지 못했습니다':/QUOTA|RATE_LIMIT/.test(loop.result.issue??'')?'사용량 한도 대기':/PERMISSION|APPROVAL_DENIED|TOOLS_DENIED/.test(loop.result.issue??'')?'권한 확인 필요':loop.result.issue??'차단 사유 미기록';
+
+/** Pure: classifies one task's newest Quality Loop record; never infers a pass from missing data. */
+export function taskQuality(task:ProgressTask):TaskQuality{
+  const loop=task.qualityLoops?.[0]??null,base={taskId:task.id,title:task.title,loop};
+  if(!loop)return {...base,phase:'none',origin:'unknown',reason:'품질 검증을 실행한 기록이 없습니다'};
+  const origin=qualityOrigin(loop),{status,repairs}=loop.result;
+  if(loop.recoveryRequired||status==='blocked')return {...base,phase:'blocked',origin,reason:blockReason(loop)};
+  if(status==='reviewing')return {...base,phase:repairs?'retest':'review',origin,reason:repairs?`수정 ${repairs}회 후 재검증 중`:'독립 AI가 검토 중'};
+  if(status==='repairing')return {...base,phase:'fix',origin,reason:'검토 실패 항목을 수정 중'};
+  if(loop.sourceRunId!==task.latestRunId||!task.planCurrent||task.stage==='revalidation_required')return {...base,phase:'stale',origin,reason:'더 새로운 실행이나 바뀐 기준이 있어 이 결과는 현재 기준이 아닙니다'};
+  if(status==='failed'||status==='limit_reached')return {...base,phase:'failed',origin,reason:`${status==='limit_reached'?'수정·호출 한도 도달':'검토 미충족'} · 문제 ${loop.result.rounds.at(-1)?.failures.length??0}개`};
+  if(origin!=='native')return {...base,phase:'unverified',origin,reason:origin==='mock'?'모의 실행 결과이며 실제 검증이 아닙니다':'실행·검토 모델 신원이 확인되지 않았습니다'};
+  if(!independentlyReviewed(loop))return {...base,phase:'unverified',origin,reason:'독립 검토 완료 근거가 부족합니다'};
+  if(loop.verification.status!=='passed')return {...base,phase:'unverified',origin,reason:`필수 검사 ${loop.verification.status==='failed'?'실패':'미확인'}`};
+  return {...base,phase:'passed',origin,reason:repairs?`수정 ${repairs}회 후 재검증 통과`:'수정 없이 통과'};
+}
+const evidenceLine=(q:TaskQuality)=>q.loop?`${q.title}: ${phaseLabel[q.phase]} · ${qualityOriginLabel[q.origin]} · ${q.reason} · 기록 ${q.loop.id.slice(0,8)} · 실행 ${q.loop.sourceRunId.slice(0,8)} · 회차 ${q.loop.result.rounds.length} · 필수 검사 ${q.loop.verification.status}${q.loop.result.issue?' · '+q.loop.result.issue:''}`:`${q.title}: ${phaseLabel.none}`;
+
+/** Pure: the two quality steps (교차 검증, 수정·재검증) from recorded Quality Loops only. */
+export function qualitySteps(progress:ProjectProgress|null,kind:'general'|'code'):[Step,Step]{
+  const all=(progress?.tasks??[]).map(taskQuality),evidence=all.map(evidenceLine);
+  const of=(...phases:QualityPhase[])=>all.filter(q=>phases.includes(q.phase)),count=(...phases:QualityPhase[])=>of(...phases).length;
+  const passed=count('passed'),total=all.length;
+  const summary=[['통과',passed],['진행',count('review','fix','retest')],['실패',count('failed')],['차단',count('blocked')],['재검증 필요',count('stale')],['통과 미인정',count('unverified')],['기록 없음',count('none')]]
+    .filter(([,n])=>n).map(([label,n])=>`${label} ${n}`).join(' · ');
+  let cross:Step;
+  if(!total||count('none')===total)cross={id:'cross',label:'교차 검증',state:'pending',detail:total?'품질 검증 기록 없음 · 통과로 보지 않습니다':'작업이 생기면 독립 AI가 검토합니다'};
+  else if(count('blocked'))cross={id:'cross',label:'교차 검증',state:'blocked',detail:`${of('blocked')[0].reason} · ${summary}`};
+  else if(count('review','fix','retest'))cross={id:'cross',label:'교차 검증',state:'active',detail:summary};
+  else if(passed===total)cross={id:'cross',label:'교차 검증',state:'done',detail:`작업 ${total}개 독립 검토 일치`};
+  else cross={id:'cross',label:'교차 검증',state:'attention',detail:summary};
+  const repairs=all.reduce((sum,q)=>sum+(q.phase==='passed'?q.loop!.result.repairs:0),0);
+  let fix:Step;
+  if(count('fix'))fix={id:'fix',label:'수정·재검증',state:'active',detail:`수정 중 ${count('fix')}개`};
+  else if(count('retest'))fix={id:'fix',label:'수정·재검증',state:'active',detail:`재검증 중 ${count('retest')}개`};
+  else if(count('failed'))fix={id:'fix',label:'수정·재검증',state:'attention',detail:`검증 실패 ${count('failed')}개 · 추가 지시로 수정 필요`};
+  else if(count('stale'))fix={id:'fix',label:'수정·재검증',state:'attention',detail:`이전 기준 결과 ${count('stale')}개 · 현재 기준으로 재검증 필요`};
+  else if(total&&passed===total)fix={id:'fix',label:'수정·재검증',state:'done',detail:repairs?`수정 ${repairs}회 후 재검증 통과`:'수정 불필요 · 필수 검사 통과'};
+  else fix={id:'fix',label:'수정·재검증',state:'pending',detail:kind==='code'?'검토 결과와 검증 명령으로 확인':'검토 실패 시 제한 안에서 수정 후 재검증'};
+  return [{...cross,evidence},{...fix,evidence}];
+}
 
 /** Pure: derives the six visible steps only from recorded progress and files. */
 export function projectSteps(progress:ProjectProgress|null,outputs:number):Step[]{
@@ -15,10 +81,19 @@ export function projectSteps(progress:ProjectProgress|null,outputs:number):Step[
     {id:'goal',label:'목표',state:plan?'done':'active',detail:plan?'정의됨':'요청을 기획으로 정리하세요'},
     {id:'plan',label:'기획',state:plan?.state==='approved'?'done':plan?'active':'pending',detail:plan?.state==='approved'?`승인 버전 ${plan.revision}`:'검토·승인 전'},
     {id:'run',label:'실행',state:running||(done>0&&done<tasks.length)?'active':tasks.length&&done===tasks.length?'done':'pending',detail:tasks.length?`작업 ${tasks.length}개 중 ${done}개 응답 완료${running?' · 실행 중':''}`:'승인 후 작업이 생깁니다'},
-    {id:'cross',label:'교차 검증',state:'unavailable',detail:'다른 AI의 독립 검증은 아직 연결되지 않았습니다'},
-    {id:'fix',label:'수정·재검증',state:'unavailable',detail:'자동 수정은 미연결 · 추가 지시로 새 버전을 만들어 다시 실행'},
+    ...qualitySteps(progress,'general'),
     {id:'result',label:'결과물',state:outputs?'done':'pending',detail:outputs?`파일 ${outputs}개`:'아직 없음'},
   ];
+}
+/** Quality next action, or null when no Quality Loop record asks for one. */
+export function qualityAction(progress:ProjectProgress|null):{text:string;target:'tasks'}|null{
+  const all=(progress?.tasks??[]).map(taskQuality),has=(phase:QualityPhase)=>all.some(q=>q.phase===phase);
+  if(has('blocked'))return {text:'품질 검증 차단 원인을 확인하세요',target:'tasks'};
+  if(has('review')||has('fix')||has('retest'))return {text:'품질 검증이 진행 중입니다. 작업 상태를 확인하세요',target:'tasks'};
+  if(has('failed'))return {text:'품질 검증 실패 항목을 확인하고 수정을 지시하세요',target:'tasks'};
+  if(has('stale'))return {text:'현재 기준으로 품질 검증을 다시 실행하세요',target:'tasks'};
+  if(has('unverified'))return {text:'통과로 인정되지 않은 품질 기록의 근거를 확인하세요',target:'tasks'};
+  return null;
 }
 /** The single most useful next action, from recorded state only. */
 export function nextAction(progress:ProjectProgress|null,outputs:number):{text:string;target:'plan'|'tasks'|'results'|'followup'}{
@@ -29,7 +104,7 @@ export function nextAction(progress:ProjectProgress|null,outputs:number):{text:s
   if(tasks.some(task=>task.stage==='running'||task.stage==='interrupt_requested'))return {text:'AI가 실행 중입니다. 작업 상태를 확인하세요',target:'tasks'};
   if(tasks.some(task=>task.stage==='not_started'))return {text:'준비된 작업을 실행하세요',target:'tasks'};
   if(tasks.some(task=>['error','lost','interrupted'].includes(task.stage)))return {text:'멈춘 작업의 원인을 확인하세요',target:'tasks'};
+  const quality=qualityAction(progress);if(quality)return quality;
   if(outputs)return {text:'결과물을 확인하세요',target:'results'};
   return {text:'추가 지시로 결과를 다듬으세요',target:'followup'};
 }
-

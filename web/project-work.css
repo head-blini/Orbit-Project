@@ -60,6 +60,9 @@
 .step-done .step-index{background:var(--accent);border-color:var(--accent);color:#122b25}
 .step-active{border-color:#2a5150;background:#13262a}.step-active .step-index{border-color:var(--accent);color:var(--accent)}
 .step-unavailable{border-style:dashed;opacity:.75}
+.step-attention{border-color:#6b5426;background:#2a2314}.step-attention .step-index{border-color:#f79009;color:#f7b955}
+.step-blocked{border-color:#6b3a3a;background:#2a1717}.step-blocked .step-index{border-color:#d92d20;color:#f0b7b7}
+.work-quality-evidence{grid-column:1/-1;font-size:12px;color:var(--muted)}.work-quality-evidence ul{margin:6px 0;padding-left:18px;overflow-wrap:anywhere}
 .work-grid{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:24px;align-items:start}
 .work-main{display:flex;flex-direction:column;gap:28px;min-width:0}
 .work-section h3{margin:0 0 4px;font-size:16px}

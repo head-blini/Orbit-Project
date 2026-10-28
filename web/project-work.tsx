@@ -15,7 +15,7 @@ import './project-work.css';
 type RawPost=(path:string,body:object)=>Promise<Response>;
 type Props=StartProps&{rawPost:RawPost;lastEventAt:string|null;freshness:ConnectionFreshness;
   /** Existing repository/workspace management, kept reachable as an advanced section. */children?:ReactNode};
-import {projectSteps,nextAction,stepStateLabel,type Step} from './project-work-model.ts';
+import {projectSteps,nextAction,qualitySteps,qualityAction,stepStateLabel,type Step} from './project-work-model.ts';
 const kindLabel={general:'일반 작업',code:'코드 작업'} as const;
 const scrollTo=(id:string)=>document.getElementById(id)?.scrollIntoView({behavior:'smooth',block:'start'});
 
@@ -41,6 +41,7 @@ export function ProjectWorkPage(props:Props){
 }
 
 function Header({name,kind,progress,steps,action,onAction}:{name:string;kind:'general'|'code';progress:ProjectProgress|null;steps:Step[];action:{text:string}|null;onAction:()=>void}){
+  const advanced=useUiMode()==='advanced',evidence=steps.find(step=>step.evidence?.length)?.evidence;
   return <header className="work-header">
     <div className="work-title"><span className={'kind kind-'+kind}>{kindLabel[kind]}</span><h2 title={name}>{name}</h2>
       <p>{progress?.plan?progress.plan.goal:'아직 승인된 목표가 없습니다. AI에게 요청해 기획을 받고 승인하세요.'}</p></div>
@@ -49,6 +50,8 @@ function Header({name,kind,progress,steps,action,onAction}:{name:string;kind:'ge
     <ol className="work-steps" aria-label="진행 단계">{steps.map((step,index)=><li key={step.id} className={'step step-'+step.state} aria-current={step.state==='active'?'step':undefined}>
       <span className="step-index" aria-hidden="true">{step.state==='done'?'✓':index+1}</span>
       <span className="step-text"><b>{step.label}</b><small>{stepStateLabel[step.state]} · {step.detail}</small></span></li>)}</ol>
+    {advanced&&evidence&&<details className="work-quality-evidence"><summary>품질 검증 근거</summary><ul>{evidence.map((line,index)=><li key={index}>{line}</li>)}</ul>
+      <p className="work-muted">‘실제 실행 관측’만 통과로 인정합니다. 모의 실행·모델 미확인 기록은 통과로 표시하지 않습니다.</p></details>}
   </header>;
 }
 
@@ -110,10 +113,15 @@ function GeneralWork(props:Props&{name:string}){
 function CodeWork(props:Props&{name:string}){
   const {state,projectId}=props,project=state!.projects!.find(item=>item.id===projectId)!;
   const ready=workspaceMatchesProject(state,projectId)&&!!state!.selectedWorkspaceId&&project.writeEnabled&&!state!.readOnly;
+  const [progress,setProgress]=useState<ProjectProgress|null>(null),lastSeq=state?.lastSeq??0;
+  useEffect(()=>{let live=true;if(!props.online)return;
+    const timer=setTimeout(()=>void fetch('/api/projects/'+encodeURIComponent(projectId)+'/progress',{cache:'no-store'}).then(r=>r.ok?r.json():null).then(value=>{if(live&&value?.projectId===projectId&&Array.isArray(value.tasks))setProgress(value);}).catch(()=>{}),lastSeq?600:0);
+    return()=>{live=false;clearTimeout(timer);};},[projectId,props.online,lastSeq]);
   const steps:Step[]=[{id:'goal',label:'목표',state:'active',detail:'기획에서 정합니다'},{id:'plan',label:'기획',state:'pending',detail:'아래 흐름에서 확인'},{id:'run',label:'실행',state:'pending',detail:'Codex 실행'},
-    {id:'cross',label:'교차 검증',state:'unavailable',detail:'다른 AI의 독립 검증은 아직 연결되지 않았습니다'},{id:'fix',label:'수정·재검증',state:'pending',detail:'검증 명령으로 확인'},{id:'result',label:'결과물',state:'pending',detail:'코드 변경·미리보기'}];
+    ...qualitySteps(progress,'code'),{id:'result',label:'결과물',state:'pending',detail:'코드 변경·미리보기'}];
+  const quality=ready?qualityAction(progress):null;
   return <>
-    <Header name={props.name} kind="code" progress={null} steps={steps} action={ready?null:{text:'작업 공간 선택'}} onAction={()=>{const element=document.getElementById('work-advanced-tools');if(element instanceof HTMLDetailsElement)element.open=true;scrollTo('work-advanced-tools');}}/>
+    <Header name={props.name} kind="code" progress={null} steps={steps} action={ready?quality:{text:'작업 공간 선택'}} onAction={()=>{if(quality){props.onNavigate('progress');return;}const element=document.getElementById('work-advanced-tools');if(element instanceof HTMLDetailsElement)element.open=true;scrollTo('work-advanced-tools');}}/>
     {ready?<StartWorkspace key={projectId+':'+state!.selectedWorkspaceId} {...props} workspaceId={state!.selectedWorkspaceId!}/>
       :<section className="work-section"><h3>작업 공간이 필요합니다</h3><p className="work-muted">코드 프로젝트는 쓰기 가능한 격리 작업 공간을 선택해야 기획·실행할 수 있습니다. 아래 ‘저장소·작업 공간 관리’에서 선택하세요.</p></section>}
   </>;

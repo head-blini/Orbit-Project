@@ -5,17 +5,17 @@ import {projectSteps,nextAction} from '../web/project-work-model.ts';
 import {getUiMode,setUiMode,subscribeUiMode,advancedMenuKey} from '../web/ui-mode.ts';
 
 // Home/project screen (2026-10-28): the six steps and the next action come only from recorded state,
-// and cross-model verification / automatic fixing are always shown as not connected.
+// and cross-model verification / fixing never claim progress without a Quality Loop record (see quality-gate-ui.test.ts).
 const task=(stage:TaskStage):ProgressTask=>({id:stage+Math.random(),title:'t',requirementLabels:[],stage,assignee:null,planCurrent:true,latestRunId:null,startedAt:null,lastObservedAt:null,verification:'not_run',criteria:{total:1,verified:0},runs:[],runsTotal:0});
 const progress=(state:'draft'|'approved'|null,stages:TaskStage[]):ProjectProgress=>({projectId:'p',plan:state?{id:'v',revision:2,state,contentHash:'a'.repeat(64),title:'T',goal:'G'}:null,
   totals:{tasks:stages.length,verifiedTasks:0,basis:'tasks'},criteria:{total:0,verified:0,basis:'acceptance_criteria'},blockers:[],tasks:stages.map(task),untaskedRuns:0,lastObservedAt:null});
 
-test('steps never claim cross verification or automatic fixing',()=>{
+test('steps never claim cross verification or fixing without a quality record',()=>{
   for(const value of [null,progress(null,[]),progress('approved',['verified'])]){
     const steps=projectSteps(value,3);
     assert.deepEqual(steps.map(step=>step.id),['goal','plan','run','cross','fix','result']);
-    assert.equal(steps.find(step=>step.id==='cross')!.state,'unavailable');
-    assert.equal(steps.find(step=>step.id==='fix')!.state,'unavailable');
+    assert.equal(steps.find(step=>step.id==='cross')!.state,'pending');
+    assert.equal(steps.find(step=>step.id==='fix')!.state,'pending');
   }
 });
 

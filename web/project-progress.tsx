@@ -2,6 +2,7 @@ import {CapabilityRouting,type CapabilityRoutePost} from './capability-routing.t
 import type {CodexModelAttribution} from '../shared/codex-model-attribution.ts';
 import type {QualityLoopRecord} from '../shared/quality-loop-record.ts';
 import {getUiMode,subscribeUiMode} from './ui-mode.ts';
+import {qualityOrigin} from './project-work-model.ts';
 import {useEffect,useRef,useState} from 'react';
 import type {ConnectionFreshness,ProgressTask,ProjectProgress,TaskStage,ProgressVerification} from '../shared/project-progress.ts';
 import type {HandoffPackage} from '../shared/handoff.ts';
@@ -172,7 +173,7 @@ export function ProjectProgressPanel({projectId,projectKind,online,lastSeq,lastE
   </>;
 }
 
-export function qualityLabel(loop:QualityLoopRecord){const state=loop.result.status,issue=loop.result.issue??'';return loop.recoveryRequired?'실행 확인 필요':/QUOTA|RATE_LIMIT/.test(issue)?'사용량 한도 대기':/PERMISSION|APPROVAL_DENIED/.test(issue)?'권한 확인 필요':/MODEL.*UNKNOWN|MODEL.*UNSUPPORTED|MODEL_MISMATCH/.test(issue)?'모델 확인 필요':state==='reviewing'?(loop.result.repairs?'재검증 중':'품질 검증 중'):state==='repairing'?'수정 중':state==='passed'?'AI 검토 일치':state==='limit_reached'?'품질 검증 한도 도달':state==='failed'?'품질 검증 실패':'품질 검증 대기';}
+export function qualityLabel(loop:QualityLoopRecord){const state=loop.result.status,issue=loop.result.issue??'';return loop.recoveryRequired?'실행 확인 필요':/QUOTA|RATE_LIMIT/.test(issue)?'사용량 한도 대기':/PERMISSION|APPROVAL_DENIED/.test(issue)?'권한 확인 필요':/MODEL.*UNKNOWN|MODEL.*UNSUPPORTED|MODEL_MISMATCH/.test(issue)?'모델 확인 필요':state==='reviewing'?(loop.result.repairs?'재검증 중':'품질 검증 중'):state==='repairing'?'수정 중':state==='passed'?({native:'AI 검토 일치',mock:'모의 AI 검토 일치 · 실제 검증 아님',unknown:'AI 검토 일치 · 모델 미확인'} as const)[qualityOrigin(loop)]:state==='limit_reached'?'품질 검증 한도 도달':state==='failed'?'품질 검증 실패':loop.result.issue==='INDEPENDENT_MODEL_REQUIRED'?'독립 검토 모델 필요':state==='blocked'?'품질 검증 차단':'품질 검증 대기';}
 export function QualityLoopStatus({loop,advanced}:{loop:QualityLoopRecord;advanced:boolean}){
   const label=qualityLabel(loop);
   const issues=loop.result.rounds.at(-1)?.failures??[];
