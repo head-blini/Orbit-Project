@@ -75,7 +75,7 @@ export class Store extends EventEmitter {
     const row=this.db.prepare('SELECT body,digest FROM runs WHERE request_id=?').get(id);
     return row?{run:JSON.parse(row.body as string),digest:row.digest as string}:null;
   }
-  createRun(requestId:string,digest:string,prompt:string,workspaceId?:string,task?:Pick<Run,'taskId'|'planningVersionId'|'requirementLabels'>,identity?:SoloOperationIdentity,acceptance?:TaskVerificationPreview):Run {
+  createRun(requestId:string,digest:string,prompt:string,workspaceId?:string,task?:Pick<Run,'taskId'|'planningVersionId'|'planningContentHash'|'requirementLabels'>,identity?:SoloOperationIdentity,acceptance?:TaskVerificationPreview):Run {
     const now=new Date().toISOString();
     const r:Run={id:randomUUID(),requestId,turnId:null,prompt,response:'',execution:'starting',verification:'not_run',createdAt:now,updatedAt:now,...(workspaceId?{workspaceId}:{}),...task,...(acceptance?{acceptanceDigest:acceptance.digest}:{})};
     this.db.exec('BEGIN IMMEDIATE');

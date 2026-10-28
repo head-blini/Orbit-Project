@@ -294,7 +294,7 @@ export class Controller {
     return this.start({...input,prompt},task,acceptance??undefined);
   }
   async submit(input:{requestId:string;prompt:string;workspaceId?:string|null}):Promise<Run>{return this.start(input);}
-  private async start(input:{requestId:string;prompt:string;workspaceId?:string|null},task?:Pick<Run,'taskId'|'planningVersionId'|'requirementLabels'>,acceptance?:TaskVerificationPreview):Promise<Run>{
+  private async start(input:{requestId:string;prompt:string;workspaceId?:string|null},task?:Pick<Run,'taskId'|'planningVersionId'|'planningContentHash'|'requirementLabels'>,acceptance?:TaskVerificationPreview):Promise<Run>{
     assertGitProject(this.store,input?.workspaceId);assertGitProject(this.store,this.workspaceId);
     if(typeof input?.requestId!=='string'||!/^[a-zA-Z0-9-]{8,80}$/.test(input.requestId)||typeof input.prompt!=='string'||!input.prompt.trim()||input.prompt.length>4000)throw new AppError('INVALID_PROMPT',400);
     if(containsCredential(input.prompt))throw new AppError('CREDENTIAL_LIKE_INPUT',400);

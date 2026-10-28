@@ -11,6 +11,8 @@ import { Controller } from '../server/controller.ts';
 import { Projects } from '../server/projects.ts';
 import { createWorkspace } from '../server/workspace.ts';
 import { createHttpServer } from '../server/http.ts';
+import { Studio } from '../server/studio.ts';
+import type {PlanningVersion,SavedTask} from '../shared/parallel.ts';
 
 class Fake extends EventEmitter {
   calls:{method:string;params:any}[]=[];thread='task-thread';uncertain=false;
@@ -24,7 +26,7 @@ class Fake extends EventEmitter {
   }
 }
 const input={format:'markdown',source:'manual',text:'# Safe implementation\n## Goal\nPreserve the original repository\n## Requirements\n### REQ-1\nUpdate the isolated source\n#### Acceptance criteria\n- Existing checks continue to pass\n## Constraints\n- Never change the original repository\n## Open questions\n'};
-async function fixture(protectedSuite=false){
+async function executionFixture(protectedSuite=false){
   const dir=mkdtempSync(join(tmpdir(),'orbit-task-run-')),root=join(dir,'project');mkdirSync(root);
   const git=(...args:string[])=>execFileSync('git',args,{cwd:root,stdio:'pipe',windowsHide:true});
   git('init','-q','-b','main');writeFileSync(join(root,'source.ts'),'export const original = true;\n');writeFileSync(join(root,'check.mjs'),"console.log('actual protected check');\n");git('add','.');git('-c','user.name=Test','-c','user.email=test@example.invalid','commit','-qm','initial');
@@ -32,6 +34,10 @@ async function fixture(protectedSuite=false){
   const project=projects.register(root),workspace=projects.create(project.id),rpc=new Fake();
   const controller=new Controller(store,createWorkspace(dir),()=>rpc,projects,protectedSuite?[{projectPath:root,id:'check',label:'Protected check',executable:process.execPath,args:['check.mjs'],timeoutMs:5000,protectedFiles:['check.mjs']}]:[]);
   await controller.selectWorkspace(workspace.id);await controller.connect();
+  return {dir,db,store,projects,project,workspace,rpc,controller};
+}
+async function fixture(protectedSuite=false){
+  const {dir,db,store,project,workspace,rpc,controller}=await executionFixture(protectedSuite);
   const server=createHttpServer(controller,'.');await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
   const origin='http://127.0.0.1:'+(server.address() as {port:number}).port;
   const session=await fetch(origin+'/api/session'),cookie=session.headers.get('set-cookie')!.split(';')[0],{csrfToken}=await session.json() as any;
@@ -46,6 +52,39 @@ async function fixture(protectedSuite=false){
   }
   return {dir,db,store,controller,rpc,project,workspace,origin,headers,post,base,plan,close:async()=>{server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));await controller.close();store.close();}};
 }
+
+test('stale_approval_rejected and task Run binds the approved hash before native dispatch',async()=>{
+  const f=await executionFixture(),studio=new Studio(f.store);let runId='',hash='',legacyBody='';
+  try{
+    const plan=studio.mutate(f.project.id,'plans',undefined,undefined,{requestId:randomUUID(),input}) as PlanningVersion;
+    studio.mutate(f.project.id,'plans',plan.id,'approve',{expectedRevision:1});
+    const [task]=studio.mutate(f.project.id,'plans',plan.id,'task-drafts',{}) as SavedTask[];
+    const request=f.rpc.request.bind(f.rpc);
+    f.rpc.request=async(method,params)=>{
+      if(method==='turn/start')assert.equal(f.store.runs().at(-1)?.planningContentHash,plan.contentHash);
+      return request(method,params);
+    };
+    const requestId=randomUUID(),run=await f.controller.submitTask(f.project.id,task.id,{requestId,workspaceId:f.workspace.id});
+    runId=run.id;hash=plan.contentHash;assert.equal(run.planningContentHash,hash);
+    assert.equal((f.store.eventsAfter(0).find(e=>e.kind==='run.created')!.data.run as typeof run).planningContentHash,hash);
+    f.store.updateRun(run.id,{execution:'completed'},'test.completed');
+    const next=studio.mutate(f.project.id,'plans',plan.id,'revisions',{requestId:randomUUID(),expectedRevision:1,input}) as PlanningVersion;
+    const stale=()=>f.controller.submitTask(f.project.id,task.id,{requestId:randomUUID(),workspaceId:f.workspace.id});
+    await assert.rejects(stale,/PLANNING_VERSION_STALE/);
+    studio.mutate(f.project.id,'plans',next.id,'approve',{expectedRevision:2});
+    await assert.rejects(stale,/PLANNING_VERSION_STALE/);
+    assert.equal((await f.controller.submitTask(f.project.id,task.id,{requestId,workspaceId:f.workspace.id})).id,run.id);
+    assert.equal(f.rpc.calls.filter(c=>c.method==='turn/start').length,1);assert.equal(f.store.runs().length,1);
+    const old=f.store.createRun(randomUUID(),'fixture','Old task run',f.workspace.id,{taskId:task.id,planningVersionId:plan.id,requirementLabels:task.requirementLabels});
+    f.store.updateRun(old.id,{execution:'completed'},'test.completed');
+    legacyBody=JSON.stringify(f.store.getRun(old.id));
+  }finally{await f.controller.close();f.store.close();}
+  const reopened=new Store(f.db);try{
+    assert.equal(reopened.getRun(runId)?.planningContentHash,hash);
+    assert.equal(Object.hasOwn(reopened.runs().at(-1)!,'planningContentHash'),false);
+    assert.equal(JSON.stringify(reopened.runs().at(-1)),legacyBody);
+  }finally{reopened.close();}
+});
 
 test('approved task executes its authoritative brief once and preserves the link across uncertain response and restart',async()=>{
   const f=await fixture();try{

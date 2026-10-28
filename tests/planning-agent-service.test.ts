@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {createHash,randomUUID} from 'node:crypto';
 import {Store} from '../server/store.ts';
 import {Studio} from '../server/studio.ts';
+import {serializePlanningDraft} from '../server/planning/parser.ts';
+import type {PlanningVersion} from '../shared/parallel.ts';
 import type {Projects} from '../server/projects.ts';
 import {parsePlanningProposal} from '../server/planning/agent-input.ts';
 import type {runCodexPlanning,NativePlanningResult} from '../server/codex-planning.ts';
@@ -18,6 +20,20 @@ function fixture(){
   const service=make(),text='PRIVATE_REQUEST_MARKER Plan an offline workspace',input=()=>({requestId:randomUUID(),workspaceId:w,text,expectedPreviewDigest:service.preview(p,{workspaceId:w,text}).previewDigest,confirmed:true});
   return {store,service,make,p,w,text,input,success,get calls(){return calls;},setBusy:(v:boolean)=>{busy=v;},setRun:(v:typeof run)=>{run=v;}};
 }
+test('proposal_does_not_mutate_approved_baseline: saving an AI suggestion leaves approval untouched',async()=>{
+  const f=fixture();try{
+    const studio=new Studio(f.store),input={format:'json',source:'manual',text:serializePlanningDraft(f.success().proposal!)};
+    const first=studio.mutate(f.p,'plans',undefined,undefined,{requestId:randomUUID(),input}) as PlanningVersion;
+    const approved=studio.mutate(f.p,'plans',first.id,'approve',{expectedRevision:1}) as PlanningVersion;
+    const before=JSON.stringify(approved),started=f.service.start(f.p,f.input());await f.service.settle();
+    const result=f.service.record(started.id);
+    const suggestion=f.service.saveDraft(f.p,result.id,{workspaceId:f.w,expectedOutputDigest:result.outputDigest!});
+    assert.equal(suggestion.state,'draft');assert.notEqual(suggestion.id,approved.id);
+    assert.equal(JSON.stringify((studio.read(f.p,'plans') as PlanningVersion[]).find(v=>v.id===approved.id)),before);
+    assert.equal(f.store.db.prepare('SELECT version_id FROM planning_heads WHERE lineage_id=?').get(approved.lineageId!)?.version_id,approved.id);
+    assert.equal(f.store.runs().length,0);
+  }finally{await f.service.close();f.store.close();}
+});
 test('planning preview hashes and launches conditional preview capabilities with the approved instructions',async()=>{
   const f=fixture();try{
     const preview=f.service.preview(f.p,{workspaceId:f.w,text:f.text});

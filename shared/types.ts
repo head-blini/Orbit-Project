@@ -2,7 +2,7 @@ export type Execution = 'starting'|'running'|'interrupting'|'completed'|'interru
 export type ProviderStatus = 'disconnected'|'connecting'|'ready'|'auth_required'|'not_installed'|'error';
 export interface Run {
   workspaceId?:string;
-  taskId?:string; planningVersionId?:string; requirementLabels?:string[];
+  taskId?:string; planningVersionId?:string; planningContentHash?:string; requirementLabels?:string[];
   acceptanceDigest?:string;
   id:string; requestId:string; turnId:string|null; prompt:string; response:string;
   execution:Execution; verification:'not_run'|'recorded'; createdAt:string; updatedAt:string;
