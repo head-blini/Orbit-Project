@@ -64,10 +64,11 @@ function TaskRow({task,actions}:{task:ProgressTask;actions?:TaskActions}){
 }
 
 /** Pure view: renders only recorded state, no inferred percentages or ETA. */
-export function ProjectProgressView({progress,freshness,lastEventAt,actions}:{progress:ProjectProgress;freshness:ConnectionFreshness;lastEventAt:string|null;actions?:TaskActions}){
+export function ProjectProgressView({progress,freshness,lastEventAt,actions,compact}:{progress:ProjectProgress;freshness:ConnectionFreshness;lastEventAt:string|null;actions?:TaskActions;
+  /** The project screen shows its own summary; compact keeps only the task list. */compact?:boolean}){
   const {totals,criteria}=progress;
   return <div className="project-progress">
-    <section className="surface progress-summary" aria-label="프로젝트 진행 요약">
+    {!compact&&<section className="surface progress-summary" aria-label="프로젝트 진행 요약">
       <div className="section-heading"><div>
         <h2>{progress.plan?.title??'승인된 기획 없음'}</h2>
         <p>{progress.plan?`${progress.plan.goal} · 승인 버전 r${progress.plan.revision} · ${progress.plan.contentHash.slice(0,12)}`:'기획을 승인하면 작업과 완료 조건이 이곳에 연결됩니다.'}</p>
@@ -82,9 +83,9 @@ export function ProjectProgressView({progress,freshness,lastEventAt,actions}:{pr
       {progress.blockers.length>0&&<ul className="progress-blockers" role="alert">{progress.blockers.map(b=><li key={b.code}>{blockerLabels[b.code]??b.code}</li>)}</ul>}
       {progress.untaskedRuns>0&&<p className="progress-note">작업과 연결되지 않은 직접 실행 {progress.untaskedRuns}개는 작업 진행에 포함하지 않았습니다.</p>}
       <p className="progress-note">AI 응답 완료와 검증 통과는 다른 상태입니다. 시간·노력 비율이나 남은 시간은 추정하지 않습니다.</p>
-    </section>
+    </section>}
     <section className="surface" aria-label="작업별 진행">
-      <div className="section-heading"><div><h2>작업</h2><p>작업을 펼치면 실행 기록과 검증 결과를 볼 수 있습니다.</p></div></div>
+      {!compact&&<div className="section-heading"><div><h2>작업</h2><p>작업을 펼치면 실행 기록과 검증 결과를 볼 수 있습니다.</p></div></div>}
       {progress.tasks.length?progress.tasks.map(task=><TaskRow key={task.id} task={task} actions={actions}/>):<p className="progress-empty">승인된 기획에서 만든 작업이 아직 없습니다.</p>}
     </section>
   </div>;
@@ -102,7 +103,9 @@ function readPending(projectId:string):{taskId:string;requestId:string}|null{
 
 /** Reads `/api/projects/:id/progress` on scope change and after new events. GET never starts work.
  * Runs start only from an explicit click; an uncertain request keeps its ID and is never resent automatically. */
-export function ProjectProgressPanel({projectId,projectKind,online,lastSeq,lastEventAt,freshness,post}:{projectId:string;projectKind:'code'|'general'|null;online:boolean;lastSeq:number;lastEventAt:string|null;freshness:ConnectionFreshness;post?:RawPost}){
+export function ProjectProgressPanel({projectId,projectKind,online,lastSeq,lastEventAt,freshness,post,compact,onProgress}:{projectId:string;projectKind:'code'|'general'|null;online:boolean;lastSeq:number;lastEventAt:string|null;freshness:ConnectionFreshness;post?:RawPost;
+  compact?:boolean;onProgress?:(progress:ProjectProgress)=>void}){
+  const report=useRef(onProgress);report.current=onProgress;
   const [progress,setProgress]=useState<ProjectProgress|null>(null),[error,setError]=useState('');
   const [busy,setBusy]=useState(false),[pending,setPending]=useState(()=>readPending(projectId)),[handoff,setHandoff]=useState<{taskId:string;markdown:string}|null>(null);
   const ticket=useRef(0);
@@ -117,7 +120,7 @@ export function ProjectProgressPanel({projectId,projectKind,online,lastSeq,lastE
         const value=await response.json() as ProjectProgress;
         if(current!==ticket.current)return;
         if(value?.projectId!==projectId||!Array.isArray(value.tasks))throw new Error();
-        setProgress(value);setError('');
+        setProgress(value);setError('');report.current?.(value);
       }catch{if(current===ticket.current)setError('진행 기록을 불러오지 못했습니다. 마지막으로 받은 기록을 표시합니다.');}
     },lastSeq?400:0);
     return()=>clearTimeout(timer);
@@ -155,7 +158,7 @@ export function ProjectProgressPanel({projectId,projectKind,online,lastSeq,lastE
   if(!projectId)return <section className="surface"><p>프로젝트를 선택하면 진행 상태를 볼 수 있습니다.</p></section>;
   return <>
     {error&&<div className="banner error" role="alert">{error}</div>}
-    {projectKind==='code'&&<p className="progress-note">코드 프로젝트 작업은 시작하기·에이전트 센터에서 검증 기준을 확인한 뒤 실행합니다.</p>}
-    {progress?<ProjectProgressView progress={progress} freshness={freshness} lastEventAt={lastEventAt} actions={actions}/>:!error&&<section className="surface"><p>진행 기록을 불러오는 중입니다.</p></section>}
+    {projectKind==='code'&&!compact&&<p className="progress-note">코드 프로젝트 작업은 시작하기·에이전트 센터에서 검증 기준을 확인한 뒤 실행합니다.</p>}
+    {progress?<ProjectProgressView progress={progress} freshness={freshness} lastEventAt={lastEventAt} actions={actions} compact={compact}/>:!error&&<section className="surface"><p>진행 기록을 불러오는 중입니다.</p></section>}
   </>;
 }

@@ -11,18 +11,19 @@ import {VerificationPanel} from './verification.tsx';
 import {DevelopmentResultPanel} from './development-results.tsx';
 import {createStartFlowCoordinator,currentStartPlans} from './start-flow.ts';
 import {answerOpenQuestions} from './plan-answers.ts';
+import {useUiMode} from './ui-mode.ts';
 import {createStudioMutator} from './studio-client.ts';
 import {serializePlanningDraft} from '../server/planning/parser.ts';
 import './start.css';
 
-type Props={state:Snapshot|null;projectId:string;online:boolean;locked:boolean;planningBlocked:boolean;canRunTask:boolean;
+export type StartProps={state:Snapshot|null;projectId:string;online:boolean;locked:boolean;planningBlocked:boolean;canRunTask:boolean;
   post:(path:string,body:object)=>Promise<any>;onNavigate:(page:PageId)=>void;onProject:(id:string)=>void;
   workspaceAction:(fn:()=>Promise<void>)=>Promise<void>;onConnect:()=>Promise<void>;
   onRunTask:(task:SavedTask)=>Promise<void>;onInterrupt:(id:string)=>Promise<void>};
 type Step='plan'|'develop'|'verify'|'result';
 const steps:readonly [Step,string][]=[['plan','기획'],['develop','개발'],['verify','검증'],['result','결과']];
 
-export function StartPage(props:Props){
+export function StartPage(props:StartProps){
   const {state,projectId,online,locked}=props,project=state?.projects?.find(p=>p.id===projectId);
   const [fresh,setFresh]=useState(false);
   useEffect(()=>setFresh(false),[projectId]);
@@ -40,7 +41,7 @@ export function StartPage(props:Props){
 }
 
 /** General (non-Git) projects: natural-language request → AI plan draft → approve in Planning → run from Progress. */
-export function StartGeneral(props:Props&{projectName:string}){
+export function StartGeneral(props:StartProps&{projectName:string}){
   const [saved,setSaved]=useState<PlanningVersion|null>(null),[initialText,setInitialText]=useState(()=>takeNewTaskRequest(props.projectId));
   useEffect(()=>onNewTaskRequest(()=>{const text=takeNewTaskRequest(props.projectId);if(text)setInitialText(text);}),[props.projectId]);
   const [materials,setMaterials]=useState<Material[]|null>(null);
@@ -55,7 +56,8 @@ export function StartGeneral(props:Props&{projectName:string}){
 }
 
 /** Current plan of a general project: review, then approve and prepare tasks in one explicit step. */
-function GeneralPlanCard(props:Props&{savedId:string|null}){
+export function GeneralPlanCard(props:StartProps&{savedId:string|null;
+  /** On the project screen the tasks are on the same page; this scrolls there instead of leaving it. */onShowTasks?:()=>void}){
   const {projectId,online,locked,state}=props;
   const callbacks=useRef(props);callbacks.current=props;
   const scope={projectId,workspaceId:null,general:true,online,blocked:locked,refreshKey:String(state?.lastSeq??0)};
@@ -83,24 +85,31 @@ function GeneralPlanCard(props:Props&{savedId:string|null}){
     }catch(error){setAnswerIssue('답변을 새 버전으로 저장하지 못했습니다: '+(error instanceof Error?error.message:'응답 확인 불가'));}
     finally{setSaving(false);}
   }
+  const advanced=useUiMode()==='advanced';
   if(!plan)return null;
-  return <section className="surface start-plan" aria-label="현재 기획"><div className="section-heading"><h2>기획을 확인하세요</h2><button onClick={()=>props.onNavigate('planning')}>자세히 편집</button></div>
-    {plans.length>1&&<label>현재 기획<select value={plan.id} disabled={!observed||!!view.action} onChange={event=>flow.selectPlan(event.target.value)}>{plans.map(p=><option key={p.id} value={p.id}>{p.draft.title} · 버전 {p.revision} · {p.state==='approved'?'승인됨':'초안'}</option>)}</select></label>}
-    <p className="subtle">버전 {plan.revision} · {plan.state==='approved'?'승인됨':'초안(미승인)'} · 기준 {plan.contentHash.slice(0,12)}</p>
-    <h3>{plan.draft.title}</h3><p>{plan.draft.goal}</p><ul>{plan.draft.requirements.map(requirement=><li key={requirement.label}><b>{requirement.description}</b><ul>{requirement.acceptanceCriteria.map((value,i)=><li key={i}>{value}</li>)}</ul></li>)}</ul>
+  // Once approved and prepared, the plan is a reference: show its summary and keep the full text one click away.
+  const prepared=plan.state==='approved'&&tasks.length>0;
+  const details=<>
+    {!prepared&&<h3>{plan.draft.title}</h3>}<p>{plan.draft.goal}</p><ul>{plan.draft.requirements.map(requirement=><li key={requirement.label}><b>{requirement.description}</b><ul>{requirement.acceptanceCriteria.map((value,i)=><li key={i}>{value}</li>)}</ul></li>)}</ul>
     {!!plan.draft.constraints.length&&<><h4>지켜야 할 조건</h4><ul>{plan.draft.constraints.map((value,i)=><li key={i}>{value}</li>)}</ul></>}
     {!!plan.draft.nonGoals?.length&&<><h4>하지 않을 것</h4><ul>{plan.draft.nonGoals.map((value,i)=><li key={i}>{value}</li>)}</ul></>}
     {!!plan.draft.decisions?.length&&<details><summary>결정과 이유 {plan.draft.decisions.length}개</summary><ul>{plan.draft.decisions.map((item,i)=><li key={i}><b>{item.topic}</b> — {item.decision} <span className="subtle">({item.rationale})</span></li>)}</ul></details>}
     {!!plan.draft.openQuestions.length&&<div role="status" className="open-questions"><h4>먼저 결정할 내용 {plan.draft.openQuestions.length}개</h4><p className="subtle">답한 질문은 결정으로 기록되고 새 버전이 저장됩니다. 답하지 않은 질문이 남아 있으면 승인할 수 없습니다.</p>
       {plan.draft.openQuestions.map((value,i)=><label key={plan.id+i}>{value}<input value={answers[i]??''} maxLength={1000} disabled={saving||!observed||locked} placeholder="답변" onChange={event=>setAnswers(old=>({...old,[i]:event.target.value}))}/></label>)}
       <button disabled={saving||!observed||locked||!Object.values(answers).some(value=>value.trim())} onClick={()=>void saveAnswers()}>{saving?'저장 중…':'답변을 반영해 새 버전 저장'}</button>{answerIssue&&<p role="alert" className="notice">{answerIssue}</p>}</div>}
+  </>;
+  return <section className="surface start-plan" aria-label="현재 기획"><div className="section-heading"><h2>{prepared?plan.draft.title:'기획을 확인하세요'}</h2>{advanced&&<button onClick={()=>props.onNavigate('planning')}>기획 스튜디오에서 편집</button>}</div>
+
+    {plans.length>1&&<label>현재 기획<select value={plan.id} disabled={!observed||!!view.action} onChange={event=>flow.selectPlan(event.target.value)}>{plans.map(p=><option key={p.id} value={p.id}>{p.draft.title} · 버전 {p.revision} · {p.state==='approved'?'승인됨':'초안'}</option>)}</select></label>}
+    <p className="subtle">버전 {plan.revision} · {plan.state==='approved'?'승인됨':'초안(미승인)'} · 기준 {plan.contentHash.slice(0,12)}</p>
+    {prepared?<details className="plan-details"><summary>기획 내용 보기 · 요구사항 {plan.draft.requirements.length}개</summary>{details}</details>:details}
     {view.error&&<p role="alert" className="notice">{view.error}</p>}
-    {tasks.length?<><p role="status">승인된 기준으로 작업 {tasks.length}개를 준비했습니다. 진행 현황에서 실행 AI를 확인하고 실행하세요.</p><button className="primary" onClick={()=>props.onNavigate('progress')}>진행 현황에서 실행하기</button></>
+    {tasks.length?<><p role="status">승인된 기준으로 작업 {tasks.length}개를 준비했습니다. {props.onShowTasks?'아래 실행에서':'진행 현황에서'} 실행 AI를 확인하고 실행하세요.</p><button className="primary" onClick={()=>props.onShowTasks?props.onShowTasks():props.onNavigate('progress')}>{props.onShowTasks?'작업 실행으로 이동':'진행 현황에서 실행하기'}</button></>
       :<><button className="primary" disabled={!canPrepare} onClick={()=>void flow.prepareTasks()}>{view.action?'작업 준비 중…':plan.state==='approved'?'이 기획으로 작업 준비':'기획 승인하고 작업 준비'}</button><p className="subtle">승인하면 이 버전이 실행 기준이 됩니다. AI 실행은 다음 단계에서 따로 시작합니다.</p></>}
   </section>;
 }
 
-export function StartWorkspace(props:Props&{workspaceId:string}){
+export function StartWorkspace(props:StartProps&{workspaceId:string}){
   const {state,projectId,workspaceId,online,locked}=props;
   const callbacks=useRef(props);callbacks.current=props;
   const scope={projectId,workspaceId,online,blocked:locked,refreshKey:String(state?.lastSeq??0)};

@@ -27,3 +27,4 @@
 .progress-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
 .progress-handoff{flex-basis:100%;max-height:320px;overflow:auto;white-space:pre-wrap;font-size:.78rem;padding:10px;border:1px solid var(--border,#e4e7ec);border-radius:8px}
 .deliverables td{white-space:normal}.evidence-passed{color:#88ddc5}.evidence-needs_review{color:#e3c37a}.evidence-unverified{color:#9bb0bc}
+.deliverables td:last-child,.deliverables td:first-child code{white-space:nowrap}

@@ -1,5 +1,5 @@
 .planning-agent { margin-top: 1.5rem; padding-top: 1.25rem; border-top: 1px solid var(--border, #2b3946); min-width: 0; }
-.planning-agent > label { margin: 1rem 0; }
+.planning-agent > label { display: flex; flex-direction: column; gap: .4rem; margin: 1rem 0; }
 .planning-agent textarea { width: 100%; resize: vertical; }
 .planning-agent p, .planning-agent code { overflow-wrap: anywhere; }
 .planning-agent-preview { margin: 1rem 0; padding: 1rem; background: var(--bg, #101923); border: 1px solid var(--border, #2b3946); border-radius: .5rem; }

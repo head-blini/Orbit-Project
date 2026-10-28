@@ -56,14 +56,14 @@ test('dedicated Studio pages render only their editor, preserve safe preview and
       const simple=renderToStaticMarkup(createElement(Navigation,{page:page.id,open:false,onNavigate:()=>{},onClose:()=>{}}));
       assert.equal((simple.match(/class="nav-item /g)??[]).length,simpleMenu.length+(simpleMenu.includes(page.id)?0:1));
       assert.match(simple,new RegExp(`href="#/${page.id}"[^>]*aria-current="page"`));
-      assert.match(simple,/고급 메뉴 보기/);
+      assert.match(simple,/고급 모드로 전환/);
     }
     storage.set(advancedMenuKey,'1');
     for(const page of pages){
       const nav=renderToStaticMarkup(createElement(Navigation,{page:page.id,open:false,onNavigate:()=>{},onClose:()=>{}}));
       assert.equal((nav.match(/aria-current="page"/g)??[]).length,1);
       assert.match(nav,new RegExp(`href="#/${page.id}"[^>]*aria-current="page"`));
-      assert.equal((nav.match(/class="nav-item /g)??[]).length,14);
+      assert.equal((nav.match(/class="nav-item /g)??[]).length,pages.length);
       assert.ok(nav.indexOf('title="Automation"')<nav.indexOf('aria-label="관리 메뉴"'));
       assert.ok(nav.indexOf('aria-label="관리 메뉴"')<nav.indexOf('title="Model Providers"'));
     }

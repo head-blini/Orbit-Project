@@ -6,7 +6,8 @@ import { pages,parsePage,resolveProject,workspaceMatchesProject,readPreference,w
 const projects=[{id:'a',name:'A',kind:'code' as const,path:'a',writeEnabled:true,createdAt:''},{id:'b',name:'B',kind:'code' as const,path:'b',writeEnabled:false,createdAt:''}];
 const state:Snapshot={provider:'ready',issue:null,threadId:null,workspace:'fixture',readOnly:false,runs:[],lastSeq:0,selectedWorkspaceId:'wa',projects,workspaces:[{id:'wa',projectId:'a',path:'fixture',branch:'a',baseSha:'sha',createdAt:'',status:'ready'}]};
 test('the beginner start page is the default while all advanced page URLs survive refresh',()=>{
-  assert.equal(pages.length,14);assert.equal(new Set(pages.map(page=>page.id)).size,14);
+  // 15 since 2026-10-28: the simple-mode 결과물 page was added; every page URL must still survive refresh.
+  assert.equal(pages.length,15);assert.equal(new Set(pages.map(page=>page.id)).size,15);
   for(const page of pages)assert.equal(parsePage('#/'+page.id),page.id);
   for(const hash of ['','#/not-a-page','#/%FF','#/../../agents','#/agents?run=true'])assert.equal(parsePage(hash),'start');
 });

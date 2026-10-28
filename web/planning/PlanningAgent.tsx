@@ -156,7 +156,7 @@ export function PlanningAgentPanel(props:PanelProps){
     <p>1 turn · 60초 제한과 프로세스 종료 확인을 사용합니다. 자동 시작·재시도·이어받기는 하지 않습니다. 검증된 제안도 별도로 저장해야 미승인 기획 초안이 됩니다.</p></>;
   return <section className="planning-agent" aria-label={label+' 기획 제안'} aria-busy={!!state.action||state.loading}>
     <h3>{simple?(props.general?'요청을 기획으로 만들기':'무엇을 만들고 싶으세요?'):label+' 기획 제안 · 선택 기능'}</h3>
-    {simple?<><p>{props.general?'요청을 확인하고 기획 요청 미리보기 → 동의 → 시작을 누르세요. 기획 도우미의 제안을 검토하고 초안으로 저장할 수 있습니다.':'누가 사용할지, 어떤 일을 할 수 있으면 좋을지 적어 주세요. 기획 도우미의 제안을 검토하고 초안으로 저장할 수 있습니다.'}</p><details><summary>기획 도우미의 실행 범위와 제한</summary>{explanation}</details></>:explanation}
+    {simple?<><p>{props.general?'요청을 확인하고 기획 요청 미리보기 → 동의 → 시작을 누르세요. 기획 도우미의 제안을 검토하고 초안으로 저장할 수 있습니다.':'누가 사용할지, 어떤 일을 할 수 있으면 좋을지 적어 주세요. 기획 도우미의 제안을 검토하고 초안으로 저장할 수 있습니다.'}</p><details><summary>기획 도우미의 실행 범위와 제한</summary>{explanation}<p>최대 8,000자 · UTF-8 32 KiB. Orbit 실행 기록에는 요청 원문을 저장하지 않습니다. 네이티브 CLI의 컨텍스트·보존 정책은 별도로 적용됩니다.</p></details></>:explanation}
     {!scoped&&<p>등록한 격리 작업 공간을 선택하면 기획 제안을 요청할 수 있습니다. 수동 기획 작성은 계속 사용할 수 있습니다.</p>}
     {!props.online&&<p>서버 연결 후 기획 제안 상태를 확인할 수 있습니다.</p>}{props.busy&&<p>다른 작업이 진행 중입니다. 완료 후 새 기획 제안을 요청하세요.</p>}
     <button disabled={!props.online||!scoped||!!state.action||state.loading} onClick={()=>void coordinator.refresh('manual')}>기획 상태 새로고침</button>
@@ -164,10 +164,10 @@ export function PlanningAgentPanel(props:PanelProps){
     {state.uncertain&&<p role="status">이전 변경 요청의 응답은 미확인입니다. 기획 상태 새로고침을 직접 눌러 성공적으로 조회해야 다시 시작할 수 있습니다. 자동 조회는 이 잠금을 해제하거나 요청을 재전송하지 않습니다.</p>}
     {state.view?.recoveryRequired&&<p>종료가 확인되지 않은 기획 프로세스가 있습니다. 실제 종료를 확인한 뒤 아래 별도 확인란으로 복구하세요.</p>}
     <label>{simple?(props.general?'요청':'만들고 싶은 프로그램'):'기획 요청'}<textarea rows={5} maxLength={8000} value={state.text} disabled={blocked} placeholder={simple&&props.general?'예: 첨부한 자료를 비교해서 표와 요약 보고서를 만들어 줘.':simple?'예: 소규모 팀이 할 일을 추가하고 진행 상태를 확인하는 웹 앱을 만들고 싶어요. 담당자와 마감일을 정하고 완료한 일을 모아 볼 수 있으면 좋겠어요.':undefined} onChange={event=>coordinator.setText(event.target.value)}/></label>
-    <p>최대 8,000자 · UTF-8 32 KiB. Orbit 실행 기록에는 요청 원문을 저장하지 않습니다. 네이티브 CLI의 컨텍스트·보존 정책은 별도로 적용됩니다.</p>
+    {simple?<p className="planning-agent-hint">보내기 전에 보낼 내용을 보여 주고 동의를 받습니다.</p>:<p>최대 8,000자 · UTF-8 32 KiB. Orbit 실행 기록에는 요청 원문을 저장하지 않습니다. 네이티브 CLI의 컨텍스트·보존 정책은 별도로 적용됩니다.</p>}
     <button disabled={!canPreview} onClick={()=>void coordinator.preview()}>기획 요청 미리보기</button>
     {state.preview&&<PlanningAgentExecutionPreview preview={state.preview} consent={state.consent} disabled={!ready} presentation={props.presentation} onConsent={coordinator.consent} onStart={()=>void coordinator.start()}/>}
-    <PlanningAgentHistory projectId={props.projectId} workspaceId={props.workspaceId} records={state.view?.records??[]} online={props.online} busy={props.busy||!!state.view?.busy} loading={state.loading} fresh={state.fresh} uncertain={state.uncertain} action={state.action} recoveryConsent={state.recoveryConsent}
+    <PlanningAgentHistory simple={simple} projectId={props.projectId} workspaceId={props.workspaceId} records={state.view?.records??[]} online={props.online} busy={props.busy||!!state.view?.busy} loading={state.loading} fresh={state.fresh} uncertain={state.uncertain} action={state.action} recoveryConsent={state.recoveryConsent}
       onInterrupt={id=>void coordinator.interrupt(id)} onRecover={id=>void coordinator.recover(id)} onConfirmStopped={coordinator.confirmStopped} onSave={id=>void coordinator.save(id)}/>
   </section>;
 }
@@ -182,17 +182,18 @@ export function PlanningAgentExecutionPreview({preview,consent,disabled,presenta
     <button disabled={disabled||!consent} onClick={()=>{if(!disabled&&consent)onStart();}}>동의한 기획 제안 시작</button>
   </section>;
 }
+const issueText:Record<string,string>={PLANNING_PROPOSAL_INVALID:'AI 응답이 기획 형식에 맞지 않아 저장하지 않았습니다. 다시 요청하세요.',PLANNING_TIMEOUT:'60초 안에 끝나지 않아 멈췄습니다.',LOGIN_REQUIRED:'AI 실행기 로그인이 필요합니다.',QUOTA_EXHAUSTED:'AI 사용량 한도가 소진됐습니다.',PLANNING_PROPOSAL_BLOCKED:'응답에 인증정보·개인정보로 보이는 내용이 있어 차단했습니다.'};
 const statuses={running:'기획 제안 실행 중',completed:'기획 제안 완료 · 미승인',failed:'기획 제안 실패',interrupted:'기획 제안 중단',timed_out:'기획 제안 시간 초과',lost:'재시작·결과 미확인'};
-interface HistoryProps {projectId:string;workspaceId:string|null;records:PlanningSuggestion[];online:boolean;busy:boolean;loading:boolean;fresh:boolean;uncertain:boolean;action:Action|null;recoveryConsent:string|null;onInterrupt:(id:string)=>void;onRecover:(id:string)=>void;onConfirmStopped:(id:string,checked:boolean)=>void;onSave:(id:string)=>void}
+interface HistoryProps {simple?:boolean;projectId:string;workspaceId:string|null;records:PlanningSuggestion[];online:boolean;busy:boolean;loading:boolean;fresh:boolean;uncertain:boolean;action:Action|null;recoveryConsent:string|null;onInterrupt:(id:string)=>void;onRecover:(id:string)=>void;onConfirmStopped:(id:string,checked:boolean)=>void;onSave:(id:string)=>void}
 export function PlanningAgentHistory(props:HistoryProps){
   const rows=props.records.filter(record=>record.projectId===props.projectId&&record.workspaceId===props.workspaceId).slice(0,100);
   const observed=props.online&&!props.loading&&!props.action&&props.fresh,canMutate=observed&&!props.busy&&!props.uncertain;
-  return <section className="planning-agent-history" aria-label="기획 제안 기록"><h4>현재 작업 공간 기획 제안 기록</h4>
-    <p>자동 조회는 저장된 상태만 읽습니다. 제안 완료는 기획 승인·Task 생성·코딩 실행이 아닙니다.</p>
+  return <section className="planning-agent-history" aria-label="기획 제안 기록"><h4>{props.simple?'기획 제안':'현재 작업 공간 기획 제안 기록'}</h4>
+    <p>{props.simple?'제안은 아직 승인이 아닙니다. 저장한 뒤 기획에서 검토·승인하세요.':'자동 조회는 저장된 상태만 읽습니다. 제안 완료는 기획 승인·Task 생성·코딩 실행이 아닙니다.'}</p>
     {!rows.length&&<p>기획 제안 기록이 없습니다.</p>}
     {rows.map(record=>{const recoveryKey=planningAgentRecoveryKey(record,props.projectId,props.workspaceId),canRecover=canMutate&&!!recoveryKey&&props.recoveryConsent===recoveryKey,canSave=canMutate&&proposalReady(record)&&!rows.some(value=>!!planningAgentRecoveryKey(value,props.projectId,props.workspaceId));return <article key={record.id}>
-      <h5>{statuses[record.execution]}</h5><p>제안 {record.id} · {record.createdAt} · 프로세스 {record.processStopped?'종료 확인됨':'종료 확인 불가'} · {record.timeoutMs} ms · {record.turnLimit} turn</p>
-      {record.issue&&<p>진단 <code>{record.issue}</code></p>}
+      <h5>{statuses[record.execution]}</h5>{props.simple?<p className="planning-agent-hint">{new Date(record.createdAt).toLocaleString('ko-KR',{hour12:false})}{record.processStopped?'':' · 프로세스 종료 확인 불가'}</p>:<p>제안 {record.id} · {record.createdAt} · 프로세스 {record.processStopped?'종료 확인됨':'종료 확인 불가'} · {record.timeoutMs} ms · {record.turnLimit} turn</p>}
+      {record.issue&&<p role={props.simple?'alert':undefined}>{props.simple?(issueText[record.issue]??'기획 제안을 완료하지 못했습니다.')+' ':''}진단 <code>{record.issue}</code></p>}
       {record.execution==='running'&&<button disabled={!observed} onClick={()=>{if(observed)props.onInterrupt(record.id);}}>기획 제안 중단</button>}
       {recoveryKey&&<div><p>이전 네이티브 기획 프로세스가 실제로 종료됐는지 직접 확인하세요.</p>
         <label className="planning-agent-consent"><input type="checkbox" checked={props.recoveryConsent===recoveryKey} disabled={!canMutate} onChange={event=>{if(canMutate)props.onConfirmStopped(record.id,event.target.checked);}}/>별도 종료 확인: 이전 기획 프로세스가 종료되었음을 확인했습니다.</label>
