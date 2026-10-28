@@ -1,3 +1,6 @@
+import {CapabilityInvocationService} from './capability-invocation.ts';
+import type {CapabilityInvocationInput} from '../shared/capability-invocation.ts';
+import {enrichCapabilityValidation} from './capability-validation.ts';
 import {createClaudeAuthenticationService} from './native-readiness.ts';
 import type {NativeReadinessReport} from '../shared/native-readiness.ts';
 import {CapabilityRuntimeAdapters} from './capability-runtime-adapters.ts';
@@ -52,8 +55,9 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
   const runtimeAdapters=options.runtimeAdapters??new CapabilityRuntimeAdapters(controller);
   const capabilityRegistry=()=>{
     const registry=discoverCapabilities({probe:nativeProbe.get(),codexReady:controller.snapshot().provider==='ready',extensions:controller.extensionSnapshot()});
-    return {...registry,runtimeAdapters:registry.providers.map(provider=>runtimeAdapters.snapshot(provider.runtimeId,provider.version))};
+    return {...enrichCapabilityValidation(registry,controller.store),runtimeAdapters:registry.providers.map(provider=>runtimeAdapters.snapshot(provider.runtimeId,provider.version))};
   };
+  const capabilityInvocation=new CapabilityInvocationService(controller.store,runtimeAdapters);
   const capabilityExecution=new CapabilityExecutionService(controller.store,controller,capabilityRegistry,runtimeAdapters);
   const sessions=new Map<string,{csrf:string;expires:number}>();
   const appPreview=new AppPreviewHost(id=>controller.appPreviewSnapshot(id));
@@ -114,6 +118,8 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
       }
       const capabilityEvidence=url.pathname.match(/^\/api\/capability-orchestration\/evidence\/([a-f0-9]{64})$/);
       if(req.method==='GET'&&capabilityEvidence){if(url.search)throw new AppError('INVALID_FIELDS',400);json(res,200,capabilityRouting.discovery(capabilityEvidence[1]));return;}
+      const invocationRoute=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/capability-invocations$/);
+      if(req.method==='GET'&&invocationRoute){if(url.search)throw new AppError('INVALID_FIELDS',400);json(res,200,{records:capabilityInvocation.records(invocationRoute[1])});return;}
       const executionRoute=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/capability-executions(?:\/([a-f0-9-]{36})(?:\/(start|interrupt|recover|quality-preview|quality-start|quality-resume))?)?$/);
       if(req.method==='GET'&&executionRoute&&!executionRoute[3]){
         if(url.search)throw new AppError('INVALID_FIELDS',400);
@@ -258,6 +264,7 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
           if(url.search)throw new AppError('INVALID_FIELDS',400);exact(data,[]);
           controller.assertExecutionAvailable();await nativeProbe.refresh();const registry=capabilityRegistry();capabilityRouting.recordDiscovery(registry);json(res,200,registry);return;
         }
+        if(invocationRoute){if(url.search)throw new AppError('INVALID_FIELDS',400);json(res,200,await capabilityInvocation.invoke(invocationRoute[1],data as unknown as CapabilityInvocationInput));return;}
         if(executionRoute){
           if(url.search)throw new AppError('INVALID_FIELDS',400);
           const projectId=executionRoute[1],id=executionRoute[2],action=executionRoute[3];

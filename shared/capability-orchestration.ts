@@ -1,7 +1,7 @@
 import type {NativeProbe,NativeProbeReport} from './capabilities.ts';
 import type {ExtensionInventory} from './extensions.ts';
 
-export type OrchestrationCapabilityId='execute.code'|'execute.general'|'plan'|'review.text'|'model.actual'|'skills'|'slash_commands'|'hooks'|'mcp'|'resume'|'interrupt';
+export type OrchestrationCapabilityId='execute.code'|'execute.general'|'plan'|'review.text'|'model.actual'|'skills'|'slash_commands'|'hooks'|'mcp'|'resume'|'interrupt'|'status'|'result'|'subagents';
 export type RuntimeId='codex'|'claude-code';
 export type CapabilitySupport='implemented'|'unsupported'|'unknown';
 export interface CapabilityEntry {
@@ -12,6 +12,8 @@ export interface CapabilityEntry {
   observation:'confirmed'|'unknown';
   policy:'allowed'|'blocked';
   evidence:string[];
+  /** Historical completed task runs; never a permission or model identity assertion. */
+  validation?:{nativeRuns:number;mockRuns:number;unknownRuns:number;lastRunId:string|null};
 }
 export interface ProviderCapabilityView {
   runtimeId:RuntimeId;version:string|null;installation:NativeProbe['status'];

@@ -1,5 +1,8 @@
 import type {Controller} from './controller.ts';
-import type {Run} from '../shared/types.ts';
+import {terminal,type Run} from '../shared/types.ts';
+import type {RuntimeOperationObservation} from '../shared/runtime-operation.ts';
+import type {QualityLoopRecord} from '../shared/quality-loop-record.ts';
+import {providerExecutionEvidence} from './provider-evidence.ts';
 import type {RuntimeId,OrchestrationCapabilityId} from '../shared/capability-orchestration.ts';
 import {AppError} from './errors.ts';
 import {containsCredential} from './privacy.ts';
@@ -16,7 +19,7 @@ export interface RuntimeAdapterSnapshot {
  runtimeId:RuntimeId;adapterId:string|null;revision:number;version:string|null;compatible:boolean;issue:string|null;
  capabilities:OrchestrationCapabilityId[];
 }
-const capabilities:readonly OrchestrationCapabilityId[]=['execute.code','execute.general','plan','review.text','model.actual','skills','slash_commands','hooks','mcp','resume','interrupt'];
+const capabilities:readonly OrchestrationCapabilityId[]=['execute.code','execute.general','plan','review.text','model.actual','skills','slash_commands','hooks','mcp','resume','interrupt','status','result','subagents'];
 const runtime=(id:unknown):id is RuntimeId=>id==='codex'||id==='claude-code';
 const stableVersion=(version:unknown):version is string=>typeof version==='string'&&/^(0|[1-9]\d{0,4})\.(0|[1-9]\d{0,4})\.(0|[1-9]\d{0,4})$/.test(version);
 export function compatibleRuntimeVersion(runtimeId:RuntimeId,version:string):boolean {
@@ -28,13 +31,13 @@ export function compatibleRuntimeVersion(runtimeId:RuntimeId,version:string):boo
 
 /** Only trusted server code registers adapters. No executable paths, prompts, or plugin loading. */
 export class CapabilityRuntimeAdapters {
- private controller:Pick<Controller,'submitTask'|'interrupt'>;
+ private controller:Pick<Controller,'submitTask'|'interrupt'|'store'>;
  private entries=new Map<RuntimeId,{definition:RuntimeAdapterDefinition&{capabilities:readonly OrchestrationCapabilityId[];dispatch:Controller['submitTask']};enabled:boolean}>();
  private revisions=new Map<RuntimeId,number>();
  private observedVersions=new Map<RuntimeId,string|null>();
- constructor(controller:Pick<Controller,'submitTask'|'interrupt'>){
+ constructor(controller:Pick<Controller,'submitTask'|'interrupt'|'store'>){
   this.controller=controller;
-  for(const runtimeId of ['codex','claude-code'] as const)this.register({runtimeId,adapterId:`orbit.${runtimeId}.task.v1`,compatible:version=>compatibleRuntimeVersion(runtimeId,version)},{trusted:true});
+  for(const runtimeId of ['codex','claude-code'] as const)this.register({runtimeId,adapterId:`orbit.${runtimeId}.task.v1`,compatible:version=>compatibleRuntimeVersion(runtimeId,version),capabilities:[runtimeId==='codex'?'execute.code':'execute.general','status','result','interrupt']},{trusted:true});
  }
  private bump(runtimeId:RuntimeId){this.revisions.set(runtimeId,(this.revisions.get(runtimeId)??0)+1);}
  register(definition:RuntimeAdapterDefinition,authorization:{trusted:boolean}):void {
@@ -71,8 +74,27 @@ export class CapabilityRuntimeAdapters {
   // Controller rechecks stored runtime selection and owns idempotency, policy and native execution.
   return this.entries.get(runtimeId)!.definition.dispatch(projectId,taskId,input);
  }
- async interrupt(runtimeId:RuntimeId,runId:string):Promise<void>{
+ private ownedRun(runtimeId:RuntimeId,runId:string,projectId?:string):Run {
   if(!runtime(runtimeId))throw new AppError('INVALID_ADAPTER',400);
+  const run=this.controller.store.getRun(runId);
+  if(!run)throw new AppError('RUN_NOT_FOUND',404);
+  if((run.runtime??'codex')!==runtimeId)throw new AppError('RUNTIME_MISMATCH',409);
+  const owner=run.projectId??this.controller.store.workspaces().find(workspace=>workspace.id===run.workspaceId)?.projectId;
+  if(!owner||projectId!==undefined&&owner!==projectId)throw new AppError('PROJECT_MISMATCH',409);
+  return run;
+ }
+ observe(runtimeId:RuntimeId,projectId:string,runId:string):RuntimeOperationObservation {
+  if(typeof projectId!=='string'||!projectId)throw new AppError('PROJECT_MISMATCH',409);
+  const run=this.ownedRun(runtimeId,runId,projectId),store=this.controller.store;
+  let quality:QualityLoopRecord|null=null;
+  if(store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='quality_loops'").get()){
+   const records=store.db.prepare('SELECT body FROM quality_loops WHERE project_id=? ORDER BY rowid DESC').all(projectId);
+   quality=records.map(row=>JSON.parse(String(row.body)) as QualityLoopRecord).find(record=>record.sourceRunId===run.id)??null;
+  }
+  return {runtimeId,projectId,runId:run.id,taskId:run.taskId??null,execution:run.execution,terminal:terminal(run.execution),stopConfirmed:['completed','failed','interrupted'].includes(run.execution),response:run.execution==='completed'?run.response:null,providerEvidence:providerExecutionEvidence(store,run,quality)};
+ }
+ async interrupt(runtimeId:RuntimeId,runId:string,projectId?:string):Promise<void>{
+  this.ownedRun(runtimeId,runId,projectId);
   // Contract changes must never remove the ability to stop an already running task.
   await this.controller.interrupt(runId);
  }

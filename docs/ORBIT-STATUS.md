@@ -1,3 +1,13 @@
+# Phase 5 재개 상태 (2026-10-28)
+
+- 기준 `0433529512fce809ecf213ece2471b785df63194`. [Phase5 구현·검증](ORBIT-CAPABILITY-PHASE5-2026-10-28.md), [공식 기능 행렬](ORBIT-CAPABILITY-PHASE5-CONTRACTS.md), [실제 증거](evidence/phase5-provider-validation-2026-10-28.json).
+- 공통 Runtime observe/interrupt: 정확한 Provider/project/run 소유권, 완료된 응답만 수집, lost 정지 미확인 유지. 자연어 상태·결과·중단→명시 대상→digest 승인→영속 invocation→진행판 연결. 중복·재시작·통신 불명확은 자동 재전송하지 않음.
+- Capability 표에 discovery/invocation/verification/정책/과거 native·mock·unknown 근거 분리. Subagent/Slash/Skill/MCP/Hook 호출은 차단, 기존 metadata discovery 유지.
+- 승인된 최소 Codex 실환경 회귀1건 성공: Native8,857ms/전체10,472ms, result.txt 정확, run1/재시도0/reviewer0. 서버 설정값을 실제 모델로 승격하지 않음. actual unknown / QUALITY_PRODUCER_MODEL_UNKNOWN / livePipelineVerified=false.
+- 보존된 Phase4 nativeDB 복사본으로 자연어 상태/결과 조회→기록 회귀 pass, 신규 model0/원본DB불변. Claude CLI32후보 미발견+URL handler broken link, 실인증unknown·실E2E blocked. 설치·인증변경·Claude 호출0.
+- 최종 Node24 `npm run verify` exit0: **1381 tests /1379 pass /0 fail /2 Windows-only skip**, 타입·빌드·diff pass. 모의 UI browser+독립 코드 리뷰 완료. `/tmp/orbit-phase5-verify.log`.
+- 다음: Claude 실행파일 확보/설치 및 실호출은 별도 승인. 이미 완료된 Codex 작업을 임의 반복하지 않는다. 외부 확장 실행·독립성 기준 변경·Push·배포·main 병합 없음.
+
 # Phase 4 재개 상태 (2026-10-28)
 
 - 기준 `c5400c28972a69e9907eb3ccff36b900a9bcef3f`. 이번 사용자 승인으로 Codex App Server0.165.0 실제 작업 **1건**, Orbit 재시도0, reviewer0 실행. [실제 검증 보고서](ORBIT-CAPABILITY-PHASE4-2026-10-28.md), [보존 증거](evidence/phase4-native-e2e-2026-10-28.json).

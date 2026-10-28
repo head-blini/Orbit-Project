@@ -1,0 +1,129 @@
+{
+  "kind": "phase5_actual_and_saved_evidence_separated",
+  "baselineCommit": "0433529512fce809ecf213ece2471b785df63194",
+  "newNativeE2E": {
+    "provider": "codex",
+    "version": "0.165.0",
+    "orbitDispatches": 1,
+    "orbitRetries": 0,
+    "reviewerCalls": 0,
+    "claudeCalls": 0,
+    "success": true,
+    "totalDurationMs": 10472,
+    "runDurationMs": 8857,
+    "ids": {
+      "projectId": "40f63547-e1b2-41b0-93e5-fe59b4d3fd63",
+      "workspaceId": "955757d5-e9fc-4f97-9ac7-2fc8b2b24110",
+      "taskId": "fc5af4cb-f967-4005-afa1-66fe63cea2e9",
+      "routeId": "80810af0-6fb9-4267-ac9c-f8c34cd9e567",
+      "executionId": "ceb47ea9-65ba-4694-929e-d654a79ac712",
+      "runId": "276992c5-d3ec-4df1-a6b1-c4e718421778"
+    },
+    "models": {
+      "selectedModelId": null,
+      "requestedModelId": null,
+      "serverModelId": "gpt-6-astra",
+      "actualModelId": "unknown",
+      "source": "unknown"
+    },
+    "providerEvidence": {
+      "source": "native",
+      "interface": "codex.app_server",
+      "executionObserved": true,
+      "responseDigest": "837a5ba656a20b5a035bbcfa5c5a0a0b2be44a598f90631901c48a682484a997",
+      "quality": "blocked",
+      "livePipelineVerified": false,
+      "costUsd": null,
+      "remainingQuota": null
+    },
+    "file": {
+      "exists": true,
+      "exact": true,
+      "sha256": "29519dcfb3a2b7c87f49961d2cafdcc08935529695d58a90d759b12d4b0b691a"
+    },
+    "onlyResultFileChanged": true,
+    "duplicateSameRun": true,
+    "getReadOnly": true,
+    "sourceUnchanged": true,
+    "qualityIssue": "QUALITY_PRODUCER_MODEL_UNKNOWN",
+    "rawArtifacts": "/private/tmp/orbit-phase4-h9Hmlk",
+    "eventCounts": {
+      "project.registered": 1,
+      "workspace.creating": 1,
+      "workspace.ready": 1,
+      "provider.status": 3,
+      "workspace.selected": 1,
+      "native.connection.intent": 1,
+      "native.process.observed": 3,
+      "native.connection.session": 1,
+      "session.created": 1,
+      "planning.created": 1,
+      "planning.approved": 1,
+      "planning.tasks_created": 1,
+      "capability.route": 1,
+      "capability.plan": 1,
+      "capability.execution": 3,
+      "run.created": 1,
+      "run.model_attribution": 5,
+      "run.runtime_source": 1,
+      "run.accepted": 1,
+      "run.started": 1,
+      "message.updated": 75,
+      "workspace.changed": 1,
+      "run.completed": 1,
+      "quality.created": 1,
+      "native.transport.closed": 1,
+      "native.connection.recorded": 1
+    }
+  },
+  "savedNativeEvidenceReplay": {
+    "kind": "offline_replay_of_retained_native_evidence",
+    "dir": "/private/tmp/orbit-phase5-history-z5q72E",
+    "originalDbUnchanged": true,
+    "observations": [
+      {
+        "text": "실행 상태 조회",
+        "capabilityId": "status",
+        "routeId": "e7ae858d-abe3-49d5-879e-e86de17b369e",
+        "operationId": "ff8198b8-d55b-43ac-a3c2-2917a76d86ad",
+        "status": "completed",
+        "source": "native",
+        "executionObserved": true,
+        "savedResponseMatches": true,
+        "duplicateReused": true
+      },
+      {
+        "text": "결과 수집",
+        "capabilityId": "result",
+        "routeId": "58387875-f69b-4761-a89d-0fc2496734bd",
+        "operationId": "6caef8e9-72c7-4f12-a21e-ef51fefe078f",
+        "status": "completed",
+        "source": "native",
+        "executionObserved": true,
+        "savedResponseMatches": true,
+        "duplicateReused": true
+      }
+    ],
+    "validation": {
+      "nativeRuns": 1,
+      "mockRuns": 0,
+      "unknownRuns": 0,
+      "lastRunId": "b51d3442-ff27-4048-ac8f-6a9d248c3f9f"
+    },
+    "execution": {
+      "status": "quality_blocked",
+      "recoveryRequired": false,
+      "actualModel": "unknown"
+    },
+    "runCount": 1,
+    "providerLaunches": 0,
+    "getInert": true
+  },
+  "unverified": [
+    "Claude native authentication/execution unavailable; CLI not found",
+    "Actual Codex model unknown; independent quality review blocked",
+    "Real provider quota exhaustion/auth failure/forced interruption not induced",
+    "External Slash/Skill/MCP/Hook/Subagent invocation blocked"
+  ],
+  "mockEvidence": "Separate test results in Phase5 report; not native execution proof"
+}

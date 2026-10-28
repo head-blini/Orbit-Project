@@ -1,13 +1,19 @@
-import test from 'node:test';
+import test,{afterEach} from 'node:test';
+import {Store} from '../server/store.ts';
+const stores:Store[]=[];
+afterEach(()=>{for(const store of stores.splice(0))store.close();});
+function testStore(){const store=new Store(':memory:');stores.push(store);return store;}
 import assert from 'node:assert/strict';
 import {CapabilityRuntimeAdapters} from '../server/capability-runtime-adapters.ts';
 import type {Run} from '../shared/types.ts';
 import {discoverCapabilities} from '../server/capability-adapters.ts';
 
 function fixture(){
- const calls:unknown[]=[];
- const adapters=new CapabilityRuntimeAdapters({submitTask:async(...args)=>{calls.push(args);return {id:'run'} as Run;},interrupt:async(id)=>{calls.push(id);}});
- return {adapters,calls};
+ const calls:unknown[]=[];const store=testStore();
+ const claudeRun=store.createRun('claude','hash','prompt',undefined,{runtime:'claude-code',projectId:'p'});
+ const codexRun=store.createRun('codex','hash','prompt',undefined,{runtime:'codex',projectId:'p'});
+ const adapters=new CapabilityRuntimeAdapters({store,submitTask:async(...args)=>{calls.push(args);return {id:'run'} as Run;},interrupt:async(id)=>{calls.push(id);}});
+ return {adapters,calls,claudeRun,codexRun};
 }
 test('runtime compatibility requires observed contract version and changes snapshot identity on version change',()=>{
  const {adapters}=fixture();
@@ -32,7 +38,7 @@ test('discovery, invocation and verification are independent support dimensions'
  assert.equal(codex.capabilities.find(c=>c.id==='model.actual')!.verification,'unsupported');
 });
 test('dispatch reuses approved task controller path without arbitrary prompt or fallback',async()=>{
- const {adapters,calls}=fixture();
+ const {adapters,calls,claudeRun,codexRun}=fixture();
  await assert.rejects(adapters.dispatch('codex','p','t',{requestId:'request'}),/CAPABILITY_RUNTIME_INCOMPATIBLE/);
  adapters.snapshot('codex','0.162.1');adapters.snapshot('claude-code','2.1.259');
  await assert.rejects(adapters.dispatch('codex','p','t',{requestId:'request'}),/WORKSPACE/);
@@ -41,10 +47,10 @@ test('dispatch reuses approved task controller path without arbitrary prompt or 
  await adapters.dispatch('codex','p','t',{requestId:'request',workspaceId:'w',expectedAcceptanceDigest:'digest'});
  await adapters.dispatch('claude-code','p','t',{requestId:'request2'});
  assert.equal(calls.length,2);assert.deepEqual(calls[1],['p','t',{requestId:'request2'}]);
- await adapters.interrupt('claude-code','run');assert.equal(calls[2],'run');
+ await adapters.interrupt('claude-code',claudeRun.id);assert.equal(calls[2],claudeRun.id);
 });
 test('trusted replacement, disable and unregister invalidate contracts but never prevent stopping',async()=>{
- const {adapters,calls}=fixture();
+ const {adapters,calls,claudeRun,codexRun}=fixture();
  const before=adapters.snapshot('codex','0.162.1');
  const definition={runtimeId:'codex' as const,adapterId:'reviewed-codex',compatible:(version:string)=>version==='0.162.1'};
  assert.throws(()=>adapters.register(definition,{trusted:false}),/ADAPTER_TRUST_REQUIRED/);
@@ -52,19 +58,20 @@ test('trusted replacement, disable and unregister invalidate contracts but never
  const after=adapters.snapshot('codex','0.162.1');assert.ok(after.revision>before.revision);assert.equal(after.adapterId,'reviewed-codex');
  adapters.disable('codex');assert.equal(adapters.snapshot('codex','0.162.1').compatible,false);
  await assert.rejects(adapters.dispatch('codex','p','t',{requestId:'request',workspaceId:'w'}),/CAPABILITY_RUNTIME_INCOMPATIBLE/);
- await adapters.interrupt('codex','existing');assert.equal(calls[0],'existing');
+ await adapters.interrupt('codex',codexRun.id);assert.equal(calls[0],codexRun.id);
  adapters.unregister('codex');assert.equal(adapters.snapshot('codex','0.162.1').issue,'ADAPTER_NOT_REGISTERED');
  adapters.register(definition,{trusted:true});assert.ok(adapters.snapshot('codex','0.162.1').revision>after.revision);
  assert.throws(()=>adapters.register({...definition,runtimeId:'external'} as never,{trusted:true}),/INVALID_ADAPTER/);
 });
 test('provider failures are surfaced with no paid or alternate-provider fallback',async()=>{
- let count=0;const adapters=new CapabilityRuntimeAdapters({submitTask:async()=>{count++;throw Error('native failed');},interrupt:async()=>{throw Error('stop uncertain');}});
+ const store=testStore(),run=store.createRun('request','hash','prompt',undefined,{runtime:'claude-code',projectId:'p'});
+ let count=0;const adapters=new CapabilityRuntimeAdapters({store,submitTask:async()=>{count++;throw Error('native failed');},interrupt:async()=>{throw Error('stop uncertain');}});
  adapters.snapshot('claude-code','2.1.259');
  await assert.rejects(adapters.dispatch('claude-code','p','t',{requestId:'request'}),/native failed/);assert.equal(count,1);
- await assert.rejects(adapters.interrupt('claude-code','r'),/stop uncertain/);
+ await assert.rejects(adapters.interrupt('claude-code',run.id),/stop uncertain/);
 });
 test('trusted registration replaces dispatch and feature changes invalidate the snapshot',async()=>{
- const {adapters,calls}=fixture();let customCalls=0;
+ const {adapters,calls,claudeRun,codexRun}=fixture();let customCalls=0;
  const original=adapters.snapshot('claude-code','2.1.259');
  adapters.register({runtimeId:'claude-code',adapterId:'reviewed.claude.v2',compatible:()=>true,capabilities:['execute.general'],dispatch:async(projectId,taskId,input)=>{
   customCalls++;assert.equal(projectId,'p');assert.equal(taskId,'t');assert.deepEqual(input,{requestId:'request'});return {id:'custom-run'} as Run;

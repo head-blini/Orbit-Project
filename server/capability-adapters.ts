@@ -26,10 +26,10 @@ function probe(value:unknown):NativeProbe {
 function observedAt(value:unknown):string|null {
   return typeof value==='string'&&/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value)&&Number.isFinite(Date.parse(value))?value:null;
 }
-const ids:readonly OrchestrationCapabilityId[]=['execute.code','execute.general','plan','review.text','model.actual','skills','slash_commands','hooks','mcp','resume','interrupt'];
+const ids:readonly OrchestrationCapabilityId[]=['execute.code','execute.general','plan','review.text','model.actual','skills','slash_commands','hooks','mcp','resume','interrupt','status','result','subagents'];
 const implementations:Record<RuntimeId,ReadonlySet<OrchestrationCapabilityId>>={
-  codex:new Set(['execute.code','plan','review.text','resume','interrupt']),
-  'claude-code':new Set(['execute.general','plan','review.text','model.actual','interrupt']),
+  codex:new Set(['execute.code','plan','review.text','resume','interrupt','status','result']),
+  'claude-code':new Set(['execute.general','plan','review.text','model.actual','interrupt','status','result']),
 };
 /** Only metadata presence is observed, never configuredEnabled/nativeTrust as permission. */
 function hasMetadata(input:CapabilityDiscoveryInput,kind:'skills'|'hooks'|'mcp'):boolean {
@@ -54,7 +54,7 @@ function discoverProvider(runtimeId:RuntimeId,input:CapabilityDiscoveryInput):Pr
     const implemented=implementations[runtimeId].has(id);
     const extension=id==='skills'||id==='hooks'||id==='mcp';
     const metadata=codex&&ready&&extension&&hasMetadata(input,id);
-    const uncertain=extension||id==='slash_commands';
+    const uncertain=extension||id==='slash_commands'||id==='subagents';
     // This registry routes Quality Loop work. Its Codex review stays blocked while
     // actual execution model evidence is unavailable; existing Review is unchanged.
     const blocked=uncertain||!implemented||id==='model.actual'||(codex&&id==='review.text');
@@ -65,6 +65,8 @@ function discoverProvider(runtimeId:RuntimeId,input:CapabilityDiscoveryInput):Pr
     if(codex&&id==='model.actual')evidence.push('codex.app_server.no_turn_model_attestation');
     if(codex&&id==='review.text')evidence.push('orbit.quality_loop.actual_model_required');
     if(extension)evidence.push('orbit.extension.activation_not_authorized');
+    if(id==='status'||id==='result')evidence.push('orbit.persisted_run.read_only');
+    if(id==='subagents')evidence.push(codex?'codex.multi_agent.disabled':'claude.subagents.documented_not_invoked');
     return {id,discovery:codex&&extension?'implemented':uncertain?'unknown':'implemented',
       invocation:implemented&&id!=='model.actual'?'implemented':'unsupported',
       verification:implemented?'implemented':'unsupported',
