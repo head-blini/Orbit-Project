@@ -1,33 +1,41 @@
 # Orbit 개발 현황 (F01~F11)
 
-## 재개 요약 (새 세션은 여기부터 · 갱신 2026-10-28 16:10 KST, 담당 Claude Code)
+## 재개 요약 (새 세션은 여기부터 · 갱신 2026-10-28 16:55 KST, 담당 Claude Code)
 
 **기준 문서(원문을 직접 읽을 것, 이 요약은 기준이 아님)**
 - 최상위 비전: `docs/ORBIT-VISION.md` (상태: 사용자 확정, 기준일 2026-10-28). 원문 §1: “Orbit은 누구나 자연어로 목표를 입력하면 다양한 AI 모델·에이전트·Skills·MCP·외부 도구를 활용해 기획, 실행, 협업, 검증, 결과물 생성까지 수행하고, 프로젝트 방향성과 진행 상태를 일관되게 관리하는 범용 AI 작업 자동화 플랫폼이다.”
-- 승인 범위: `docs/ORBIT-SCOPE-2026-10-27.md` v1.1(F01~F11, A01~A16, 2026-10-28 공동 개발 정정). 구현 순서: `docs/ORBIT-IMPLEMENTATION-PLAN-2026-10-27.md`. 분담: `docs/ORBIT-COLLABORATION.md`.
+- 승인 범위: `docs/ORBIT-SCOPE-2026-10-27.md` v1.1(F01~F11, A01~A16). 구현 순서: `docs/ORBIT-IMPLEMENTATION-PLAN-2026-10-27.md`. 분담: `docs/ORBIT-COLLABORATION.md`.
 
 **저장소 상태(관측)**
-- 통합 브랜치 `codex/orbit-mac-handoff-2026-10-26` HEAD `59dcc7c`(병합) ← `8132244`. 원격 대비 로컬이 앞섬(작업 시작 시 ahead 38, 이번 2커밋 추가). **원격은 이번에 조회하지 않음.** Push 안 함.
-- worktree: `.worktrees/claude-ui`(`claude/first-flow` = `8132244`, 깨끗함), `.worktrees/codex-core`(`codex/core-model-registry` `ddb74d8`, 변경 없음), `.worktrees/verify`(detached `c14df45`, 이전 데이터는 `.local-c4-1eba7d3`로 보존). 루트에 미추적 `.DS_Store`만 있음.
-- Codex: 크레딧 소진으로 **차단**(아래 ‘현재 차단’). 그동안 Claude Code가 단일 담당으로 Codex 소유 파일(`server/controller.ts`·`http.ts`·`planning-agent-service.ts`·`planning/agent-input.ts`·`shared/deliverables.ts`)도 순차 수정했다. Codex 재개 시 이 변경을 기준으로 이어갈 것.
+- 통합 브랜치 `codex/orbit-mac-handoff-2026-10-26`: 코드 HEAD `440b8da`(병합) ← `4e52d99`(UI), 그 위에 이 문서 커밋. 원격은 이번에도 조회하지 않음, Push 안 함.
+- worktree: `.worktrees/claude-ui`(`claude/ui-home-project` = `4e52d99`, 깨끗함, 일회용 서버 포트 4399 실행 중·DB는 `.local/`), `.worktrees/codex-core`(`ddb74d8`, 변경 없음), `.worktrees/verify`(detached `c14df45`).
+- Codex: 크레딧 소진으로 **차단** 지속. Claude Code가 단일 담당.
 
-**현재 작업** `FF1 첫 비코드 흐름` · 담당 Claude Code
-- 목표: “첨부한 자료를 비교해서 표와 요약 보고서를 만들어 줘.” 새 작업→기획 AI→명세 검토·승인→Git 없는 프로젝트→실행 AI→실행·진행→결과물 열기→후속 수정→재시작 확인.
-- 허용 범위: 홈·일반 프로젝트 Start·진행판 결과물 표시, 자료 저장(inputs/), Claude 기획 입력·파서, 간편 메뉴. 하지 않을 것: 전체 UI 확산, 새 의존성, 모델 Registry(C5), ChatGPT 웹 자동화, 원격 Push.
-- 완료 조건: 사용자 수용 조건 1~7(아래 FF1 검증). 상태: **구현·실연동 1회 통과, 사용자 화면 확인 대기.**
-- 다음 행동 하나: 사용자가 홈·프로젝트 화면 미리보기를 확인하면, 일반 작업의 근거 대조 결과를 작업 검증 기록(CheckRecord)에 연결해 진행판 ‘검증 통과’ 집계에 반영한다(현재는 결과물 목록에만 표시).
+**현재 작업** `UI1 홈·프로젝트 화면 정리` · 담당 Claude Code
+- 목표: 초보자가 자연어 입력부터 결과물까지 한 흐름으로 쓰도록 홈·프로젝트 화면과 간편/고급 모드를 정리. 기능 삭제·비전 변경 없음.
+- 허용 범위: `web/**` 홈·프로젝트·결과물·설정 화면, 내비게이션, 기획 패널 표시. 하지 않을 것: 나머지 화면 대규모 개편(사용자 확인 전), 서버·DB·실행기 변경, 미구현 기능(교차 검증·자동 수정·자동 추천·이미지)을 동작처럼 표시.
+- 상태: **구현·브라우저 실연동 확인, 사용자 화면 확인 대기.**
+- 다음 행동 하나: 사용자 화면 확인 후, 피드백 반영 → 같은 방식으로 진행 현황·기획 스튜디오 화면 정리 여부 결정. (FF1의 다음 행동 ‘근거 대조→CheckRecord 연결’은 그 다음 순서로 유지)
 
-**FF1 검증 (대상 `8132244`, 2026-10-28 KST)**
-| 구분 | 명령/방법 | 결과 | 증거 |
-|---|---|---|---|
-| 구현 | `npm run typecheck` / `npm run build` | 0 / 0 | — |
-| 단위·통합 | `npm test` | 1201 / 1199 pass / 0 fail / 2 Windows-only skip, exit 0. 최초 실행은 12 fail(아래 ‘테스트 변경’) 후 수정·재실행 | `tests/first-flow.test.ts`(10) |
-| 실연동 | Chrome(Claude in Chrome)으로 일회용 서버 `.worktrees/claude-ui` 포트 4399, 샘플 CSV 2개 | 기획 2회(1회 `PLANNING_PROPOSAL_INVALID` → 원인 수정 후 성공), 후속 기획 1회, Claude Code 실행 4회 모두 completed | DB `.worktrees/claude-ui/.local/`(gitignore, 이 PC에만 있음) |
-| 사실 확인 | 결과물 4개 표 수치를 입력 CSV·계산값과 스크립트로 대조 | 설명 불가 수치 0개 | 이 문서 FF1 기록 |
-| 재시작 | 서버 종료→재시작 전후 runs 3·events seq 46 동일, 화면 상태 동일 | 자동 재실행 없음 | — |
-| 사용자 확인 | — | **미확인** | — |
+**UI1 검증 (대상 `4e52d99`, 2026-10-28 KST)**
+| 구분 | 명령/방법 | 결과 |
+|---|---|---|
+| 구현 | `npm run typecheck` / `npm run build` | 0 / 0 |
+| 단위·통합 | `npm test` | 1205 / 1203 pass / 0 fail / 2 Windows-only skip, exit 0. 중간 실행 8 fail → 코드·하네스 조정 후 재실행(아래 테스트 변경) |
+| 브라우저(Chrome 확장, 1470px) | 홈 새 작업(첨부·예시) → 프로젝트 화면 이동·요청 채움 → 실제 Claude 기획 → 질문 6개 답변 v2 → 승인·작업 준비 → 실제 Claude 실행 1회 completed → 결과물 미리보기 → 고급 모드 전환(15개 메뉴·AI 명령·저장소 관리) → 간편 복귀 | 모두 동작, 데이터 동일 |
+| 반응형 | headless Chrome + CDP 뷰포트 390/820/1280px, 가로 넘침 측정 | `scrollWidth==clientWidth`, 넘침 요소 0 |
+| 사실 확인 | 새 결과물 표 수치 22개를 입력 CSV·계산값과 대조 | 설명 불가 0 |
+| 사용자 확인 | — | **미확인** |
 
-**최소 읽기 목록:** `AGENTS.md` → `docs/ORBIT-VISION.md` → `docs/ORBIT-SCOPE-2026-10-27.md` → 이 문서 → `docs/ORBIT-COLLABORATION.md`. 코드 진입점: `web/start.tsx`, `web/new-task.tsx`, `server/materials.ts`, `server/deliverables.ts`, `server/planning/agent-input.ts`.
+**테스트 변경(별도 검토 대상)**
+- `tests/orbit-navigation.test.ts`: 페이지 수 14→15(새 `results` 페이지). 모든 페이지 URL 새로고침 유지 계약은 그대로.
+- `tests/studio-ui.test.ts`: 고급 메뉴 개수 단언 14→`pages.length`(원 계약 “모든 페이지 표시” 유지), 간편 모드 문구 ‘고급 모드로 전환’.
+- 기존 단언 유지를 위해 코드 쪽을 맞춘 것: 간편 기획 패널의 8,000자·32 KiB·원문 미저장 고지는 접힌 상세 안에 유지, `App`의 모드 구독은 `useState`/`useEffect`(가짜 훅 하네스 호환), `WorkspacePanel`은 프로젝트 화면의 children으로 전달.
+- 신규 `tests/ui-home-project.test.ts`(4): 단계·다음 할 일·모드 저장.
+
+**FF1 (직전 작업) 요약:** 첫 비코드 흐름 구현·실연동 통과(`8132244`), 근거 대조의 진행판 검증 집계 연결은 미완. 상세는 아래 ‘FF1 첫 비코드 흐름’ 절.
+
+**최소 읽기 목록:** `AGENTS.md` → `docs/ORBIT-VISION.md` → `docs/ORBIT-SCOPE-2026-10-27.md` → 이 문서 → `docs/ORBIT-COLLABORATION.md`. 코드 진입점: `web/home.tsx`, `web/project-work.tsx`(+`project-work-model.ts`), `web/ui-mode.ts`, `web/start.tsx`(GeneralPlanCard·코드 흐름), `web/new-task.tsx`, `server/materials.ts`, `server/deliverables.ts`, `server/planning/agent-input.ts`.
 
 **재개 규칙(강제 아님):** 새 세션은 위 기준 원문과 이 요약을 대조하고, `git status`/`git worktree list`로 실제 상태를 확인한 뒤 진행한다. 이 요약과 실제가 다르면 실제를 기록하고, 미확인 실행은 재실행하지 않는다. 이 규칙과 테스트는 에이전트가 수정할 수 있으므로 자동 강제가 아니다. 통합 담당의 독립 diff·검증 검토가 최종 관문이다.
 
@@ -68,7 +76,10 @@ HEAD `d39679e`: `npm ci` → `npm run typecheck` exit 0, `npm run build` exit 0,
 - 후속 기획이 제약(“통화는 KRW”)까지 별도 작업으로 쪼개 작업 6개가 생김(후속 R1만 실행). 기획 지시문의 작업 분해 기준 개선 필요(F01).
 - 기획 지시문의 코드 앱 미리보기 제약(`staticAppPreviewCapability`)이 비코드 기획에도 들어감(기존 발견, 미해결).
 - 요청 원문은 브라우저 메모리로만 전달(저장하지 않음). 새로고침하면 입력칸이 비고 첨부 자료 목록만 남는다.
-- 기획 패널의 ‘기획 상태 새로고침’ 버튼이 입력 라벨과 겹쳐 보임(표시 문제).
+- (해결 `4e52d99`) 기획 패널의 ‘기획 상태 새로고침’ 버튼이 입력 라벨과 겹쳐 보임.
+- 기획이 “작업은 하나로” 요청에도 요구사항마다 작업을 만들어 작업 6개가 생김(UI1 재현). 기획 지시문의 작업 분해 기준 개선 필요(F01).
+- 프로젝트 화면 실행 목록은 여러 기획 버전의 작업을 한 목록에 섞어 보여 줌(기획별 묶음 미구현).
+- Chrome 확장 창 크기 조절이 뷰포트에 반영되지 않고, 서버 보안 헤더로 iframe 삽입도 막혀 반응형 확인은 headless Chrome+CDP로 수행.
 - 재빌드 직후 첫 접속에 이전 `app.js`가 보인 현상 재발(`Cache-Control: no-store`는 이미 설정됨, 원인 미확인).
 
 ## 요구사항별 상태
@@ -85,7 +96,7 @@ HEAD `d39679e`: `npm ci` → `npm run typecheck` exit 0, `npm run build` exit 0,
 | F08 결과물·검증 | 코드: 구현. **일반 프로젝트: 입력 자료/결과물 분리, 작업 출처·크기·digest·형식 검사·미리보기, 표 수치 근거 대조(passed/needs_review/unverified)**. 내용 적합성은 `unverified`. **근거 대조는 진행판 검증 집계에 미연결** | deliverables·first-flow | **Chrome FF1: 결과물 4개·근거 대조·미리보기** | Claude 결과물, 독립 대조 0 불일치 | A13 | `8132244` | — | 근거 대조→작업 CheckRecord 연결, 결과물 버전 이력, 내보내기 |
 | F09 중단·복구 | **부분**: lost/quarantine/interrupt/중복 방지, Claude 실행은 해당 작업만 격리, Claude 한도 이벤트→진행판 `quota_wait`, keep-alive 연결 끊김 수정 | 있음 | — | Claude live 중단(스크립트) | A10 | `afd7747`, `3c4aff4` | — | 명시적 복구 API(Claude 작업), 한도 초기화 후 재개 안내 |
 | F10 모델·사용량·도구 | **부분**: 프로젝트별 기획/실행 AI 선택(실행 가능한 조합만 저장, 실행 시 재확인), Model Hub(env 등록만), Codex·Claude 사용량 관측. **사용자 정의 모델·제공자 등록 미구현** | ai-preferences·UI | AI 선택 화면 표시 | 외부 모델 미검증 | A14,A15 | `fbb7cf5`, `05c98e6` | — | **사용자 정의 Registry(DB·UI)**, 프로젝트 도구 프로필 |
-| F11 간편·고급 | **부분**: 사이드바 간편(4개+현재)/고급 메뉴 전환(브라우저 저장), 진행판 요약/펼침, Start/Studio 표현. 페이지 내부 간편/고급 구분은 부분 | studio-ui·first-flow | Chrome: 간편 메뉴 | — | A12 | `8132244` | — | 같은 데이터로 모드 전환 검증(A12), 진행판·기획 스튜디오 간편 표현 |
+| F11 간편·고급 | **부분**: 간편(새 작업·프로젝트·진행 현황·결과물·설정)/고급(기존 전 페이지·AI 명령·기술 상세) 전환을 설정·사이드바에서 제공, 같은 데이터 사용. 홈·프로젝트·결과물 화면 간편 표현. 진행판·기획 스튜디오 내부는 기존 표현 | studio-ui·ui-home-project | **Chrome: 모드 전환 전후 데이터 동일, 390/820/1280px** | — | A12 | `4e52d99` | — | 사용자 화면 확인 후 나머지 화면 정리 |
 
 ## 현재 차단 (2026-10-28)
 
@@ -105,6 +116,7 @@ HEAD `d39679e`: `npm ci` → `npm run typecheck` exit 0, `npm run build` exit 0,
 
 | 시각(KST) | 담당 | 작업 | 결과 |
 |---|---|---|---|
+| 2026-10-28 | Claude Code | **UI1 홈·프로젝트 화면**: 홈 새 작업 우선·예시·최근 프로젝트, 프로젝트 작업 화면(6단계·다음 할 일·기획·실행·추가 지시·AI 선택·자료·결과물), 결과물 페이지, 설정 모드 전환, 간편/고급 메뉴 | typecheck·build 0, 전체 1205/1203/0/2 skip, Chrome 실연동 기획 1·실행 1, 반응형 3폭, `4e52d99`→병합 `440b8da` |
 | 2026-10-28 | Claude Code | **FF1 첫 비코드 흐름**(Codex 차단 중 단일 담당, Codex 소유 파일 포함): 홈 새 작업·자료 저장·Claude 기획 펜스/자료 읽기·질문 답변 버전·일반 프로젝트 승인 카드·근거 대조·간편 메뉴 | typecheck·build 0, 전체 1201/1199/0/2 skip(최초 12 fail→수정), Chrome 실연동 기획 3·실행 4, `8132244`→병합 `59dcc7c` |
 | 2026-10-28 | Claude Code | 일반 프로젝트 Start를 자연어 기획 요청으로 시작, 저장 버튼 이름 정리 | `c14df45` |
 | 2026-10-28 | Claude Code | T0 문서 정리: SCOPE v1.1 공동 개발 정정, 경로 수정, COLLABORATION·STATUS 작성 | 문서만 변경, `615fc72` |
