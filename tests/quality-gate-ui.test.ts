@@ -4,6 +4,7 @@ import type {ProjectProgress,ProgressTask,TaskStage} from '../shared/project-pro
 import type {QualityLoopRecord,QualityModelEvidence,QualityStep} from '../shared/quality-loop-record.ts';
 import type {QualityLoopResult} from '../shared/quality-loop.ts';
 import {projectSteps,nextAction,qualitySteps,taskQuality} from '../web/project-work-model.ts';
+import type {QualityDimension,QualityProgress,QualityStatus} from '../shared/quality-progress.ts';
 
 // QG-UI-01: the 교차 검증 / 수정·재검증 steps come only from recorded Quality Loops (mock fixtures, no model calls).
 const native=(modelId:string|null,source:QualityModelEvidence['evidenceSource']|null='native'):QualityModelEvidence=>
@@ -96,4 +97,23 @@ test('native origin alone is not proof of a completed independent review',()=>{
     assert.equal(q.phase,'unverified',name);assert.match(q.reason,/독립 검토 완료 근거/,name);
     assert.notEqual(steps(progress(task([record]))).cross.state,'done',name);
   }
+});
+
+// QG-01 server dimensions (tasks[].quality) may only downgrade the UI verdict.
+const dim=(status:QualityStatus,blockers:string[]=[]):QualityDimension=>({status,evidenceIds:[],blockers,nextAction:null});
+const server=(over:Partial<QualityProgress>={}):QualityProgress=>({execution:dim('completed'),format:dim('not_run'),codeVerification:dim('not_run'),semantic:dim('passed'),
+  independentReview:dim('completed'),repair:dim('not_run'),revalidation:dim('not_run'),userApproval:dim('not_run'),evidence:[],...over});
+
+test('server quality dimensions confirm but never upgrade the UI verdict',()=>{
+  assert.equal(taskQuality(task([loop({})],{quality:server()})).phase,'passed');
+  assert.equal(taskQuality(task([loop({})])).phase,'passed','older servers without quality keep UI behaviour');
+  const recorded=taskQuality(task([loop({})],{quality:server({semantic:dim('recorded',['QUALITY_EVIDENCE_SOURCE_UNKNOWN'])})}));
+  assert.equal(recorded.phase,'unverified');assert.match(recorded.reason,/QUALITY_EVIDENCE_SOURCE_UNKNOWN/);
+  assert.equal(taskQuality(task([loop({})],{quality:server({independentReview:dim('not_run')})})).phase,'unverified');
+  assert.equal(taskQuality(task([loop({})],{quality:server({semantic:dim('stale')})})).phase,'stale');
+  assert.equal(taskQuality(task([loop({repairs:1})],{quality:server({repair:dim('completed'),revalidation:dim('unknown')})})).phase,'unverified');
+  assert.equal(taskQuality(task([loop({repairs:1})],{quality:server({repair:dim('completed'),revalidation:dim('passed')})})).phase,'passed');
+  assert.equal(taskQuality(task([loop({},{producer:native('claude-x','mock')})],{quality:server()})).phase,'unverified','a server pass never lifts a mock record');
+  assert.equal(taskQuality(task([],{quality:server()})).phase,'none','server dimensions alone are not a quality record');
+  assert.equal(taskQuality(task([loop({status:'reviewing'})],{quality:server({semantic:dim('stale')})})).phase,'review','active loops stay visible');
 });

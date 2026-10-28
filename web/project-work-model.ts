@@ -1,5 +1,6 @@
 import type {ProjectProgress,ProgressTask} from '../shared/project-progress.ts';
 import type {QualityLoopRecord,QualityModelEvidence} from '../shared/quality-loop-record.ts';
+import type {QualityDimension,QualityProgress} from '../shared/quality-progress.ts';
 
 /** Project screen read model: pure functions over recorded progress and file counts. */
 export type StepState='done'|'active'|'pending'|'attention'|'blocked'|'unavailable';
@@ -12,7 +13,7 @@ export type QualityOrigin='native'|'mock'|'unknown';
 export const qualityOriginLabel:Record<QualityOrigin,string>={native:'실제 실행 관측',mock:'모의 실행',unknown:'모델 미확인'};
 /** Latest Quality Loop phase per task. `passed` needs native identities, a current baseline and passed required checks. */
 export type QualityPhase='none'|'review'|'fix'|'retest'|'blocked'|'failed'|'stale'|'unverified'|'passed';
-export interface TaskQuality {taskId:string;title:string;phase:QualityPhase;origin:QualityOrigin;reason:string;loop:QualityLoopRecord|null}
+export interface TaskQuality {taskId:string;title:string;phase:QualityPhase;origin:QualityOrigin;reason:string;loop:QualityLoopRecord|null;server?:QualityProgress}
 const phaseLabel:Record<QualityPhase,string>={none:'품질 기록 없음',review:'독립 검토 중',fix:'수정 중',retest:'재검증 중',blocked:'품질 검증 차단',failed:'품질 검증 실패',stale:'이전 기준 결과 · 재검증 필요',unverified:'통과로 보지 않음',passed:'독립 검토 일치 · 필수 검사 통과'};
 
 export function qualityOrigin(loop:QualityLoopRecord):QualityOrigin{
@@ -31,9 +32,19 @@ export function independentlyReviewed(loop:QualityLoopRecord):boolean{
 }
 const blockReason=(loop:QualityLoopRecord)=>loop.recoveryRequired?'실행 종료 확인 필요':loop.result.issue==='INDEPENDENT_MODEL_REQUIRED'?'실행 AI와 다른 독립 검토 모델이 필요합니다':/MODEL.*UNKNOWN|MODEL_MISMATCH|MODEL_EVIDENCE/.test(loop.result.issue??'')?'모델 신원을 확인하지 못했습니다':/QUOTA|RATE_LIMIT/.test(loop.result.issue??'')?'사용량 한도 대기':/PERMISSION|APPROVAL_DENIED|TOOLS_DENIED/.test(loop.result.issue??'')?'권한 확인 필요':loop.result.issue??'차단 사유 미기록';
 
-/** Pure: classifies one task's newest Quality Loop record; never infers a pass from missing data. */
+/** Pure: classifies one task's newest Quality Loop record, then lets the server's QG-01 dimensions (when present) only downgrade it. */
 export function taskQuality(task:ProgressTask):TaskQuality{
-  const loop=task.qualityLoops?.[0]??null,base={taskId:task.id,title:task.title,loop};
+  const local=loopQuality(task),server=task.quality;
+  if(!server||!local.loop||!['passed','failed','unverified'].includes(local.phase))return local;
+  const blockers=(...dims:QualityDimension[])=>[...new Set(dims.flatMap(d=>d.blockers))].join(', ')||'근거 없음';
+  if([server.semantic,server.independentReview,server.revalidation].some(d=>d.status==='stale'))return {...local,phase:'stale',reason:'서버 근거: 기준이나 결과물이 바뀌어 재검증이 필요합니다'};
+  if(local.phase!=='passed')return local;
+  if(server.independentReview.status!=='completed'||server.semantic.status!=='passed')return {...local,phase:'unverified',reason:`서버 근거 미충족 (독립 검토 ${server.independentReview.status} · 의미 기준 ${server.semantic.status}): ${blockers(server.independentReview,server.semantic)}`};
+  if(server.repair.status==='completed'&&server.revalidation.status!=='passed')return {...local,phase:'unverified',reason:`수정 후 재검증 근거 없음 (${server.revalidation.status}): ${blockers(server.revalidation)}`};
+  return local;
+}
+function loopQuality(task:ProgressTask):TaskQuality{
+  const loop=task.qualityLoops?.[0]??null,base={taskId:task.id,title:task.title,loop,server:task.quality};
   if(!loop)return {...base,phase:'none',origin:'unknown',reason:'품질 검증을 실행한 기록이 없습니다'};
   const origin=qualityOrigin(loop),{status,repairs}=loop.result;
   if(loop.recoveryRequired||status==='blocked')return {...base,phase:'blocked',origin,reason:blockReason(loop)};
@@ -46,7 +57,7 @@ export function taskQuality(task:ProgressTask):TaskQuality{
   if(loop.verification.status!=='passed')return {...base,phase:'unverified',origin,reason:`필수 검사 ${loop.verification.status==='failed'?'실패':'미확인'}`};
   return {...base,phase:'passed',origin,reason:repairs?`수정 ${repairs}회 후 재검증 통과`:'수정 없이 통과'};
 }
-const evidenceLine=(q:TaskQuality)=>q.loop?`${q.title}: ${phaseLabel[q.phase]} · ${qualityOriginLabel[q.origin]} · ${q.reason} · 기록 ${q.loop.id.slice(0,8)} · 실행 ${q.loop.sourceRunId.slice(0,8)} · 회차 ${q.loop.result.rounds.length} · 필수 검사 ${q.loop.verification.status}${q.loop.result.issue?' · '+q.loop.result.issue:''}`:`${q.title}: ${phaseLabel.none}`;
+const evidenceLine=(q:TaskQuality)=>q.loop?`${q.title}: ${phaseLabel[q.phase]} · ${qualityOriginLabel[q.origin]} · ${q.reason} · 기록 ${q.loop.id.slice(0,8)} · 실행 ${q.loop.sourceRunId.slice(0,8)} · 회차 ${q.loop.result.rounds.length} · 필수 검사 ${q.loop.verification.status}${q.loop.result.issue?' · '+q.loop.result.issue:''}${q.server?` · 서버 독립 검토 ${q.server.independentReview.status} · 의미 기준 ${q.server.semantic.status} · 재검증 ${q.server.revalidation.status}`:' · 서버 품질 근거 없음'}`:`${q.title}: ${phaseLabel.none}`;
 
 /** Pure: the two quality steps (교차 검증, 수정·재검증) from recorded Quality Loops only. */
 export function qualitySteps(progress:ProjectProgress|null,kind:'general'|'code'):[Step,Step]{
