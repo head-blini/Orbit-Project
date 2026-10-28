@@ -3,6 +3,9 @@
 ## Required source of truth
 Before planning or editing, read `docs/ORBIT-VISION.md` and `docs/ORBIT-SCOPE-2026-10-27.md`. The vision defines product identity; the scope defines approved functionality. Consult `docs/ORBIT-IMPLEMENTATION-PLAN-2026-10-27.md` for implementation sequencing, then inspect actual code, tests, local Git status, and relevant architecture documents. Older PRD/Goal/Backlog files are historical context where they conflict with approved product scope.
 
+## Resuming work
+Start each session from the resume summary at the top of `docs/ORBIT-STATUS.md`: read the source documents it cites (not the summary) and compare its current task and done-conditions with the actual `git status`/`git worktree list`. Record differences instead of assuming; do not re-run unconfirmed executions. Update that summary when a work unit ends, the owner changes, or work is paused. The current integration owner is its single writer.
+
 ## Product direction
 Orbit is a provider-neutral, local-first, general-purpose AI task automation platform, **not** merely a coding control center. Preserve the natural-language goal → planning → approved task specification → project → selected AI execution → collaboration/verification → artifacts workflow, with simple/advanced modes. Support noncoding tasks, observable progress, durable decisions and handoffs, and user-extensible model/provider/agent registration. Never silently narrow the product vision when a new idea or implementation constraint arises. Propose scope/vision changes separately and require explicit user approval.
 
