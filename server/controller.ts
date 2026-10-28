@@ -469,6 +469,7 @@ export class Controller {
     this.modelTracker.begin(run.id,{selectedModelId:null,requestedModelId:null});
     this.output.clear();this.deadline=setTimeout(()=>{void this.failTransport('RUN_TIMEOUT');},120000);
     try{
+      this.store.append('run.runtime_source',run.id,{source:rpc.evidenceSource==='native'?'native':rpc.evidenceSource==='mock'?'mock':'unknown',interface:'codex.app_server'});
       const result=await rpc.request('turn/start',{threadId:this.thread(),cwd:this.workspace,input:[{type:'text',text:input.prompt}],sandboxPolicy:this.sandbox(),approvalPolicy:this.approvalPolicy(),approvalsReviewer:'user'});
       if(typeof result.turn?.id!=='string')throw new Error('INVALID_TURN');
       this.telemetry.acknowledge(run.id,result.turn.id);

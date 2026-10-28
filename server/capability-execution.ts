@@ -1,3 +1,4 @@
+import {providerExecutionEvidence} from './provider-evidence.ts';
 import {createHash,randomUUID} from 'node:crypto';
 import type {Store} from './store.ts';
 import type {Controller} from './controller.ts';
@@ -162,5 +163,6 @@ export function readCapabilityExecution(store:Store,projectId:string,id:string):
     if(r.quality){r.qualityLoopId=r.quality.id;r.status=r.quality.result.status==='passed'?'quality_passed':r.quality.result.status==='blocked'?'quality_blocked':['reviewing','repairing'].includes(r.quality.result.status)?'quality_running':'quality_failed';}
    }
   }
+  r.providerEvidence=providerExecutionEvidence(store,run,r.quality);
   return r;
  }

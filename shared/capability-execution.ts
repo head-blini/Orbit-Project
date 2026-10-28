@@ -4,6 +4,7 @@ export interface CapabilityPlanInput {requestId:string;routeId:string;workspaceI
 export interface CapabilityExecutionApproval {confirmed:true;expectedPlanDigest:string}
 export type CapabilityExecutionStatus='awaiting_approval'|'dispatching'|'running'|'interrupt_requested'|'interrupted'|'failed'|'recovery_required'|'execution_completed'|'quality_running'|'quality_blocked'|'quality_failed'|'quality_passed';
 export interface CapabilityExecutionRecord {
+ providerEvidence?:import('./provider-evidence.ts').ProviderExecutionEvidence;
  id:string;requestId:string;projectId:string;taskId:string;routeId:string;runtimeId:RuntimeId;
  createdAt:string;updatedAt:string;planDigest:string;bindingDigest:string;
  dispatchRequestId:string;workspaceId:string|null;expectedAcceptanceDigest:string|null;

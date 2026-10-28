@@ -2,11 +2,57 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
+import {EventEmitter} from 'node:events';
+import {PassThrough} from 'node:stream';
+import {executionForClaudeOutcome} from '../server/runtimes/claude-task.ts';
 import {claudeArgs,claudeEnv,findClaude,parseClaudeLine,ClaudeCodeRun,type ClaudeEvent} from '../server/runtimes/claude-code.ts';
 
 const fake=fileURLToPath(new URL('./fixtures/claude-code/fake-claude.mjs',import.meta.url));
 // Launch the synthetic emitter with the adapter's real argument list and stdin prompt.
 const fakeSpawn:typeof spawn=((_:string,args:readonly string[],options:object)=>spawn(process.execPath,[fake,...args],options)) as typeof spawn;
+test('authentication preflight denies before task spawn and records mock source',async()=>{
+ for(const authentication of ['not_authenticated','unsupported','unknown','not_installed'] as const){
+  let launches=0;const runtime=new ClaudeCodeRun({executable:'/fake/claude',cwd:process.cwd(),mode:'read',spawn:(command,args,options)=>{launches++;return fakeSpawn(command,args,options);},
+   authProbe:async()=>({authentication,checkedAt:new Date().toISOString(),source:'claude.auth.status',issue:null})});
+  const outcome=await runtime.start('never transmit',()=>{});assert.equal(launches,0);assert.equal(outcome.dispatch,'not_started');assert.equal(outcome.evidenceSource,'mock');assert.equal(executionForClaudeOutcome(outcome).execution,'failed');
+ }
+});
+test('preflight exceptions contain no raw secrets and subscription continues through existing runtime',async()=>{
+ const blocked=new ClaudeCodeRun({executable:'/fake/claude',cwd:process.cwd(),mode:'read',spawn:fakeSpawn,authProbe:async()=>{throw Error('secret-value');}});
+ const outcome=await blocked.start('not sent',()=>{});assert.equal(outcome.dispatch,'not_started');assert.doesNotMatch(JSON.stringify(outcome),/secret-value/);
+ const successful=await run('ok',{authProbe:async()=>({authentication:'subscription',checkedAt:new Date().toISOString(),source:'claude.auth.status',issue:null})});
+ assert.equal(successful.outcome.dispatch,'started');assert.equal(successful.outcome.evidenceSource,'mock');
+});
+test('PID-bearing process error is quarantined without claiming spawn failure or losing stop handle',async()=>{
+ const child=Object.assign(new EventEmitter(),{pid:123,stdout:new PassThrough(),stderr:new PassThrough(),stdin:new PassThrough(),kill:()=>true});
+ const runtime=new ClaudeCodeRun({executable:'/fake/claude',cwd:process.cwd(),mode:'read',spawn:(()=>child) as unknown as typeof spawn,killAfterMs:10});
+ const pending=runtime.start('test',()=>{});child.emit('error',Error('signal denied'));
+ const outcome=await pending;assert.equal(outcome.status,'unknown');assert.equal(outcome.exit,'not_observed');assert.equal(executionForClaudeOutcome(outcome).execution,'lost');
+ assert.equal(runtime.interrupt(),'requested');child.emit('close',null,'SIGKILL');assert.equal(runtime.interrupt(),'not_running');
+});
+test('malformed quota metadata cannot throw or publish credential-bearing fields',()=>{
+ const secret='sk-proj-'+'a'.repeat(50);
+ const events=parseClaudeLine(JSON.stringify({type:'rate_limit_event',rate_limit_info:{status:'allowed',unifiedWindows:{five_hour:{utilization:-1,resetsAt:1e100,status:secret},[secret]:{utilization:0.5,status:'allowed'}}}}))!;
+ assert.doesNotMatch(JSON.stringify(events),/sk-proj/);
+ const quota=events[0] as Extract<ClaudeEvent,{kind:'quota'}>;assert.equal(quota.windows.length,1);assert.equal(quota.windows[0].resetsAt,null);assert.equal(quota.windows[0].utilization,null);assert.equal(quota.windows[0].status,'unknown');
+});
+test('interrupt during authentication preflight never launches after the probe resolves',async()=>{
+ let release!:()=>void,launches=0;
+ const probe=new Promise<void>(resolve=>{release=resolve;});
+ const runtime=new ClaudeCodeRun({executable:'/fake/claude',cwd:process.cwd(),mode:'read',spawn:(command,args,options)=>{launches++;return fakeSpawn(command,args,options);},
+  authProbe:async()=>{await probe;return {authentication:'subscription',checkedAt:new Date().toISOString(),source:'claude.auth.status',issue:null};}});
+ const pending=runtime.start('not sent',()=>{});assert.equal(runtime.interrupt(),'requested');release();
+ const outcome=await pending;assert.equal(launches,0);assert.equal(outcome.dispatch,'not_started');assert.equal(executionForClaudeOutcome(outcome).execution,'interrupted');
+});
+test('launch guard revalidates after delayed authentication and blocks invalidated paths',async()=>{
+ let release!:()=>void,valid=true,launches=0,checks=0;
+ const ready=new Promise<void>(resolve=>{release=resolve;});
+ const runtime=new ClaudeCodeRun({executable:'/fake/claude',cwd:process.cwd(),mode:'read',spawn:(command,args,options)=>{launches++;return fakeSpawn(command,args,options);},
+  authProbe:async()=>{await ready;return {authentication:'subscription',checkedAt:new Date().toISOString(),source:'claude.auth.status',issue:null};},
+  beforeDispatch:()=>{checks++;if(!valid)throw Error('private path invalidated');}});
+ const pending=runtime.start('not sent',()=>{});valid=false;release();const result=await pending;
+ assert.equal(checks,1);assert.equal(launches,0);assert.equal(result.dispatch,'not_started');assert.equal(result.issue,'LAUNCH_CONTEXT_CHANGED');assert.doesNotMatch(JSON.stringify(result),/private path/);
+});
 async function run(prompt:string,options:Partial<ConstructorParameters<typeof ClaudeCodeRun>[0]>={}){
   const events:ClaudeEvent[]=[];
   const r=new ClaudeCodeRun({executable:'/fake/claude',cwd:process.cwd(),mode:'read',spawn:fakeSpawn,env:{PATH:process.env.PATH},...options});

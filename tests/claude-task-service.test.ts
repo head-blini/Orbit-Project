@@ -7,11 +7,35 @@ import {Projects} from '../server/projects.ts';
 import {Controller} from '../server/controller.ts';
 import {AppError} from '../server/errors.ts';
 import type {ClaudeEvent} from '../server/runtimes/claude-code.ts';
-import {parseClaudeLine} from '../server/runtimes/claude-code.ts';
+import {parseClaudeLine,ClaudeCodeRun} from '../server/runtimes/claude-code.ts';
 import {ClaudeTaskService} from '../server/claude-task-service.ts';
 import {claudeFixture,planningInput,outcome,session,tick} from './claude-task-fixture.ts';
 
 const error=(message:string,status=409)=>(e:unknown)=>e instanceof AppError&&e.message===message&&e.status===status;
+test('unchanged approved task passes the service beforeDispatch guard',async()=>{
+ const f=claudeFixture();let guarded=0;
+ const service=new ClaudeTaskService(f.store,f.projects,{findExecutable:()=>'/fake/claude',runnerFactory:config=>({
+  async start(){config.beforeDispatch();guarded++;return outcome('completed',{dispatch:'started',evidenceSource:'mock'});},interrupt(){return 'not_running';}
+ })});
+ try{const {task}=f.plan(),run=service.submit(f.project.id,task.id,randomUUID());await tick();assert.equal(guarded,1);assert.equal(f.store.getRun(run.id)?.execution,'completed');}
+ finally{await service.close();await f.close();}
+});
+test('directory replacement during authentication is rejected by the task guard before native spawn',async()=>{
+ for(const replacement of process.platform==='win32'?['directory']:['directory','symlink']){
+ const f=claudeFixture();let release!:()=>void,launches=0;
+ const ready=new Promise<void>(resolve=>{release=resolve;});
+ const service=new ClaudeTaskService(f.store,f.projects,{findExecutable:()=>'/fake/claude',runnerFactory:config=>new ClaudeCodeRun({...config,
+  spawn:()=>{launches++;throw Error('must never launch');},authProbe:async()=>{await ready;return {authentication:'subscription',checkedAt:new Date().toISOString(),source:'claude.auth.status',issue:null};}})});
+ const moved=f.project.path+'-original';
+ try{
+  const {task}=f.plan(),run=service.submit(f.project.id,task.id,randomUUID());
+  renameSync(f.project.path,moved);if(replacement==='symlink')symlinkSync(moved,f.project.path,'dir');else mkdirSync(f.project.path);release();await tick();
+  assert.equal(launches,0);assert.equal(f.store.getRun(run.id)?.execution,'failed');
+  const event=f.store.db.prepare("SELECT data FROM events WHERE run_id=? AND kind='run.failed'").get(run.id);
+  assert.equal(JSON.parse(String(event?.data)).reason,'LAUNCH_CONTEXT_CHANGED');
+ }finally{release();await service.close();rmSync(f.project.path,{recursive:true,force:true});renameSync(moved,f.project.path);await f.close();}
+ }
+});
 
 test('quality repair retains approved baseline, persists source, and deduplicates only matching repair intent',async()=>{
   const f=claudeFixture(),service=new ClaudeTaskService(f.store,f.projects,f.dependencies);
@@ -26,6 +50,10 @@ test('quality repair retains approved baseline, persists source, and deduplicate
     assert.equal(f.runners.length,2);
     const identity=f.store.db.prepare("SELECT data FROM events WHERE run_id=? AND kind='run.identity'").get(source.id)!;
     assert.equal(JSON.parse(identity.data as string).modelId,'observed-model');
+    const provenance=f.store.db.prepare("SELECT data FROM events WHERE run_id=? AND kind='run.runtime_source'").get(source.id);
+    assert.deepEqual(JSON.parse(String(provenance?.data)),{source:'mock',interface:'claude.print'});
+    const runtimeOutcome=f.store.db.prepare("SELECT data FROM events WHERE run_id=? AND kind='run.runtime_outcome'").get(source.id);
+    assert.deepEqual(JSON.parse(String(runtimeOutcome?.data)),{source:'mock',dispatch:'unknown',exit:'observed'});
     const link=f.store.db.prepare("SELECT data FROM events WHERE run_id=? AND kind='run.repair_source'").get(repair.id)!;
     assert.equal(JSON.parse(link.data as string).sourceRunId,source.id);
     f.runners[1].finish();await tick();

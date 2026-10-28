@@ -4,7 +4,7 @@ import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import { buildChildEnv } from './child-env.ts';
 import type {NativeProcessObservation} from '../shared/native-process.ts';
-export interface RpcPort extends EventEmitter {request(method:string,params:unknown):Promise<any>;initialize():Promise<void>;close():Promise<unknown>;processObservation?():NativeProcessObservation}
+export interface RpcPort extends EventEmitter {evidenceSource?:'native'|'mock';request(method:string,params:unknown):Promise<any>;initialize():Promise<void>;close():Promise<unknown>;processObservation?():NativeProcessObservation}
 export function denyRequest(e:any):object {
   if(['item/commandExecution/requestApproval','item/fileChange/requestApproval'].includes(e.method))return {id:e.id,result:{decision:'decline'}};
   if(e.method==='item/permissions/requestApproval')return {id:e.id,result:{permissions:{},scope:'turn'}};
@@ -12,6 +12,7 @@ export function denyRequest(e:any):object {
   return {id:e.id,error:{code:-32601,message:'Request unsupported; no permission granted'}};
 }
 export class Rpc extends EventEmitter implements RpcPort {
+  evidenceSource?:'native'|'mock';
   child:ChildProcessWithoutNullStreams;private pending=new Map<number,{resolve:(v:any)=>void;reject:(e:Error)=>void;timer:NodeJS.Timeout}>();
   private nextId=1;private buffer='';private ended=false;private stopped=false;private closed:Promise<void>;
   private observation:NativeProcessObservation={handleId:randomUUID(),pid:null,createdAt:new Date().toISOString(),state:'spawn_pending',closedAt:null,exitCode:null,signal:null};

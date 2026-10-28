@@ -68,10 +68,13 @@ for(const observed of [false,true])test(`mock provider vertical HTTP execution: 
   const quality=await json<CapabilityExecutionRecord>(await post(url+'/quality-start',qualityStart));
   await controller.qualityLoops.settled(quality.qualityLoopId!);
   const final=await json<CapabilityExecutionRecord>(await get(url));
+  assert.equal(final.providerEvidence?.source,'mock');assert.equal(final.providerEvidence?.livePipelineVerified,false);
+  assert.equal(final.providerEvidence?.costUsd,null);assert.equal(final.providerEvidence?.remainingQuota,null);
   assert.equal(final.status,observed?'quality_passed':'quality_blocked',JSON.stringify(final.quality));assert.equal(reviews,observed?1:0);
   if(!observed){assert.equal(final.quality!.result.issue,'QUALITY_PRODUCER_MODEL_UNKNOWN');await json(await post(url+'/quality-preview',qualityInput));assert.equal(reviews,0);}
   else{assert.equal(final.quality!.verification.status,'passed');assert.ok(final.quality!.verification.checkIds.length);}
   const board=await json<ProjectProgress>(await get(base+'/progress')),visible=board.tasks.find(item=>item.id===task.id)!;
+  assert.deepEqual(visible.capabilityExecutions![0].providerEvidence,final.providerEvidence);
   assert.equal(visible.capabilityExecutions![0].status,final.status);assert.equal(visible.qualityLoops![0].id,final.qualityLoopId);
   assert.equal(f.store.getRun(started.runId!)!.verification,'not_run');
   const finalSeq=f.store.lastSeq();await get(url);await get(base+'/progress');assert.equal(f.store.lastSeq(),finalSeq);

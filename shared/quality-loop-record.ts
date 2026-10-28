@@ -5,6 +5,7 @@ import type {Run} from './types.ts';
 
 /** Only observed adapter metadata may populate modelId/sessionId. Requested aliases are not evidence. */
 export interface QualityModelEvidence {
+ evidenceSource?:'native'|'mock'|'unknown';
   providerId:string;modelId:string|null;sessionId:string|null;runId:string|null;executionId?:string|null;
   source:'native_observed'|'unknown';
   codex?:CodexModelAttribution;

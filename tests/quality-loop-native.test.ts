@@ -31,6 +31,21 @@ function fixture(){
   const review=()=>{const artifact=ports.snapshot(context.sourceRun).artifact;context.artifact=artifact;return ports.review({baseline:{id:'version',digest:'b'.repeat(64),criteria:context.task.acceptanceCriteria},artifact,reviewer:{id:'reviewer',modelKey:'anthropic/model-b'},signal:new AbortController().signal},context,{id:'reviewer',providerId:'anthropic',modelId:'model-b'});};
   return {dir,store,project,run,context,outcome,options,ports,review,setEvents:(value:ClaudeEvent[])=>{events=value;},get calls(){return calls;},get interrupts(){return interrupts;},get prompt(){return prompt;},close(){store.close();rmSync(dir,{recursive:true,force:true});}};
 }
+test('quality evidence preserves runtime provenance without promoting a synthetic model observation',async()=>{
+ const f=fixture();try{
+  f.store.append('run.identity',f.run.id,{providerId:'anthropic',modelId:'model-a',sessionId:'s',modelEvidence:'assistant_message'});
+  assert.equal(qualityRunEvidence(f.store,f.run).evidenceSource,undefined);
+  f.store.append('run.runtime_source',f.run.id,{source:'mock',interface:'claude.print'});
+  assert.equal(qualityRunEvidence(f.store,f.run).evidenceSource,'mock');
+  const review=await f.review();assert.equal(review.evidence.evidenceSource,'mock');
+ }finally{f.close();}
+});
+test('known authentication denial before review dispatch does not claim an unconfirmed process',async()=>{
+ const f=fixture();try{
+  f.outcome.status='auth_required';f.outcome.dispatch='not_started';f.outcome.exit='not_observed';
+  await assert.rejects(f.review(),/LOGIN_REQUIRED/);
+ }finally{f.close();}
+});
 
 test('general project native bridge uses frozen artifacts, observed identity and fresh read sessions',async()=>{
   const f=fixture();try{assert.equal(f.ports.snapshot(f.context.sourceRun).producer.source,'unknown');const result=await f.review();assert.equal(result.evidence.source,'native_observed');assert.equal(result.evidence.modelId,'model-b');assert.equal(result.evidence.runId,'step');assert.equal(result.review.criteria.length,1);assert.match(f.prompt,/Evidence verified/);assert.match(f.prompt,/도구를 사용하지/);assert.equal(f.calls,1);}finally{f.close();}
@@ -105,7 +120,7 @@ test('Codex model observation gap blocks before spending quota; injected protoco
     await assert.rejects(f.ports.review(request,f.context,{id:'reviewer',providerId:'openai',modelId:'model-c'}),/QUALITY_MODEL_OBSERVATION_UNSUPPORTED/);assert.equal(f.calls,0);
     let calls=0;f.context.stepId='codex-fixture';
     const ports=createQualityNativePorts({...f.options,codexReview:async()=>{calls++;return {execution:'completed',threadId:'thread',turnId:'turn',response:f.outcome.response,issue:null,processStopped:true,identity:{providerId:'openai',modelId:'unknown',sessionId:'thread',executionId:'turn',modelEvidence:'unknown'}};}});
-    const result=await ports.review(request,f.context,{id:'reviewer',providerId:'openai',modelId:'model-c'});assert.equal(result.evidence.source,'unknown');assert.equal(result.review.modelKey,'unknown');assert.equal(calls,1);
+    const result=await ports.review(request,f.context,{id:'reviewer',providerId:'openai',modelId:'model-c'});assert.equal(result.evidence.source,'unknown');assert.equal(result.evidence.evidenceSource,'mock');assert.equal(result.review.modelKey,'unknown');assert.equal(calls,1);
   }finally{f.close();}
 });
 

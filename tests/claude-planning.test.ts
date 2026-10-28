@@ -9,7 +9,7 @@ const input={workspacePath:'/planning-fixture',instructions:'PRIVATE_REQUEST',ti
 function fixture(){
   assert.ok(module,'Claude planning runner required');
   const runner=new FakeClaudeRun();let calls=0;
-  const options={findExecutable:()=>'/fake/claude',runnerFactory:(config:any)=>{calls++;assert.equal(config.mode,'read');assert.equal(config.cwd,input.workspacePath);return runner;}};
+  const options={findExecutable:()=>'/fake/claude',runnerFactory:(config:any)=>{calls++;assert.equal(config.mode,'read');assert.equal(config.cwd,input.workspacePath);assert.equal(config.spawn,undefined,'production wrapper must not bypass native authentication');assert.equal(typeof config.onOutputLine,'function');return runner;}};
   return {runner,options,get calls(){return calls;}};
 }
 test('Claude planning parses JSON v1 and Markdown with server-owned attribution in read mode',async()=>{
@@ -34,6 +34,11 @@ test('Claude login/quota outcomes and missing executable map to public issue cod
   const result=await module!.runClaudePlanning(input,{findExecutable:()=>{throw new Error('CLAUDE_NOT_INSTALLED');}});
   assert.equal(result.issue,'CLAUDE_NOT_INSTALLED');assert.equal(result.processStopped,true);
 });
+test('known planning no-start authentication denial is failed with a stopped process, not quarantined',async()=>{
+ const f=fixture(),pending=module!.runClaudePlanning(input,f.options);
+ f.runner.finish(outcome('auth_required',{dispatch:'not_started',exit:'not_observed',issue:'AUTH_MODE_BLOCKED'}));
+ const result=await pending;assert.equal(result.execution,'failed');assert.equal(result.processStopped,true);assert.equal(result.issue,'LOGIN_REQUIRED');
+});
 test('Claude interrupt remains pending until exit, and unobserved exit is lost',async()=>{
   const f=fixture(),controller=new AbortController();let settled=false;
   const pending=module!.runClaudePlanning({...input,signal:controller.signal},f.options).then(result=>{settled=true;return result;});
@@ -53,6 +58,11 @@ test('Claude timeout with observed exit is timed_out; pre-abort never launches',
   assert.equal(result.execution,'timed_out');assert.equal(result.processStopped,true);
   const g=fixture();const stopped=await module!.runClaudePlanning({...input,signal:AbortSignal.abort()},g.options);
   assert.equal(stopped.execution,'interrupted');assert.equal(g.calls,0);
+});
+test('deadline during preflight retains timeout cause when no task process started',async t=>{
+ t.mock.timers.enable({apis:['setTimeout']});const f=fixture(),pending=module!.runClaudePlanning(input,f.options);
+ t.mock.timers.tick(1000);f.runner.finish(outcome('interrupted',{dispatch:'not_started',exit:'not_observed'}));
+ const result=await pending;assert.equal(result.execution,'timed_out');assert.equal(result.issue,'PLANNING_TIMEOUT');assert.equal(result.processStopped,true);
 });
 
 test('native Claude sanitization or truncation cannot turn altered output into a planning proposal',async()=>{
@@ -82,4 +92,19 @@ test('Claude planning asks for non-goals separately and keeps them as nonGoals i
   const draft=parseClaudePlanningProposal(JSON.stringify({schema_version:'1.0',title:'Report',goal:'Compare',requirements:[{id:'R1',description:'Write',acceptance_criteria:['Done']}],
     constraints:['Local files only'],non_goals:['No new data collection'],open_questions:[],decisions:[{topic:'Scope',decision:'Use existing files',rationale:'No web tools'}]}));
   assert.deepEqual(draft.nonGoals,['No new data collection']);assert.deepEqual(draft.constraints,['Local files only']);
+});
+test('oversized native output cannot promote an earlier valid proposal after line or buffer truncation',async()=>{
+ for(const split of [false,true]){
+  const spawn=()=>{
+   const child=Object.assign(new EventEmitter(),{stdout:new PassThrough(),stderr:new PassThrough(),stdin:new PassThrough(),kill:()=>true});
+   queueMicrotask(()=>{
+    child.stdout.emit('data',JSON.stringify({type:'assistant',message:{content:[{type:'text',text:planningInput.text}]}})+'\n');
+    const oversized=JSON.stringify({type:'assistant',message:{content:[{type:'text',text:'x'.repeat(4*1024*1024+1)}]}});
+    child.stdout.emit('data',oversized+(split?'':'\n'));if(split)child.stdout.emit('data','\n');
+    child.stdout.emit('data',JSON.stringify({type:'result',is_error:false})+'\n');child.emit('close',0,null);
+   });return child as unknown as ChildProcess;
+  };
+  const result=await module!.runClaudePlanning(input,{findExecutable:()=>'/fake/claude',spawn});
+  assert.equal(result.execution,'failed');assert.equal(result.issue,'PLANNING_PROPOSAL_INVALID');assert.equal(result.proposal,null);
+ }
 });

@@ -1,50 +1,38 @@
 import {isAbsolute} from 'node:path';
-import {spawn as nodeSpawn} from 'node:child_process';
 import type {NativePlanningInput,NativePlanningResult} from './codex-planning.ts';
 import {ClaudeCodeRun,claudeEnv,findClaude,type ClaudeOutcome} from './runtimes/claude-code.ts';
 import {parseClaudePlanningProposal} from './planning/agent-input.ts';
 import {safeText} from './privacy.ts';
 
 type Spawn=NonNullable<ConstructorParameters<typeof ClaudeCodeRun>[0]['spawn']>;
-type RunnerOptions={executable:string;cwd:string;mode:'read';env:NodeJS.ProcessEnv;spawn?:Spawn};
+type RunnerOptions=ConstructorParameters<typeof ClaudeCodeRun>[0];
 
 export interface ClaudePlanningOptions {
   findExecutable?:()=>string;
   runnerFactory?:(options:RunnerOptions)=>Pick<ClaudeCodeRun,'start'|'interrupt'>;
   spawn?:Spawn;
+  beforeDispatch?:()=>void;
 }
 
 /** The shared runtime intentionally sanitizes responses for display. Observe only
  * transformation evidence before that boundary so a partial/masked plan cannot
  * become an authoritative saved draft. No raw lines leave this bounded observer. */
-function outputIntegrity(spawn:Spawn){
+function outputIntegrity(){
   let issue:string|null=null;
-  const guarded:Spawn=(...args)=>{
-    const child=spawn(...args);let buffer='';const limit=4*1024*1024;
-    const inspect=(line:string)=>{
-      if(issue)return;
-      try{
-        const value=JSON.parse(line);
-        if(value?.type!=='assistant'||!Array.isArray(value.message?.content))return;
-        for(const part of value.message.content){
-          if(part?.type!=='text'||typeof part.text!=='string')continue;
-          if(part.text.length>64000){issue='PLANNING_PROPOSAL_INVALID';return;}
-          if(safeText(part.text)!==part.text){issue='PLANNING_PROPOSAL_BLOCKED';return;}
-        }
-      }catch{/* Protocol recognition and lifecycle remain owned by ClaudeCodeRun. */}
-    };
-    child.stdout?.setEncoding('utf8');
-    child.stdout?.on('data',(chunk:string)=>{
-      if(issue)return;
-      if(buffer.length+chunk.length>limit){issue='PLANNING_PROPOSAL_INVALID';buffer='';return;}
-      buffer+=chunk;let newline:number;
-      while((newline=buffer.indexOf('\n'))>=0){inspect(buffer.slice(0,newline));buffer=buffer.slice(newline+1);}
-      if(issue)buffer='';
-    });
-    child.on('close',()=>{if(buffer)inspect(buffer);buffer='';});
-    return child;
+  const inspect=(line:string|null)=>{
+    if(issue)return;
+    if(line===null){issue='PLANNING_PROPOSAL_INVALID';return;}
+    try{
+      const value=JSON.parse(line);
+      if(value?.type!=='assistant'||!Array.isArray(value.message?.content))return;
+      for(const part of value.message.content){
+        if(part?.type!=='text'||typeof part.text!=='string')continue;
+        if(part.text.length>64000){issue='PLANNING_PROPOSAL_INVALID';return;}
+        if(safeText(part.text)!==part.text){issue='PLANNING_PROPOSAL_BLOCKED';return;}
+      }
+    }catch{/* Protocol recognition and lifecycle remain owned by ClaudeCodeRun. */}
   };
-  return {spawn:guarded,issue:()=>issue};
+  return {onOutputLine:inspect,issue:()=>issue};
 }
 
 /** One invocation; interrupt is only a request until the runtime observes exit. */
@@ -56,8 +44,8 @@ export async function runClaudePlanning(input:NativePlanningInput,options:Claude
     ||!Number.isSafeInteger(input.timeoutMs)||input.timeoutMs<1000||input.timeoutMs>60000||(input.signal!==undefined&&!(input.signal instanceof AbortSignal)))return {...result,issue:'INVALID_PLANNING_INPUT'};
   if(input.signal?.aborted)return {...result,execution:'interrupted',issue:'PLANNING_INTERRUPTED'};
   let runner:Pick<ClaudeCodeRun,'start'|'interrupt'>;
-  const integrity=outputIntegrity(options.spawn??nodeSpawn);
-  try{runner=(options.runnerFactory??(config=>new ClaudeCodeRun(config)))({executable:(options.findExecutable??findClaude)(),cwd:input.workspacePath,mode:'read',env:claudeEnv(),spawn:integrity.spawn});}
+  const integrity=outputIntegrity();
+  try{runner=(options.runnerFactory??(config=>new ClaudeCodeRun(config)))({executable:(options.findExecutable??findClaude)(),cwd:input.workspacePath,mode:'read',env:claudeEnv(),spawn:options.spawn,onOutputLine:integrity.onOutputLine,beforeDispatch:options.beforeDispatch});}
   catch(error){return {...result,issue:error instanceof Error&&error.message==='CLAUDE_NOT_INSTALLED'?'CLAUDE_NOT_INSTALLED':'PLANNING_RUNTIME_NOT_STARTED'};}
   let reason:'interrupted'|'timed_out'|null=null,grace:NodeJS.Timeout|undefined;
   let unconfirmed!:()=>void;
@@ -74,6 +62,7 @@ export async function runClaudePlanning(input:NativePlanningInput,options:Claude
     const running=runner.start(input.instructions,()=>{});
     if(input.signal?.aborted)abort();
     const outcome:ClaudeOutcome|null=await Promise.race([running,abandoned]);
+    if(outcome?.dispatch==='not_started')return {...result,execution:reason??(outcome.status==='interrupted'?'interrupted':'failed'),issue:reason==='timed_out'?'PLANNING_TIMEOUT':reason==='interrupted'||outcome.status==='interrupted'?'PLANNING_INTERRUPTED':outcome.status==='auth_required'?'LOGIN_REQUIRED':'PLANNING_RUNTIME_NOT_STARTED',processStopped:true};
     if(!outcome||outcome.exit!=='observed')return {...result,execution:'lost',issue:'PLANNING_PROCESS_STOP_UNCONFIRMED',processStopped:false};
     result.threadId=outcome.sessionId;
     if(reason)return {...result,execution:reason,issue:reason==='timed_out'?'PLANNING_TIMEOUT':'PLANNING_INTERRUPTED'};

@@ -1,3 +1,4 @@
+import {NativeReadinessPanel} from './native-readiness.tsx';
 import { useEffect,useRef,useState } from 'react';
 import type { CapabilityRegistry,Capability,NativeProbe } from '../shared/capabilities.ts';
 import type { ProviderStatus } from '../shared/types.ts';
@@ -26,6 +27,7 @@ export function CapabilityPanel({online,status,post,extensionsOnly=false}:Props)
   }
   return <section className="surface capability-panel" aria-label="Capability Registry">
     <div className="section-heading"><div><h2>{extensionsOnly?'공식 확장 기능 지원':'Capability Registry'}</h2><p>공식 기능과 현재 Orbit 연결·권한을 구분합니다.</p></div><button onClick={probe} disabled={!online||busy}>{busy?'진단 중…':'로컬 CLI 버전 확인'}</button></div>
+    {!extensionsOnly&&<NativeReadinessPanel online={online} status={status} post={post}/>}
     <p className="subtle">버전 진단은 로컬 실행 파일의 버전만 확인합니다. 인증·구독 잔여량 확인과 모델 실행은 포함하지 않습니다. 결과는 60초간 재사용합니다.</p>
     {error&&<p role="alert">{error} <button onClick={()=>setRetry(value=>value+1)}>다시 불러오기</button></p>}
     {!registry?<p role="status">{online?'기능 정보를 불러오는 중…':'서버 연결 후 기능 정보를 확인할 수 있습니다.'}</p>:<CapabilityDetails registry={registry} extensionsOnly={extensionsOnly}/>}

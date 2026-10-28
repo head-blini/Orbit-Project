@@ -1,0 +1,1793 @@
+{
+  "cliVersion": "0.165.0",
+  "evidenceKind": "offline_generated_contract_not_live_execution",
+  "generationCommands": [
+    "codex --version",
+    "codex app-server generate-json-schema --out <temporary-directory>",
+    "codex features list <codexArgs(false) without app-server --listen stdio://>",
+    "codex features list <codexArgs(true) without app-server --listen stdio://>"
+  ],
+  "schemas": {
+    "ModelListResponse": {
+      "source": {
+        "jsonFile": "v2/ModelListResponse.json",
+        "jsonPointer": "",
+        "jsonSha256": "2fb387a2ed258fc74258828ea342d68f89ce4e8e22cd0329ca59d2b423f9108b"
+      },
+      "projection": {
+        "type": "object",
+        "title": "ModelListResponse",
+        "required": [
+          "data"
+        ],
+        "propertyNames": [
+          "data",
+          "nextCursor"
+        ],
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/definitions/Model"
+            },
+            "type": "array"
+          }
+        }
+      }
+    },
+    "ThreadStartResponse": {
+      "source": {
+        "jsonFile": "v2/ThreadStartResponse.json",
+        "jsonPointer": "",
+        "jsonSha256": "9cbed08ecdb67764d1e1ca90df5f33754dbeba2d1e21436d77fbc80bb626c844"
+      },
+      "projection": {
+        "type": "object",
+        "title": "ThreadStartResponse",
+        "required": [
+          "approvalPolicy",
+          "approvalsReviewer",
+          "cwd",
+          "model",
+          "modelProvider",
+          "sandbox",
+          "thread"
+        ],
+        "propertyNames": [
+          "approvalPolicy",
+          "approvalsReviewer",
+          "cwd",
+          "disabledPluginIds",
+          "instructionSources",
+          "model",
+          "modelProvider",
+          "reasoningEffort",
+          "sandbox",
+          "serviceTier",
+          "thread"
+        ],
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "modelProvider": {
+            "type": "string"
+          },
+          "thread": {
+            "$ref": "#/definitions/Thread"
+          }
+        }
+      }
+    },
+    "ThreadResumeResponse": {
+      "source": {
+        "jsonFile": "v2/ThreadResumeResponse.json",
+        "jsonPointer": "",
+        "jsonSha256": "b4af48eb11ee6a60438af563ef8b149f5b06069c0344486a13d08db39ca10c0f"
+      },
+      "projection": {
+        "type": "object",
+        "title": "ThreadResumeResponse",
+        "required": [
+          "approvalPolicy",
+          "approvalsReviewer",
+          "cwd",
+          "model",
+          "modelProvider",
+          "sandbox",
+          "thread"
+        ],
+        "propertyNames": [
+          "approvalPolicy",
+          "approvalsReviewer",
+          "collaborationMode",
+          "cwd",
+          "disabledPluginIds",
+          "instructionSources",
+          "itemsBackwardsCursor",
+          "model",
+          "modelProvider",
+          "reasoningEffort",
+          "sandbox",
+          "serviceTier",
+          "thread",
+          "turnsBackwardsCursor"
+        ],
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "modelProvider": {
+            "type": "string"
+          },
+          "thread": {
+            "$ref": "#/definitions/Thread"
+          }
+        }
+      }
+    },
+    "ThreadReadResponse": {
+      "source": {
+        "jsonFile": "v2/ThreadReadResponse.json",
+        "jsonPointer": "",
+        "jsonSha256": "8aa88b8203cf3cc29fe474595f5d3645c9f0d26d1294ce342ac5d69de1313211"
+      },
+      "projection": {
+        "type": "object",
+        "title": "ThreadReadResponse",
+        "required": [
+          "thread"
+        ],
+        "propertyNames": [
+          "thread"
+        ],
+        "properties": {
+          "thread": {
+            "$ref": "#/definitions/Thread"
+          }
+        }
+      }
+    },
+    "TurnStartParams": {
+      "source": {
+        "jsonFile": "v2/TurnStartParams.json",
+        "jsonPointer": "",
+        "jsonSha256": "835e0d4ca1a0ddc4fb6db1e2b3249dd67f07c50ac2506092ba81543efc92829b"
+      },
+      "projection": {
+        "type": "object",
+        "title": "TurnStartParams",
+        "required": [
+          "input",
+          "threadId"
+        ],
+        "propertyNames": [
+          "approvalPolicy",
+          "approvalsReviewer",
+          "clientUserMessageId",
+          "cwd",
+          "disabledPluginIds",
+          "effort",
+          "input",
+          "model",
+          "outputSchema",
+          "parentTurnId",
+          "personality",
+          "rootTurnId",
+          "sandboxPolicy",
+          "serviceTier",
+          "serviceTierForTurn",
+          "summary",
+          "threadId",
+          "toolOutput",
+          "turnTrigger"
+        ],
+        "properties": {
+          "approvalPolicy": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/AskForApproval"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Override the approval policy for this turn and subsequent turns."
+          },
+          "approvalsReviewer": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/ApprovalsReviewer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Override where approval requests are routed for review on this turn and subsequent turns."
+          },
+          "clientUserMessageId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cwd": {
+            "description": "Override the working directory for this turn and subsequent turns.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "disabledPluginIds": {
+            "description": "Replace this thread's disabled plugin IDs. Omitted/null preserves the list; [] clears it.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "effort": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/ReasoningEffort"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Override the reasoning effort for this turn and subsequent turns."
+          },
+          "input": {
+            "items": {
+              "$ref": "#/definitions/UserInput"
+            },
+            "type": "array"
+          },
+          "model": {
+            "description": "Override the model for this turn and subsequent turns.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "outputSchema": {
+            "description": "Optional JSON Schema used to constrain the final assistant message for this turn."
+          },
+          "parentTurnId": {
+            "description": "ID of the turn that caused this new turn to start.\n\nSet this when starting work on behalf of another turn, such as delegated work in a different thread. Leave unset for work started directly by the user. Ignored when this request adds input to an active turn.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "personality": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/Personality"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "@deprecated `friendly` and `pragmatic` no longer select a style. Changing this does not rewrite the thread's existing instructions."
+          },
+          "rootTurnId": {
+            "description": "ID of the first turn in the chain of work that led to this new turn.\n\nWhen setting `parentTurnId`, set this to the parent turn's `rootTurnId` when known. This keeps descendant work attributed to the original turn. If omitted, the new turn becomes its own root. Ignored when this request adds input to an active turn.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sandboxPolicy": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/SandboxPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Override the sandbox policy for this turn and subsequent turns."
+          },
+          "serviceTier": {
+            "description": "Override the service tier for this turn and subsequent turns.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "serviceTierForTurn": {
+            "description": "Override the service tier only when this request starts a new turn. Use \"default\" for standard speed. Omitted or null inherits the thread's tier. Does not change the thread's tier or a turn being steered.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/ReasoningSummary"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Override the reasoning summary for this turn and subsequent turns."
+          },
+          "threadId": {
+            "type": "string"
+          },
+          "toolOutput": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/TurnToolOutput"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "turnTrigger": {
+            "description": "Optional source classification for the caller that starts this turn. Ignored when this request steers an already-active turn.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "TurnStartResponse": {
+      "source": {
+        "jsonFile": "v2/TurnStartResponse.json",
+        "jsonPointer": "",
+        "jsonSha256": "9588fa7c85b5eb67b363d3fca8f4a6bf9291f3b4b8c6295b7e7d154228270159"
+      },
+      "projection": {
+        "type": "object",
+        "title": "TurnStartResponse",
+        "required": [
+          "turn"
+        ],
+        "propertyNames": [
+          "turn"
+        ],
+        "properties": {
+          "turn": {
+            "$ref": "#/definitions/Turn"
+          }
+        }
+      }
+    },
+    "TurnStartedNotification": {
+      "source": {
+        "jsonFile": "v2/TurnStartedNotification.json",
+        "jsonPointer": "",
+        "jsonSha256": "46d86869a7145b82bb97ac3811e50686a92c79bc0e9c12c639462a292dd8495b"
+      },
+      "projection": {
+        "type": "object",
+        "title": "TurnStartedNotification",
+        "required": [
+          "threadId",
+          "turn"
+        ],
+        "propertyNames": [
+          "threadId",
+          "turn"
+        ],
+        "properties": {
+          "threadId": {
+            "type": "string"
+          },
+          "turn": {
+            "$ref": "#/definitions/Turn"
+          }
+        }
+      }
+    },
+    "TurnCompletedNotification": {
+      "source": {
+        "jsonFile": "v2/TurnCompletedNotification.json",
+        "jsonPointer": "",
+        "jsonSha256": "119bde7262f8e3f8f50a590a2eacac2b04083bb0d788d7949bd0d81a18ac7de9"
+      },
+      "projection": {
+        "type": "object",
+        "title": "TurnCompletedNotification",
+        "required": [
+          "threadId",
+          "turn"
+        ],
+        "propertyNames": [
+          "threadId",
+          "turn"
+        ],
+        "properties": {
+          "threadId": {
+            "type": "string"
+          },
+          "turn": {
+            "$ref": "#/definitions/Turn"
+          }
+        }
+      }
+    },
+    "ThreadSettingsUpdatedNotification": {
+      "source": {
+        "jsonFile": "v2/ThreadSettingsUpdatedNotification.json",
+        "jsonPointer": "",
+        "jsonSha256": "1decdf57238a1573ffbbf0bf695acba50888c1580e44670471dd88bfc2bd540f"
+      },
+      "projection": {
+        "type": "object",
+        "title": "ThreadSettingsUpdatedNotification",
+        "required": [
+          "threadId",
+          "threadSettings"
+        ],
+        "propertyNames": [
+          "threadId",
+          "threadSettings"
+        ],
+        "properties": {
+          "threadId": {
+            "type": "string"
+          },
+          "threadSettings": {
+            "$ref": "#/definitions/ThreadSettings"
+          }
+        }
+      }
+    },
+    "ModelReroutedNotification": {
+      "source": {
+        "jsonFile": "v2/ModelReroutedNotification.json",
+        "jsonPointer": "",
+        "jsonSha256": "37cd3c1b3a3560b85b01d4061a07d830fc9ed93b80e4663f975f9197cdb501ef"
+      },
+      "projection": {
+        "type": "object",
+        "title": "ModelReroutedNotification",
+        "required": [
+          "fromModel",
+          "reason",
+          "threadId",
+          "toModel",
+          "turnId"
+        ],
+        "propertyNames": [
+          "fromModel",
+          "reason",
+          "threadId",
+          "toModel",
+          "turnId"
+        ],
+        "properties": {
+          "fromModel": {
+            "type": "string"
+          },
+          "reason": {
+            "$ref": "#/definitions/ModelRerouteReason"
+          },
+          "threadId": {
+            "type": "string"
+          },
+          "toModel": {
+            "type": "string"
+          },
+          "turnId": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "ModelVerificationNotification": {
+      "source": {
+        "jsonFile": "v2/ModelVerificationNotification.json",
+        "jsonPointer": "",
+        "jsonSha256": "4f27a99d0c8664c29abb4d65384ab16853bbc29b61de5e749111cefdc6994655"
+      },
+      "projection": {
+        "type": "object",
+        "title": "ModelVerificationNotification",
+        "required": [
+          "threadId",
+          "turnId",
+          "verifications"
+        ],
+        "propertyNames": [
+          "threadId",
+          "turnId",
+          "verifications"
+        ],
+        "properties": {
+          "threadId": {
+            "type": "string"
+          },
+          "turnId": {
+            "type": "string"
+          },
+          "verifications": {
+            "items": {
+              "$ref": "#/definitions/ModelVerification"
+            },
+            "type": "array"
+          }
+        }
+      }
+    },
+    "ModelSafetyBufferingUpdatedNotification": {
+      "source": {
+        "jsonFile": "v2/ModelSafetyBufferingUpdatedNotification.json",
+        "jsonPointer": "",
+        "jsonSha256": "4cf853e3a2f968fdfde75206fd497d3d530b26769026bee343c3ef09ce438cfd"
+      },
+      "projection": {
+        "type": "object",
+        "title": "ModelSafetyBufferingUpdatedNotification",
+        "required": [
+          "model",
+          "reasons",
+          "showBufferingUi",
+          "threadId",
+          "turnId",
+          "useCases"
+        ],
+        "propertyNames": [
+          "fasterModel",
+          "model",
+          "reasons",
+          "showBufferingUi",
+          "threadId",
+          "turnId",
+          "useCases"
+        ],
+        "properties": {
+          "fasterModel": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "model": {
+            "type": "string"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "showBufferingUi": {
+            "type": "boolean"
+          },
+          "threadId": {
+            "type": "string"
+          },
+          "turnId": {
+            "type": "string"
+          },
+          "useCases": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        }
+      }
+    },
+    "RawResponseCompletedNotification": {
+      "source": {
+        "jsonFile": "v2/RawResponseCompletedNotification.json",
+        "jsonPointer": "",
+        "jsonSha256": "aba140e87952c900f96e0308a8849d3e313d985de1f1aa2b77f193884a76357c"
+      },
+      "projection": {
+        "type": "object",
+        "title": "RawResponseCompletedNotification",
+        "description": "Internal-only notification containing the exact usage from one upstream Responses API completion.",
+        "required": [
+          "responseId",
+          "threadId",
+          "turnId"
+        ],
+        "propertyNames": [
+          "responseId",
+          "threadId",
+          "turnId",
+          "usage",
+          "usageMetadata"
+        ],
+        "properties": {
+          "responseId": {
+            "type": "string"
+          },
+          "threadId": {
+            "type": "string"
+          },
+          "turnId": {
+            "type": "string"
+          },
+          "usage": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/TokenUsageBreakdown"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "usageMetadata": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/ResponseUsageMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "Thread": {
+      "source": {
+        "jsonFile": "v2/ThreadStartResponse.json",
+        "jsonPointer": "/definitions/Thread",
+        "jsonSha256": "9cbed08ecdb67764d1e1ca90df5f33754dbeba2d1e21436d77fbc80bb626c844"
+      },
+      "projection": {
+        "type": "object",
+        "required": [
+          "cliVersion",
+          "createdAt",
+          "cwd",
+          "ephemeral",
+          "id",
+          "modelProvider",
+          "preview",
+          "projectId",
+          "sessionId",
+          "source",
+          "status",
+          "turns",
+          "updatedAt"
+        ],
+        "propertyNames": [
+          "agentNickname",
+          "agentRole",
+          "cliVersion",
+          "createdAt",
+          "cwd",
+          "ephemeral",
+          "forkedFromId",
+          "gitInfo",
+          "historyMode",
+          "id",
+          "model",
+          "modelProvider",
+          "name",
+          "originator",
+          "parentThreadId",
+          "path",
+          "preview",
+          "projectId",
+          "reasoningEffort",
+          "recencyAt",
+          "section",
+          "sectionEnteredAt",
+          "sessionId",
+          "source",
+          "status",
+          "threadSource",
+          "turns",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "description": "Identifier for this thread. Codex-generated thread IDs are UUIDv7.",
+            "type": "string"
+          },
+          "model": {
+            "description": "Current configured model when loaded, otherwise the latest persisted model. Null when unavailable. This is not per-turn execution telemetry.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "modelProvider": {
+            "description": "Model provider used for this thread (for example, 'openai').",
+            "type": "string"
+          },
+          "sessionId": {
+            "description": "Session id shared by threads that belong to the same session tree.",
+            "type": "string"
+          },
+          "status": {
+            "allOf": [
+              {
+                "$ref": "#/definitions/ThreadStatus"
+              }
+            ],
+            "description": "Current runtime status for the thread."
+          },
+          "turns": {
+            "description": "Only populated on `thread/resume`, `thread/fork`, and `thread/read` (when `includeTurns` is true) responses. For all other responses and notifications returning a Thread, the turns field will be an empty list.",
+            "items": {
+              "$ref": "#/definitions/Turn"
+            },
+            "type": "array"
+          }
+        }
+      }
+    },
+    "Turn": {
+      "source": {
+        "jsonFile": "v2/TurnStartResponse.json",
+        "jsonPointer": "/definitions/Turn",
+        "jsonSha256": "9588fa7c85b5eb67b363d3fca8f4a6bf9291f3b4b8c6295b7e7d154228270159"
+      },
+      "projection": {
+        "type": "object",
+        "required": [
+          "id",
+          "items",
+          "status"
+        ],
+        "propertyNames": [
+          "completedAt",
+          "durationMs",
+          "error",
+          "id",
+          "items",
+          "itemsView",
+          "rootTurnId",
+          "startedAt",
+          "status"
+        ],
+        "properties": {
+          "id": {
+            "description": "Identifier for this turn. Codex-generated turn IDs are UUIDv7.",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/definitions/TurnStatus"
+          }
+        }
+      }
+    },
+    "Model": {
+      "source": {
+        "jsonFile": "v2/ModelListResponse.json",
+        "jsonPointer": "/definitions/Model",
+        "jsonSha256": "2fb387a2ed258fc74258828ea342d68f89ce4e8e22cd0329ca59d2b423f9108b"
+      },
+      "projection": {
+        "type": "object",
+        "required": [
+          "defaultReasoningEffort",
+          "description",
+          "displayName",
+          "hidden",
+          "id",
+          "isDefault",
+          "model",
+          "supportedReasoningEfforts"
+        ],
+        "propertyNames": [
+          "additionalSpeedTiers",
+          "availabilityNux",
+          "availableAccessPrograms",
+          "defaultReasoningEffort",
+          "defaultServiceTier",
+          "description",
+          "displayName",
+          "hidden",
+          "id",
+          "inputModalities",
+          "isDefault",
+          "model",
+          "modelSpecialty",
+          "multiAgentVersion",
+          "serviceTiers",
+          "supportedReasoningEfforts",
+          "supportsPersonality",
+          "upgrade",
+          "upgradeInfo"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "ModelVerification": {
+      "source": {
+        "jsonFile": "v2/ModelVerificationNotification.json",
+        "jsonPointer": "/definitions/ModelVerification",
+        "jsonSha256": "4f27a99d0c8664c29abb4d65384ab16853bbc29b61de5e749111cefdc6994655"
+      },
+      "projection": {
+        "type": "string",
+        "enum": [
+          "trustedAccessForCyber"
+        ]
+      }
+    },
+    "ResponseUsageMetadata": {
+      "source": {
+        "jsonFile": "v2/RawResponseCompletedNotification.json",
+        "jsonPointer": "/definitions/ResponseUsageMetadata",
+        "jsonSha256": "aba140e87952c900f96e0308a8849d3e313d985de1f1aa2b77f193884a76357c"
+      },
+      "projection": {
+        "type": "object",
+        "description": "Usage metadata reported for one upstream response.",
+        "propertyNames": [
+          "amount",
+          "metadata"
+        ],
+        "properties": {
+          "amount": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "metadata": true
+        }
+      }
+    },
+    "ThreadSettings": {
+      "source": {
+        "jsonFile": "v2/ThreadSettingsUpdatedNotification.json",
+        "jsonPointer": "/definitions/ThreadSettings",
+        "jsonSha256": "1decdf57238a1573ffbbf0bf695acba50888c1580e44670471dd88bfc2bd540f"
+      },
+      "projection": {
+        "type": "object",
+        "required": [
+          "approvalPolicy",
+          "approvalsReviewer",
+          "collaborationMode",
+          "cwd",
+          "model",
+          "modelProvider",
+          "sandboxPolicy"
+        ],
+        "propertyNames": [
+          "activePermissionProfile",
+          "approvalPolicy",
+          "approvalsReviewer",
+          "collaborationMode",
+          "cwd",
+          "disabledPluginIds",
+          "effort",
+          "model",
+          "modelProvider",
+          "personality",
+          "sandboxPolicy",
+          "serviceTier",
+          "summary"
+        ],
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "modelProvider": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "InitializeParams": {
+      "source": {
+        "jsonFile": "v1/InitializeParams.json",
+        "jsonPointer": "",
+        "jsonSha256": "b55124e7c0f36a1789396daa5578217a92be67f053903696236686e59f6f212e"
+      },
+      "projection": {
+        "type": "object",
+        "title": "InitializeParams",
+        "required": [
+          "clientInfo"
+        ],
+        "propertyNames": [
+          "capabilities",
+          "clientInfo"
+        ],
+        "properties": {
+          "capabilities": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/InitializeCapabilities"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "clientInfo": {
+            "$ref": "#/definitions/ClientInfo"
+          }
+        }
+      }
+    },
+    "ThreadStartParams": {
+      "source": {
+        "jsonFile": "v2/ThreadStartParams.json",
+        "jsonPointer": "",
+        "jsonSha256": "e9c6d3cc18d049bfbc0249add3808fb8e5a27e1a0b5a423767aafbc3859a9428"
+      },
+      "projection": {
+        "type": "object",
+        "title": "ThreadStartParams",
+        "propertyNames": [
+          "approvalPolicy",
+          "approvalsReviewer",
+          "baseInstructions",
+          "config",
+          "cwd",
+          "developerInstructions",
+          "ephemeral",
+          "model",
+          "modelProvider",
+          "personality",
+          "sandbox",
+          "serviceName",
+          "serviceTier",
+          "sessionStartSource",
+          "threadSource"
+        ],
+        "properties": {
+          "approvalPolicy": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/AskForApproval"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "approvalsReviewer": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/ApprovalsReviewer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Override where approval requests are routed for review on this thread and subsequent turns."
+          },
+          "baseInstructions": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "config": {
+            "additionalProperties": true,
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "cwd": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "developerInstructions": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ephemeral": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "modelProvider": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "personality": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/Personality"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "@deprecated `friendly` and `pragmatic` no longer select a style."
+          },
+          "sandbox": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/SandboxMode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "serviceName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "serviceTier": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sessionStartSource": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/ThreadStartSource"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "threadSource": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/ThreadSource"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional client-supplied analytics source classification for this thread."
+          }
+        }
+      }
+    },
+    "ThreadResumeParams": {
+      "source": {
+        "jsonFile": "v2/ThreadResumeParams.json",
+        "jsonPointer": "",
+        "jsonSha256": "8dceca415b2c16693b55658ea629cba5ffc82ac300dcd403db0ba7455e491496"
+      },
+      "projection": {
+        "type": "object",
+        "title": "ThreadResumeParams",
+        "description": "There are three ways to resume a thread: 1. By thread_id: load the thread from disk by thread_id and resume it. 2. By history: instantiate the thread from memory and resume it. 3. By path: load the thread from disk by path and resume it.\n\nFor non-running threads, the precedence is: history > non-empty path > thread_id. If using history or a non-empty path for a non-running thread, the thread_id param will be ignored.\n\nIf thread_id identifies a running thread, app-server rejoins that thread and treats a non-empty path as a consistency check against the active rollout path. Empty string path values are treated as absent.\n\nPrefer using thread_id whenever possible.",
+        "required": [
+          "threadId"
+        ],
+        "propertyNames": [
+          "approvalPolicy",
+          "approvalsReviewer",
+          "baseInstructions",
+          "config",
+          "cwd",
+          "developerInstructions",
+          "excludeTurns",
+          "model",
+          "modelProvider",
+          "personality",
+          "sandbox",
+          "serviceTier",
+          "threadId"
+        ],
+        "properties": {
+          "approvalPolicy": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/AskForApproval"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "approvalsReviewer": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/ApprovalsReviewer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Override where approval requests are routed for review on this thread and subsequent turns."
+          },
+          "baseInstructions": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "config": {
+            "additionalProperties": true,
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "cwd": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "developerInstructions": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "excludeTurns": {
+            "description": "When true, return only thread metadata and live-resume state without populating `thread.turns`. This is useful when the client plans to call `thread/turns/list` immediately after resuming. Full-history hydration is deprecated for paginated threads; use this with `thread/turns/list` and `thread/items/list` instead.",
+            "type": "boolean"
+          },
+          "model": {
+            "description": "Configuration overrides for the resumed thread, if any.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "modelProvider": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "personality": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/Personality"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "@deprecated `friendly` and `pragmatic` no longer select a style. Changing this does not rewrite the thread's existing instructions."
+          },
+          "sandbox": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/SandboxMode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "serviceTier": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "threadId": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "TurnInterruptParams": {
+      "source": {
+        "jsonFile": "v2/TurnInterruptParams.json",
+        "jsonPointer": "",
+        "jsonSha256": "6dff382dae73d1dbc58406ed045605f647e7a49660e2540fbd2c6c24d60c5f2b"
+      },
+      "projection": {
+        "type": "object",
+        "title": "TurnInterruptParams",
+        "required": [
+          "threadId",
+          "turnId"
+        ],
+        "propertyNames": [
+          "threadId",
+          "turnId"
+        ],
+        "properties": {
+          "threadId": {
+            "type": "string"
+          },
+          "turnId": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "GetAccountParams": {
+      "source": {
+        "jsonFile": "v2/GetAccountParams.json",
+        "jsonPointer": "",
+        "jsonSha256": "30b545275f60975b55bd6fbaafd70f15505801d14168ee82d3931b6e93c78aab"
+      },
+      "projection": {
+        "type": "object",
+        "title": "GetAccountParams",
+        "propertyNames": [
+          "refreshToken"
+        ],
+        "properties": {
+          "refreshToken": {
+            "description": "When `true`, requests a proactive token refresh before returning.\n\nIn managed auth mode this triggers the normal refresh-token flow. In external auth mode this flag is ignored. Clients should refresh tokens themselves and call `account/login/start` with `chatgptAuthTokens`.",
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "ConfigReadParams": {
+      "source": {
+        "jsonFile": "v2/ConfigReadParams.json",
+        "jsonPointer": "",
+        "jsonSha256": "257c54a423b47c1d209ff1076765a1564d82322fd5161670fd489a2874de1bac"
+      },
+      "projection": {
+        "type": "object",
+        "title": "ConfigReadParams",
+        "propertyNames": [
+          "cwd",
+          "includeLayers"
+        ],
+        "properties": {
+          "cwd": {
+            "description": "Optional working directory to resolve project config layers. If specified, return the effective config as seen from that directory (i.e., including any project layers between `cwd` and the project/repo root).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "includeLayers": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "ListMcpServerStatusParams": {
+      "source": {
+        "jsonFile": "v2/ListMcpServerStatusParams.json",
+        "jsonPointer": "",
+        "jsonSha256": "30b978c6502b37c9f0002aeba241f41c91d4c6adf0f92d89242b62ffde415a2d"
+      },
+      "projection": {
+        "type": "object",
+        "title": "ListMcpServerStatusParams",
+        "propertyNames": [
+          "cursor",
+          "detail",
+          "limit",
+          "serverName",
+          "threadId"
+        ],
+        "properties": {
+          "cursor": {
+            "description": "Opaque pagination cursor returned by a previous call.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/McpServerStatusDetail"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Controls how much MCP inventory data to fetch for each server. Defaults to `Full` when omitted."
+          },
+          "limit": {
+            "description": "Optional page size; defaults to a server-defined value.",
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "serverName": {
+            "description": "Limit discovery to one server. With a thread ID, reuse that thread's MCP connection.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "threadId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "ApprovalsReviewer": {
+      "source": {
+        "jsonFile": "v2/TurnStartParams.json",
+        "jsonPointer": "/definitions/ApprovalsReviewer",
+        "jsonSha256": "835e0d4ca1a0ddc4fb6db1e2b3249dd67f07c50ac2506092ba81543efc92829b"
+      },
+      "projection": {
+        "type": "string",
+        "description": "Configures who approval requests are routed to for review. Examples include sandbox escapes, blocked network access, MCP approval prompts, and ARC escalations. Defaults to `user`. `auto_review` uses a carefully prompted subagent to gather relevant context and apply a risk-based decision framework before approving or denying the request. The legacy value `guardian_subagent` is accepted for compatibility.",
+        "enum": [
+          "user",
+          "auto_review",
+          "guardian_subagent"
+        ]
+      }
+    },
+    "AskForApproval": {
+      "source": {
+        "jsonFile": "v2/TurnStartParams.json",
+        "jsonPointer": "/definitions/AskForApproval",
+        "jsonSha256": "835e0d4ca1a0ddc4fb6db1e2b3249dd67f07c50ac2506092ba81543efc92829b"
+      },
+      "projection": {
+        "oneOf": [
+          {
+            "enum": [
+              "untrusted",
+              "on-request",
+              "never"
+            ],
+            "type": "string"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "granular": {
+                "properties": {
+                  "mcp_elicitations": {
+                    "type": "boolean"
+                  },
+                  "request_permissions": {
+                    "default": false,
+                    "type": "boolean"
+                  },
+                  "rules": {
+                    "type": "boolean"
+                  },
+                  "sandbox_approval": {
+                    "type": "boolean"
+                  },
+                  "skill_approval": {
+                    "default": false,
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "mcp_elicitations",
+                  "rules",
+                  "sandbox_approval"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "granular"
+            ],
+            "title": "GranularAskForApproval",
+            "type": "object"
+          }
+        ]
+      }
+    },
+    "SandboxPolicy": {
+      "source": {
+        "jsonFile": "v2/TurnStartParams.json",
+        "jsonPointer": "/definitions/SandboxPolicy",
+        "jsonSha256": "835e0d4ca1a0ddc4fb6db1e2b3249dd67f07c50ac2506092ba81543efc92829b"
+      },
+      "projection": {
+        "oneOf": [
+          {
+            "properties": {
+              "type": {
+                "enum": [
+                  "dangerFullAccess"
+                ],
+                "title": "DangerFullAccessSandboxPolicyType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "title": "DangerFullAccessSandboxPolicy",
+            "type": "object"
+          },
+          {
+            "properties": {
+              "networkAccess": {
+                "default": false,
+                "type": "boolean"
+              },
+              "type": {
+                "enum": [
+                  "readOnly"
+                ],
+                "title": "ReadOnlySandboxPolicyType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "title": "ReadOnlySandboxPolicy",
+            "type": "object"
+          },
+          {
+            "properties": {
+              "networkAccess": {
+                "allOf": [
+                  {
+                    "$ref": "#/definitions/NetworkAccess"
+                  }
+                ],
+                "default": "restricted"
+              },
+              "type": {
+                "enum": [
+                  "externalSandbox"
+                ],
+                "title": "ExternalSandboxSandboxPolicyType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "title": "ExternalSandboxSandboxPolicy",
+            "type": "object"
+          },
+          {
+            "properties": {
+              "excludeSlashTmp": {
+                "default": false,
+                "type": "boolean"
+              },
+              "excludeTmpdirEnvVar": {
+                "default": false,
+                "type": "boolean"
+              },
+              "networkAccess": {
+                "default": false,
+                "type": "boolean"
+              },
+              "type": {
+                "enum": [
+                  "workspaceWrite"
+                ],
+                "title": "WorkspaceWriteSandboxPolicyType",
+                "type": "string"
+              },
+              "writableRoots": {
+                "default": [],
+                "items": {
+                  "$ref": "#/definitions/AbsolutePathBuf"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "title": "WorkspaceWriteSandboxPolicy",
+            "type": "object"
+          }
+        ]
+      }
+    },
+    "UserInput": {
+      "source": {
+        "jsonFile": "v2/TurnStartParams.json",
+        "jsonPointer": "/definitions/UserInput",
+        "jsonSha256": "835e0d4ca1a0ddc4fb6db1e2b3249dd67f07c50ac2506092ba81543efc92829b"
+      },
+      "projection": {
+        "oneOf": [
+          {
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "text_elements": {
+                "default": [],
+                "description": "UI-defined spans within `text` used to render or persist special elements.",
+                "items": {
+                  "$ref": "#/definitions/TextElement"
+                },
+                "type": "array"
+              },
+              "type": {
+                "enum": [
+                  "text"
+                ],
+                "title": "TextUserInputType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "text",
+              "type"
+            ],
+            "title": "TextUserInput",
+            "type": "object"
+          },
+          {
+            "anyOf": [
+              {
+                "properties": {
+                  "url": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "url"
+                ],
+                "title": "UrlUserInput",
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "fileId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "fileId"
+                ],
+                "title": "FileIdUserInput",
+                "type": "object"
+              }
+            ],
+            "properties": {
+              "detail": {
+                "anyOf": [
+                  {
+                    "$ref": "#/definitions/ImageDetail"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "type": {
+                "enum": [
+                  "image"
+                ],
+                "title": "ImageUserInputType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "title": "ImageUserInput",
+            "type": "object"
+          },
+          {
+            "properties": {
+              "detail": {
+                "anyOf": [
+                  {
+                    "$ref": "#/definitions/ImageDetail"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "path": {
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "localImage"
+                ],
+                "title": "LocalImageUserInputType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "path",
+              "type"
+            ],
+            "title": "LocalImageUserInput",
+            "type": "object"
+          },
+          {
+            "properties": {
+              "type": {
+                "enum": [
+                  "audio"
+                ],
+                "title": "AudioUserInputType",
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "url"
+            ],
+            "title": "AudioUserInput",
+            "type": "object"
+          },
+          {
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "localAudio"
+                ],
+                "title": "LocalAudioUserInputType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "path",
+              "type"
+            ],
+            "title": "LocalAudioUserInput",
+            "type": "object"
+          },
+          {
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "skill"
+                ],
+                "title": "SkillUserInputType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "path",
+              "type"
+            ],
+            "title": "SkillUserInput",
+            "type": "object"
+          },
+          {
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "mention"
+                ],
+                "title": "MentionUserInputType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "path",
+              "type"
+            ],
+            "title": "MentionUserInput",
+            "type": "object"
+          }
+        ]
+      }
+    }
+  },
+  "featureFlags": {
+    "read": {
+      "sourceSha256": "a7e3d9c5d6baade5e2f12e59771f2dc8de62194dc3e3c2eb3938b47b08c87afb",
+      "values": {
+        "apps": false,
+        "plugins": false,
+        "hooks": false,
+        "goals": false,
+        "browser_use": false,
+        "browser_use_external": false,
+        "computer_use": false,
+        "multi_agent": false,
+        "image_generation": false,
+        "shell_tool": false,
+        "shell_snapshot": false,
+        "view_image": false,
+        "code_mode": false,
+        "code_mode_host": false,
+        "skill_search": false,
+        "skill_mcp_dependency_install": false
+      }
+    },
+    "write": {
+      "sourceSha256": "9bfbf6d794c3c8cd846ed600a7774fb9a4b23fa0b9c46825f26181ba1c4b89b2",
+      "values": {
+        "apps": false,
+        "plugins": false,
+        "hooks": false,
+        "goals": false,
+        "browser_use": false,
+        "browser_use_external": false,
+        "computer_use": false,
+        "multi_agent": false,
+        "image_generation": false,
+        "shell_tool": false,
+        "shell_snapshot": false,
+        "view_image": false,
+        "code_mode": false,
+        "code_mode_host": true,
+        "skill_search": false,
+        "skill_mcp_dependency_install": false
+      }
+    }
+  },
+  "requests": {
+    "sourceSha256": "9b89e2459362d20cec67a429ef9430fe6b0e9fb8bd87d445d4c9a6acccd87450",
+    "methods": {
+      "initialize": {
+        "$ref": "#/definitions/InitializeParams"
+      },
+      "thread/start": {
+        "$ref": "#/definitions/ThreadStartParams"
+      },
+      "thread/resume": {
+        "$ref": "#/definitions/ThreadResumeParams"
+      },
+      "turn/start": {
+        "$ref": "#/definitions/TurnStartParams"
+      },
+      "turn/interrupt": {
+        "$ref": "#/definitions/TurnInterruptParams"
+      },
+      "mcpServerStatus/list": {
+        "$ref": "#/definitions/ListMcpServerStatusParams"
+      },
+      "config/read": {
+        "$ref": "#/definitions/ConfigReadParams"
+      },
+      "account/read": {
+        "$ref": "#/definitions/GetAccountParams"
+      }
+    }
+  }
+}

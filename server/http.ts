@@ -1,3 +1,5 @@
+import {createClaudeAuthenticationService} from './native-readiness.ts';
+import type {NativeReadinessReport} from '../shared/native-readiness.ts';
 import {CapabilityRuntimeAdapters} from './capability-runtime-adapters.ts';
 import {CapabilityExecutionService} from './capability-execution.ts';
 import type {CapabilityPlanInput,CapabilityExecutionApproval} from '../shared/capability-execution.ts';
@@ -32,13 +34,20 @@ async function body(req:IncomingMessage,limit=18000):Promise<Record<string,unkno
   for await(const chunk of req){size+=chunk.length;if(size>limit)throw new AppError('BODY_TOO_LARGE',413);chunks.push(chunk);}
   try{const value=JSON.parse(Buffer.concat(chunks).toString('utf8'));if(!value||typeof value!=='object'||Array.isArray(value))throw new Error();return value;}catch{throw new AppError('INVALID_JSON',400);}
 }
-export function createHttpServer(controller:Controller,assets:string,options:{nativeProbe?:ReturnType<typeof createNativeProbeService>;runtimeAdapters?:CapabilityRuntimeAdapters}={}){
+export function createHttpServer(controller:Controller,assets:string,options:{nativeProbe?:ReturnType<typeof createNativeProbeService>;runtimeAdapters?:CapabilityRuntimeAdapters;claudeAuthentication?:ReturnType<typeof createClaudeAuthenticationService>}={}){
   const studio=new Studio(controller.store);
   const handoff=new HandoffService(controller.store,studio);
   const goals=new GoalService(controller.store);
   const progress=new ProjectProgressService(controller.store,studio);
   const planningHandoff=new PlanningHandoffService(controller.store,(workspaceId,runId)=>controller.verification.view(workspaceId,runId),id=>controller.workspaceDiff(id));
   const nativeProbe=options.nativeProbe??createNativeProbeService();
+  const claudeAuthentication=options.claudeAuthentication??createClaudeAuthenticationService();
+  const nativeReadiness=():NativeReadinessReport=>{
+    const installation=nativeProbe.get(),connection=controller.snapshot().provider;
+    return {codex:{installation:installation?.codex??{status:'unknown',version:null},authentication:connection==='ready'?'confirmed':'unknown',connection},
+      claude:{installation:installation?.claude??{status:'unknown',version:null},authentication:claudeAuthentication.get()},
+      actualModel:'unknown',liveValidation:'approval_required',costUsd:null,remainingQuota:null};
+  };
   const capabilityRouting=new CapabilityRoutingService(controller.store);
   const runtimeAdapters=options.runtimeAdapters??new CapabilityRuntimeAdapters(controller);
   const capabilityRegistry=()=>{
@@ -99,6 +108,9 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
       }
       if(req.method==='GET'&&url.pathname==='/api/capability-orchestration'){
         if(url.search)throw new AppError('INVALID_FIELDS',400);json(res,200,capabilityRegistry());return;
+      }
+      if(req.method==='GET'&&url.pathname==='/api/capability-orchestration/readiness'){
+        if(url.search)throw new AppError('INVALID_FIELDS',400);json(res,200,nativeReadiness());return;
       }
       const capabilityEvidence=url.pathname.match(/^\/api\/capability-orchestration\/evidence\/([a-f0-9]{64})$/);
       if(req.method==='GET'&&capabilityEvidence){if(url.search)throw new AppError('INVALID_FIELDS',400);json(res,200,capabilityRouting.discovery(capabilityEvidence[1]));return;}
@@ -235,6 +247,12 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
           if(url.search)throw new AppError('INVALID_FIELDS',400);exact(data,['workspaceId']);
           if(typeof data.workspaceId!=='string'||!/^[a-f0-9-]{36}$/.test(data.workspaceId))throw new AppError('INVALID_FIELDS',400);
           json(res,200,controller.interruptWorkflow(data.workspaceId,workflowInterrupt[1]));return;
+        }
+        if(url.pathname==='/api/capability-orchestration/readiness/refresh'){
+          if(url.search)throw new AppError('INVALID_FIELDS',400);exact(data,[]);controller.assertExecutionAvailable();
+          const installation=await nativeProbe.refresh();
+          if(installation.claude.status==='found'&&runtimeAdapters.snapshot('claude-code',installation.claude.version).compatible)await claudeAuthentication.refresh();
+          json(res,200,nativeReadiness());return;
         }
         if(url.pathname==='/api/capability-orchestration/refresh'){
           if(url.search)throw new AppError('INVALID_FIELDS',400);exact(data,[]);

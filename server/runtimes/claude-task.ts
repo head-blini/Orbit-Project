@@ -36,6 +36,8 @@ export function claudeTaskPrompt(input:ClaudeTaskInput):string{
 }
 
 export function executionForClaudeOutcome(outcome:ClaudeOutcome):{execution:Execution;reason:string|null}{
+  if(outcome.dispatch==='not_started'&&outcome.status==='interrupted')return {execution:'interrupted',reason:null};
+  if(outcome.dispatch==='not_started'&&outcome.issue)return {execution:'failed',reason:outcome.issue};
   if(outcome.status==='spawn_failed')return {execution:'failed',reason:'RUNTIME_NOT_STARTED'};
   if(outcome.exit!=='observed')return {execution:'lost',reason:'EXIT_NOT_OBSERVED'};
   switch(outcome.status){

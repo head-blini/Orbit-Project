@@ -13,12 +13,13 @@ import {ClaudeCodeRun,findClaude,claudeEnv,type ClaudeEvent,type ClaudeOutcome} 
 import {claudeTaskPrompt,executionForClaudeOutcome} from './runtimes/claude-task.ts';
 import {nativeModelId} from './runtimes/model-identity.ts';
 import {listMaterials} from './materials.ts';
+import {ProjectAiPreferencesService} from './project-ai-preferences.ts';
 
 type Runner=Pick<ClaudeCodeRun,'start'|'interrupt'>;
 type Quota=Extract<ClaudeEvent,{kind:'quota'}>;
 export interface ClaudeTaskServiceOptions {
   findExecutable?:()=>string;
-  runnerFactory?:(options:{executable:string;cwd:string;mode:'write';env:NodeJS.ProcessEnv})=>Runner;
+  runnerFactory?:(options:{executable:string;cwd:string;mode:'write';env:NodeJS.ProcessEnv;beforeDispatch:()=>void})=>Runner;
 }
 type Active={runner:Runner;done:Promise<void>};
 
@@ -70,10 +71,14 @@ export class ClaudeTaskService {
       {runtime:'claude-code',projectId,taskId,planningVersionId:brief.planningVersionId,planningContentHash:brief.planningContentHash,requirementLabels:brief.requirementLabels});
     let runner:Runner;
     try{
+      this.store.append('run.runtime_source',run.id,{source:this.options.runnerFactory?'mock':'native',interface:'claude.print'});
       if(repair)this.store.append('run.repair_source',run.id,{sourceRunId:repair.source.id,planningVersionId:brief.planningVersionId,planningContentHash:brief.planningContentHash});
       // Revalidate after synchronous Store observers, immediately before launch.
       this.projects.generalProject(projectId);
-      runner=(this.options.runnerFactory??(options=>new ClaudeCodeRun(options)))({executable,cwd:project.path,mode:'write',env:claudeEnv()});
+      runner=(this.options.runnerFactory??(options=>new ClaudeCodeRun(options)))({executable,cwd:project.path,mode:'write',env:claudeEnv(),beforeDispatch:()=>{
+        this.projects!.generalProject(projectId);
+        if(this.closing||new ProjectAiPreferencesService(this.store).read(projectId).execution!=='claude-code'||JSON.stringify(studio.execution(projectId,taskId))!==JSON.stringify(brief))throw new AppError('LAUNCH_CONTEXT_CHANGED',409);
+      }});
     }catch{
       return this.store.updateRun(run.id,{execution:'failed'},'run.failed',{reason:'RUNTIME_NOT_STARTED'});
     }
@@ -101,6 +106,8 @@ export class ClaudeTaskService {
     let result:ReturnType<typeof executionForClaudeOutcome>;
     try{
       const outcome:ClaudeOutcome=await runner.start(this.store.getRun(id)!.prompt,event=>this.observe(id,event));
+      this.store.append('run.runtime_outcome',id,{source:this.options.runnerFactory?'mock':outcome.evidenceSource==='native'?'native':outcome.evidenceSource==='mock'?'mock':'unknown',
+        dispatch:outcome.dispatch==='started'?'started':outcome.dispatch==='not_started'?'not_started':'unknown',exit:outcome.exit==='observed'?'observed':'not_observed'});
       if(outcome.identity)this.store.append('run.identity',id,{...outcome.identity,runId:id});
       result=executionForClaudeOutcome(outcome);
     }catch{result={execution:'lost',reason:'EXIT_NOT_OBSERVED'};}

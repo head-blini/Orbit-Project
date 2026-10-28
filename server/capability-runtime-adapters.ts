@@ -21,7 +21,7 @@ const runtime=(id:unknown):id is RuntimeId=>id==='codex'||id==='claude-code';
 const stableVersion=(version:unknown):version is string=>typeof version==='string'&&/^(0|[1-9]\d{0,4})\.(0|[1-9]\d{0,4})\.(0|[1-9]\d{0,4})$/.test(version);
 export function compatibleRuntimeVersion(runtimeId:RuntimeId,version:string):boolean {
  if(!stableVersion(version))return false;
- if(runtimeId==='codex')return version==='0.162.1';
+ if(runtimeId==='codex')return version==='0.162.1'||version==='0.165.0';
  const [major,minor,patch]=version.split('.').map(Number);
  return major===2&&(minor>1||minor===1&&patch>=259);
 }

@@ -2,9 +2,10 @@ import {spawn as nodeSpawn,type ChildProcess} from 'node:child_process';
 import {isAbsolute,join} from 'node:path';
 import {buildChildEnv} from '../child-env.ts';
 import {resolveNativeExecutable} from '../native-executable.ts';
-import {safeText} from '../privacy.ts';
+import {safeText,containsCredential} from '../privacy.ts';
 import {AppError} from '../errors.ts';
 import {nativeModelId,type NativeIdentity} from './model-identity.ts';
+import type {ClaudeAuthenticationReport} from '../../shared/native-readiness.ts';
 
 /**
  * Claude Code runtime adapter over the official `claude -p --output-format stream-json`
@@ -23,6 +24,7 @@ export type ClaudeEvent=
   |{kind:'quota';status:'allowed'|'allowed_warning'|'rejected'|'unknown';windows:ClaudeQuotaWindow[]}
   |{kind:'result';isError:boolean;terminalReason:string|null;turns:number|null;durationMs:number|null};
 export interface ClaudeOutcome {
+  dispatch?:'not_started'|'started';evidenceSource?:'native'|'mock';issue?:'AUTHENTICATION_REQUIRED'|'AUTH_MODE_BLOCKED'|'AUTH_PREFLIGHT_UNAVAILABLE'|'LAUNCH_CONTEXT_CHANGED';
   status:'completed'|'error'|'auth_required'|'quota_exhausted'|'interrupted'|'unknown'|'spawn_failed';
   sessionId:string|null;exit:'observed'|'not_observed';exitCode:number|null;signal:string|null;forced:boolean;
   ignoredLines:number;response:string;
@@ -59,7 +61,8 @@ export function findClaude(env:NodeJS.ProcessEnv=process.env,platform:NodeJS.Pla
 const text=(value:unknown)=>typeof value==='string'?value:null;
 const record=(value:unknown):Record<string,unknown>|null=>value&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,unknown>:null;
 const finite=(value:unknown)=>typeof value==='number'&&Number.isFinite(value)?value:null;
-const epoch=(value:unknown)=>{const n=finite(value);return n===null?null:new Date(n*1000).toISOString();};
+const epoch=(value:unknown)=>{const n=finite(value);if(n===null||n<0||!Number.isSafeInteger(n*1000))return null;try{return new Date(n*1000).toISOString();}catch{return null;}};
+const quotaStatus=(value:unknown)=>value==='allowed'||value==='allowed_warning'||value==='rejected'?value:'unknown';
 
 /** Returns projected events, [] for known lines with nothing to show, or null for unrecognised input. */
 export function parseClaudeLine(line:string):ClaudeEvent[]|null{
@@ -90,8 +93,12 @@ export function parseClaudeLine(line:string):ClaudeEvent[]|null{
     case 'user':return [];
     case 'rate_limit_event':{
       const info=record(value.rate_limit_info);if(!info)return null;
-      const status=['allowed','allowed_warning','rejected'].includes(String(info.status))?info.status as 'allowed':'unknown';
-      const windows=Object.entries(record(info.unifiedWindows)??{}).flatMap(([id,raw])=>{const w=record(raw);return w?[{id:id.slice(0,40),utilization:finite(w.utilization),resetsAt:epoch(w.resetsAt),status:text(w.status)??'unknown'}]:[];});
+      const status=quotaStatus(info.status);
+      const windows=Object.entries(record(info.unifiedWindows)??{}).slice(0,32).flatMap(([id,raw])=>{
+        if(!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}$/.test(id)||containsCredential(id))return [];
+        const w=record(raw),utilization=finite(w?.utilization);
+        return w?[{id,utilization:utilization!==null&&utilization>=0&&utilization<=1?utilization:null,resetsAt:epoch(w.resetsAt),status:quotaStatus(w.status)}]:[];
+      });
       return [{kind:'quota',status,windows}];
     }
     case 'result':return [{kind:'result',isError:value.is_error===true,terminalReason:text(value.terminal_reason),turns:finite(value.num_turns),durationMs:finite(value.duration_ms)}];
@@ -103,23 +110,39 @@ type SpawnLike=(command:string,args:readonly string[],options:object)=>ChildProc
 
 /** One Claude Code turn. The owner of a task must not start a second run for it. */
 export class ClaudeCodeRun {
-  private options:{executable:string;cwd:string;mode:ClaudeMode;textOnly?:boolean;resume?:string;model?:string;env?:NodeJS.ProcessEnv;spawn?:SpawnLike;killAfterMs?:number};
+  private options:{executable:string;cwd:string;mode:ClaudeMode;textOnly?:boolean;resume?:string;model?:string;env?:NodeJS.ProcessEnv;spawn?:SpawnLike;killAfterMs?:number;authProbe?:()=>Promise<ClaudeAuthenticationReport>;beforeDispatch?:()=>void;onOutputLine?:(line:string|null)=>void};
   private child:ChildProcess|null=null;private started=false;private interruptRequested=false;private forced=false;private killTimer:ReturnType<typeof setTimeout>|undefined;
+  private preflighting=false;
   constructor(options:ClaudeCodeRun['options']){this.options=options;}
-  start(prompt:string,onEvent:(event:ClaudeEvent)=>void):Promise<ClaudeOutcome>{
+  async start(prompt:string,onEvent:(event:ClaudeEvent)=>void):Promise<ClaudeOutcome>{
     if(this.started)return Promise.reject(new AppError('RUN_ALREADY_STARTED'));
     this.started=true;
+    const evidenceSource=this.options.spawn||this.options.authProbe?'mock':'native';
+    if(this.options.authProbe||!this.options.spawn){
+      this.preflighting=true;
+      let authentication:ClaudeAuthenticationReport['authentication']='unknown';
+      try{
+        const probe=this.options.authProbe??(async()=>{const {probeClaudeAuthentication}=await import('../native-readiness.ts');return probeClaudeAuthentication({findExecutable:()=>this.options.executable,env:this.options.env});});
+        authentication=(await probe()).authentication;
+      }catch{/* Authentication diagnostics never leave the probe. */}finally{this.preflighting=false;}
+      if(this.interruptRequested)return {status:'interrupted',dispatch:'not_started',evidenceSource,sessionId:null,exit:'not_observed',exitCode:null,signal:null,forced:false,ignoredLines:0,response:''};
+      if(authentication!=='subscription')return {status:'auth_required',dispatch:'not_started',evidenceSource,issue:authentication==='not_authenticated'?'AUTHENTICATION_REQUIRED':authentication==='unsupported'?'AUTH_MODE_BLOCKED':'AUTH_PREFLIGHT_UNAVAILABLE',
+        sessionId:null,exit:'not_observed',exitCode:null,signal:null,forced:false,ignoredLines:0,response:''};
+    }
+    try{this.options.beforeDispatch?.();}catch{return {status:'error',dispatch:'not_started',evidenceSource,issue:'LAUNCH_CONTEXT_CHANGED',sessionId:null,exit:'not_observed',exitCode:null,signal:null,forced:false,ignoredLines:0,response:''};}
     const args=claudeArgs(this.options),spawn=this.options.spawn??(nodeSpawn as SpawnLike);
     return new Promise(resolve=>{
       let sessionId:string|null=null,result:Extract<ClaudeEvent,{kind:'result'}>|null=null,error:Extract<ClaudeEvent,{kind:'error'}>['code']|null=null;
       let quotaRejected=false,ignoredLines=0,buffer='',response='',settled=false;
       let observedModel:string|null=null,identityInvalid=false;
-      const finish=(outcome:Omit<ClaudeOutcome,'sessionId'|'ignoredLines'|'response'|'forced'>)=>{
-        if(settled)return;settled=true;if(this.killTimer)clearTimeout(this.killTimer);this.child=null;
-        resolve({...outcome,sessionId,ignoredLines,response,forced:this.forced,identity:{providerId:'anthropic',modelId:identityInvalid?'unknown':observedModel??'unknown',sessionId,executionId:null,modelEvidence:!identityInvalid&&observedModel?'assistant_message':'unknown'}});
+      const finish=(outcome:Omit<ClaudeOutcome,'sessionId'|'ignoredLines'|'response'|'forced'>,preserveHandle=false)=>{
+        if(settled)return;settled=true;if(!preserveHandle){if(this.killTimer)clearTimeout(this.killTimer);this.child=null;}
+        resolve({dispatch:outcome.status==='spawn_failed'?'not_started':'started',evidenceSource,...outcome,sessionId,ignoredLines,response,forced:this.forced,identity:{providerId:'anthropic',modelId:identityInvalid?'unknown':observedModel??'unknown',sessionId,executionId:null,modelEvidence:!identityInvalid&&observedModel?'assistant_message':'unknown'}});
       };
       const handle=(line:string)=>{
         if(!line.trim())return;
+        // Null reports truncation without forwarding an unbounded raw line.
+        this.options.onOutputLine?.(line.length<=MAX_LINE?line:null);
         const events=line.length>MAX_LINE?null:parseClaudeLine(line);
         if(!events){ignoredLines++;return;}
         for(const event of events){
@@ -139,11 +162,14 @@ export class ClaudeCodeRun {
       try{child=spawn(this.options.executable,args,{cwd:this.options.cwd,env:this.options.env??claudeEnv(),stdio:['pipe','pipe','pipe'],shell:false,windowsHide:true});}
       catch{finish({status:'spawn_failed',exit:'not_observed',exitCode:null,signal:null});return;}
       this.child=child;
-      child.on('error',()=>finish({status:'spawn_failed',exit:'not_observed',exitCode:null,signal:null}));
+      child.on('error',()=>{
+        finish({status:child.pid===undefined?'spawn_failed':'unknown',exit:'not_observed',exitCode:null,signal:null},child.pid!==undefined);
+        if(child.pid!==undefined&&this.child===child)this.interrupt();
+      });
       child.stdout?.setEncoding('utf8');
       child.stdout?.on('data',(chunk:string)=>{
         buffer+=chunk;const lines=buffer.split('\n');buffer=lines.pop()??'';
-        if(buffer.length>MAX_LINE){ignoredLines++;buffer='';}
+        if(buffer.length>MAX_LINE){ignoredLines++;buffer='';this.options.onOutputLine?.(null);}
         for(const line of lines)handle(line);
       });
       // stderr may contain diagnostics with paths or account details; it is drained, never stored.
@@ -151,6 +177,7 @@ export class ClaudeCodeRun {
       child.stdin?.on('error',()=>{});
       child.stdin?.end(prompt);
       child.on('close',(code,signal)=>{
+        if(this.killTimer)clearTimeout(this.killTimer);this.child=null;
         if(buffer)handle(buffer);buffer='';
         const base={exit:'observed' as const,exitCode:code,signal:signal??null};
         if(this.interruptRequested)return finish({status:'interrupted',...base});
@@ -164,10 +191,12 @@ export class ClaudeCodeRun {
   }
   /** Sends an interrupt. Confirmation comes only from the observed process exit. */
   interrupt():'requested'|'not_running'{
+    if(this.preflighting){this.interruptRequested=true;return 'requested';}
     const child=this.child;if(!child)return 'not_running';
     if(this.interruptRequested)return 'requested';
-    this.interruptRequested=true;child.kill('SIGINT');
-    this.killTimer=setTimeout(()=>{if(this.child===child){this.forced=true;child.kill('SIGKILL');}},this.options.killAfterMs??5000);
+    this.interruptRequested=true;
+    try{child.kill('SIGINT');}catch{/* A signal error is not an exit observation. */}
+    this.killTimer=setTimeout(()=>{if(this.child===child){this.forced=true;try{child.kill('SIGKILL');}catch{/* Keep the unconfirmed process handle quarantined. */}}},this.options.killAfterMs??5000);
     return 'requested';
   }
 }

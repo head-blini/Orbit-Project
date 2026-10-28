@@ -6,9 +6,23 @@ import type {CapabilityRoutePost} from './capability-routing.tsx';
 import {QualityLoopStatus} from './project-progress.tsx';
 
 const labels:Record<CapabilityExecutionStatus,string>={awaiting_approval:'실행 승인 대기',dispatching:'실행 요청 확인 중',running:'실행 중',interrupt_requested:'중단 요청됨 · 종료 미확인',interrupted:'중단 확인',failed:'실행 실패',recovery_required:'종료 확인 필요',execution_completed:'응답 완료 · 품질 검증 전',quality_running:'품질 검증 중',quality_blocked:'품질 검증 차단',quality_failed:'품질 검증 실패',quality_passed:'품질 검증 통과'};
+export function ProviderEvidence({record,advanced}:{record:CapabilityExecutionRecord;advanced:boolean}){
+  const evidence=record.providerEvidence,source=evidence?.source??'unknown';
+  const liveVerified=source==='native'&&evidence?.livePipelineVerified===true;
+  return <section aria-label="Provider 검증 근거">
+    <p>검증 출처: {source==='mock'?'Mock · 모의 검증':source==='native'?'실제 네이티브 Provider':'unknown · 실행 출처 미확인'}</p>
+    <p>{source==='mock'?'모의 실행 관측':source==='native'?'실제 실행 관측':'실행 관측'}: {evidence?.executionObserved?'확인':'미확인'} · 실 Provider 전체 흐름: {liveVerified?'검증됨':'검증 대기'}</p>
+    <p>실제 비용 (USD): unknown · 잔여 사용량: unknown</p>
+    {advanced&&<details><summary>Provider 증거 상세</summary>
+      <p>실행 인터페이스: {evidence?.interface??'unknown'} · 응답 근거: {evidence?.responseDigest??'없음'}</p>
+      <p>품질 검증 기록: {evidence?.quality??'not_started'} · 비용과 사용량은 추정하지 않습니다.</p>
+    </details>}
+  </section>;
+}
 export function CapabilityExecutionEvidence({record,advanced}:{record:CapabilityExecutionRecord;advanced:boolean}){
-  return <section aria-label="기능 실행 기록"><p role="status"><strong>{labels[record.status]}</strong> · {record.runtimeId}</p>
+  return <section aria-label="기능 실행 기록"><p role="status"><strong>{record.status==='quality_passed'&&record.providerEvidence?.source==='mock'?'모의 품질 검증 통과':labels[record.status]}</strong> · {record.runtimeId}</p>
     <p>실제 실행 모델: {record.models.actualModelId} · 근거: {record.models.source}</p>
+    <ProviderEvidence record={record} advanced={advanced}/>
     {record.issue&&<p role="alert">{record.issue}</p>}
     {advanced&&<details><summary>실행 계약과 증거</summary>
       <p>사용자 선택: {record.models.selectedModelId??'미지정'} · 요청 모델: {record.models.requestedModelId??'미지정'} · 서버 설정 모델: {record.models.serverModelId??'unknown'}</p>

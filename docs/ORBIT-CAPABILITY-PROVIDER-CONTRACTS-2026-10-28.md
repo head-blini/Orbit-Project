@@ -1,6 +1,12 @@
 # Capability Provider Runtime 계약 — 2026-10-28
 
-## 확인 범위
+## Phase 3 추가 확인
+
+Node24 PATH의 Codex는 **0.165.0**, `/opt/homebrew/bin/codex`는 **0.162.1**이다. 서로 다른 바이너리를 동일 설치로 간주하지 않는다. 0.165.0의 오프라인 JSON schema·핵심 요청·제한 flag를 확인해 정확한 두 버전만 허용한다. `tests/fixtures/codex-0.165.0-contract.json`은 원본 SHA-256과 schema/flag 투영이며 실제 모델 실행 증거가 아니다. 모델 식별 관련 19개 projection은 0.162.1과 동일하고 actual unknown 유지.
+
+Claude `auth status` 공식 JSON은 `loggedIn`, `authMethod`를 제공한다. Orbit은 구독 `claude.ai`만 허용하며 API key/helper·third-party·OAuth token만으로 구독을 추정하지 않는다. 현재 Claude는 PATH 미발견으로 **실제 auth status 검증도 미수행**이다. 인증 preflight·오류·한도·중단 처리는 Mock으로 검증했다. 자세한 구현과 승인 절차는 [Phase 3](ORBIT-CAPABILITY-PHASE3-2026-10-28.md)에 기록한다.
+
+## Phase 2 확인 범위
 
 공식 문서 조회와 로컬 `codex --version`만 수행했다. `/opt/homebrew/bin/codex`의 결과는 `codex-cli 0.162.1`이었다. Claude는 PATH 및 `/opt/homebrew/bin/claude`, `/usr/local/bin/claude`, `~/.local/bin/claude`에서 발견되지 않았다. 인증파일, 실모델, 설치, 유료 API, 사용자 MCP/Hook은 호출하지 않았다. 아래 문서 지원과 Orbit 구현 지원 및 실제 실행 검증은 서로 다르다.
 

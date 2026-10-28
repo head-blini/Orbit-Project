@@ -22,11 +22,14 @@ export function qualityModelEvidence(identity:NativeIdentity|undefined,runId:str
   return {providerId:identity?.providerId??'unknown',modelId:known?identity!.modelId:null,sessionId:identity?.sessionId??null,runId,executionId:identity?.executionId??null,source:known?'native_observed':'unknown',...(identity?.codex?{codex:identity.codex}:{})};
 }
 export function qualityRunEvidence(store:Store,run:Run):QualityModelEvidence{
+  const provenance=store.db.prepare("SELECT data FROM events WHERE kind='run.runtime_source' AND run_id=? ORDER BY seq DESC LIMIT 1").get(run.id);
+  const rawSource=provenance?JSON.parse(String(provenance.data)).source:undefined;
+  const origin:Pick<QualityModelEvidence,'evidenceSource'>=provenance?{evidenceSource:rawSource==='native'?'native':rawSource==='mock'?'mock':'unknown'}:{};
   const codex=store.getCodexModelAttribution(run.id);
-  if(codex)return {providerId:'openai',modelId:null,sessionId:codex.nativeSessionId,runId:run.id,executionId:codex.turnId,source:'unknown',codex};
+  if(codex)return {providerId:'openai',modelId:null,sessionId:codex.nativeSessionId,runId:run.id,executionId:codex.turnId,source:'unknown',codex,...origin};
   const row=store.db.prepare("SELECT data FROM events WHERE kind='run.identity' AND run_id=? ORDER BY seq DESC LIMIT 1").get(run.id);
   const identity=row?JSON.parse(String(row.data)) as NativeIdentity:undefined;
-  return qualityModelEvidence(identity,run.id);
+  return {...qualityModelEvidence(identity,run.id),...origin};
 }
 
 /** File/format and numeric-source checks only. Semantic criteria remain independent review opinions. */
@@ -153,10 +156,13 @@ export function createQualityNativePorts(options:QualityNativeOptions):QualitySe
         processStopped=result.processStopped;
         if(!result.processStopped)fail('QUALITY_PROCESS_STOP_UNCONFIRMED');
         if(result.execution!=='completed')fail(result.issue??'QUALITY_REVIEW_FAILED');
-        response=result.response;evidence=qualityModelEvidence(result.identity,context.stepId);
+        response=result.response;evidence={...qualityModelEvidence(result.identity,context.stepId),evidenceSource:options.codexReview?'mock':'unknown'};
       }else if(selection.providerId==='anthropic'){
         if(!nativeModelId(selection.modelId))fail('QUALITY_MODEL_INVALID');
-        const runner=(options.claudeFactory??(config=>new ClaudeCodeRun(config)))({executable:(options.findExecutable??findClaude)(),cwd:source.path,mode:'read',textOnly:true,model:selection.modelId,env:claudeEnv()});
+        const runner=(options.claudeFactory??(config=>new ClaudeCodeRun(config)))({executable:(options.findExecutable??findClaude)(),cwd:source.path,mode:'read',textOnly:true,model:selection.modelId,env:claudeEnv(),beforeDispatch:()=>{
+          options.guard(context.sourceRun);
+          if(request.signal.aborted||snapshot(context.sourceRun).artifact.digest!==source.artifact.digest)fail('QUALITY_ARTIFACT_CHANGED');
+        }});
         let denied:string|null=null,subscriptionObserved=false;
         const abort=()=>{try{runner.interrupt();}catch{/* An interrupt request never proves exit. */}};
         request.signal.addEventListener('abort',abort,{once:true});
@@ -171,12 +177,13 @@ export function createQualityNativePorts(options:QualityNativeOptions):QualitySe
           if(event.kind==='quota'&&event.status==='rejected'){denied='QUOTA_EXHAUSTED';abort();}
         });}catch{fail('QUALITY_PROCESS_STOP_UNCONFIRMED');}
         finally{request.signal.removeEventListener('abort',abort);}
-        processStopped=result!.exit==='observed';
+        processStopped=result!.dispatch==='not_started'||result!.exit==='observed';
+        if(result!.dispatch==='not_started')fail(result!.status==='auth_required'?'LOGIN_REQUIRED':result!.status==='interrupted'?'QUALITY_INTERRUPTED':'QUALITY_LAUNCH_CONTEXT_CHANGED');
         if(!processStopped)fail('QUALITY_PROCESS_STOP_UNCONFIRMED');
         if(denied)fail(denied);
         if(!subscriptionObserved)fail('QUALITY_PERMISSION_DENIED');
         if(result!.status!=='completed'||result!.exitCode!==0)fail(result!.status==='quota_exhausted'?'QUOTA_EXHAUSTED':result!.status==='auth_required'?'LOGIN_REQUIRED':'QUALITY_REVIEW_FAILED');
-        response=result!.response;evidence=qualityModelEvidence(result!.identity,context.stepId);
+        response=result!.response;evidence={...qualityModelEvidence(result!.identity,context.stepId),evidenceSource:options.claudeFactory?'mock':result!.evidenceSource==='native'?'native':result!.evidenceSource==='mock'?'mock':'unknown'};
       }else return fail('QUALITY_PROVIDER_UNSUPPORTED');
       if(snapshot(context.sourceRun).artifact.digest!==source.artifact.digest)fail('QUALITY_ARTIFACT_CHANGED');
       if(response.length>=64000||response.includes('[REDACTED]'))fail('QUALITY_REVIEW_OUTPUT_BLOCKED');

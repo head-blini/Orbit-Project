@@ -1,3 +1,11 @@
+# Phase 3 재개 상태 (2026-10-28)
+
+- 기준: Phase 2 `1651cd55f0b1371a5dfbdc751f4073a7c007d77d`. [Phase 3 구현·검증·승인 절차](ORBIT-CAPABILITY-PHASE3-2026-10-28.md). 기존 실행/승인/Quality Loop 재사용, 실제 모델 unknown·독립 리뷰 차단 유지.
+- 구현: Claude 구독 auth preflight, PID 오류 격리, quota 정제; 실제/Mock 출처 journal과 진행판; 명시적 준비 상태 API/UI; Codex0.165.0 오프라인 계약 확인 및 exact 버전 호환 추가.
+- 실제 모델 호출 0회. Claude PATH 미발견. Codex Node24 PATH0.165.0 / Homebrew0.162.1. 설치/version/schema/flags 확인만 수행. 실제 전체 E2E 수락 조건은 승인 대기이며 완료로 보고하지 않는다.
+- 최종 검증: Node24.22.1 `npm run verify` exit0, **1358 tests /1356 pass /0 fail /2 Windows-only skip**, 타입·빌드·diff 검사 통과. 준비 상태/실행 승인 모의 Chrome 검사 통과. `/tmp/orbit-phase3-release.log`. 최종 리뷰의 auth await 경합·기획 wrapper 인증 우회·출력 초과 회귀는 재현 후 수정·재검증했다.
+- 이후 작업: 사용자가 실모델 최소 범위를 승인하면 문서 절차로 실행한다. 자동 설치·로그인 변경·외부 전송·Push·배포·main 병합 없음. `.DS_Store` 두 파일 보존/커밋 제외.
+
 # 현재 재개 요약 (2026-10-28 · Codex · Capability Orchestration Phase 2 로컬 구현·검증 완료)
 
 - 기준: `AGENTS.md`, `ORBIT-VISION.md`, `ORBIT-SCOPE-2026-10-27.md`, `ORBIT-IMPLEMENTATION-PLAN-2026-10-27.md`, `ORBIT-CAPABILITY-PHASE2-2026-10-28.md`, `ORBIT-CAPABILITY-PROVIDER-CONTRACTS-2026-10-28.md`.

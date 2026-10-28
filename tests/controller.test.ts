@@ -31,6 +31,8 @@ test('Solo dispatch has durable manager/session identity and replay preserves th
       const run=store.runs().at(-1)!,record=store.soloOperation(run.id).record;
       assert.ok(record);assert.equal(record.execution,'starting');assert.equal(record.nativeSessionId,params.threadId);
       assert.match(record.ownerIncarnation,/^[a-f0-9-]{36}$/);assert.ok(record.generation>0);beforeDispatch=true;
+      const provenance=store.db.prepare("SELECT data FROM events WHERE run_id=? AND kind='run.runtime_source'").get(run.id);
+      assert.deepEqual(JSON.parse(String(provenance?.data)),{source:'unknown',interface:'codex.app_server'});
     }return request(method,params);
   };
   try{

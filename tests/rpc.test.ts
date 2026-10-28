@@ -5,6 +5,7 @@ import { Rpc, denyRequest } from '../server/rpc.ts';
 test('production stdio parser correlates split responses and denies server approvals',async()=>{
   const script=`let b='';process.stdin.on('data',c=>{b+=c;let n;while((n=b.indexOf('\\n'))>=0){const e=JSON.parse(b.slice(0,n));b=b.slice(n+1);if(e.method==='fixture'){process.stdout.write(JSON.stringify({id:'approval',method:'item/commandExecution/requestApproval',params:{command:'not logged'}})+'\\n');const s=JSON.stringify({id:e.id,result:{ok:true}})+'\\n';process.stdout.write(s.slice(0,4));setTimeout(()=>process.stdout.write(s.slice(4)),5);}else if(e.id==='approval'){setTimeout(()=>process.stdout.write(JSON.stringify({method:'fixture/decision',params:{decision:e.result.decision}})+'\\n'),20);}}});`;
   const rpc=new Rpc(process.execPath,['-e',script],process.cwd());
+  assert.equal(rpc.evidenceSource,undefined,'generic subprocess transport is not native-provider evidence');
   const notification=new Promise<any>(r=>rpc.once('notification',r));
   try{assert.deepEqual(await rpc.request('fixture',{}),{ok:true});assert.equal((await notification).params.decision,'decline');}
   finally{await rpc.close();}

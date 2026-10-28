@@ -119,7 +119,12 @@ export class PlanningAgentService {
       const current=this.previewHash(record.projectId,workspace,record.inputDigest,runtime,record.preferencesRevision??0);
       if(current!==record.previewDigest)throw new Error();attempted=true;
       const input={workspacePath:workspace.path,instructions,timeoutMs,signal,onStarted:(ids:{threadId:string;turnId:string})=>{this.save({...this.record(record.id),threadId:ids.threadId,turnId:ids.turnId});}};
-      const result=await (runtime==='claude-code'?runClaudePlanning(input,this.claudeOptions):this.runner(input,this.factory));
+      const result=await (runtime==='claude-code'?runClaudePlanning(input,{...this.claudeOptions,beforeDispatch:()=>{
+        const latest=this.validated(record.projectId,record.workspaceId),selection=this.selection(record.projectId);
+        if(record.workspaceId)this.guard(record.workspaceId);
+        if(signal.aborted||this.previewHash(record.projectId,latest,record.inputDigest,selection.runtime,selection.preferencesRevision)!==record.previewDigest)throw new Error('PLANNING_PREVIEW_STALE');
+        this.claudeOptions.beforeDispatch?.();
+      }}):this.runner(input,this.factory));
       let execution=result.execution,issue=result.issue===null?null:publicIssue(result.issue),proposal:PlanningDraft|null=null;
       if(!['completed','failed','interrupted','timed_out','lost'].includes(execution)){execution='failed';issue='PLANNING_FAILED';}
       if(result.processStopped!==true){execution='lost';issue='PLANNING_PROCESS_UNCERTAIN';}
