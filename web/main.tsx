@@ -26,6 +26,7 @@ import {TaskVerificationPreviewPanel} from './task-verification-preview.tsx';
 import {StartPage} from './start.tsx';
 import {ProjectProgressPanel,lastEventTime} from './project-progress.tsx';
 import {DeliverablesPanel} from './deliverables.tsx';
+import {AiPreferencesPanel} from './ai-preferences.tsx';
 import {connectionFreshness} from '../shared/project-progress.ts';
 import './project-progress.css';
 
@@ -148,6 +149,7 @@ export function App(){
       {!online&&<div className="banner" role="status">서버 연결을 기다리고 있습니다. 다시 연결될 때 기록만 복원하며 프롬프트는 재전송하지 않습니다.</div>}
       {error&&<div className="banner error" role="alert">{error}</div>}
       {taskIntent&&taskAllowed&&taskIntent.scope===taskScope&&<TaskVerificationPreviewPanel projectId={taskIntent.task.projectId} workspaceId={taskIntent.workspaceId} taskId={taskIntent.task.id} taskTitle={taskIntent.task.title} scopeKey={taskIntent.scope} active={taskAllowed} onCancel={cancelTask} onRun={digest=>startTask(taskIntent,digest)}/>}
+      {page==='progress'&&selectedProject&&<AiPreferencesPanel key={'ai:'+projectId} projectId={projectId} kind={selectedProject.kind} online={online} post={rawPost}/>}
       {page==='progress'&&<ProjectProgressPanel key={projectId} projectId={projectId} projectKind={selectedProject?.kind??null} post={rawPost} online={online} lastSeq={state?.lastSeq??0} lastEventAt={lastEventTime(events)} freshness={connectionFreshness({online,lastEventAt:lastEventTime(events),now:Date.now()})}/>}
       {page==='progress'&&selectedProject?.kind==='general'&&<DeliverablesPanel key={'deliverables:'+projectId} projectId={projectId} online={online} lastSeq={state?.lastSeq??0}/>}
       {page==='dashboard'&&<Dashboard key={projectId} state={state} projectId={projectId} onNavigate={navigate}/>}

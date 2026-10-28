@@ -5,7 +5,11 @@ import {createStudioMutator} from '../studio-client.ts';
 import {PlanningPreview} from './PlanningStudio.tsx';
 import './agent.css';
 
-type Scope=Pick<PlanningAgentPanelProps,'projectId'|'workspaceId'|'online'|'busy'>;
+// A general (non-Git) project plans without a workspace: its scope is the project itself.
+type PanelProps=PlanningAgentPanelProps&{general?:boolean};
+type Scope=Pick<PanelProps,'projectId'|'workspaceId'|'online'|'busy'|'general'>;
+const hasScope=(scope:Scope)=>!!scope.workspaceId||!!scope.general;
+const runtimeLabel=(runtime:string|undefined)=>runtime==='claude-code'?'Claude Code':'Codex';
 type Action='preview'|'start'|'interrupt'|'recover'|'save';
 type ReadMode='poll'|'manual';
 type ReceiptStorage=Pick<Storage,'getItem'|'setItem'|'removeItem'>;
@@ -23,7 +27,7 @@ export function planningAgentRecoveryKey(record:PlanningSuggestion,projectId:str
   return record.projectId===projectId&&record.workspaceId===workspaceId&&record.execution!=='running'&&!record.processStopped&&!record.recoveredAt
     ?JSON.stringify([projectId,workspaceId,record.id,record.execution,record.inputDigest,record.outputDigest,record.processStopped,record.recoveredAt]):null;
 }
-function idle(state:AgentState){return state.scope.online&&!!state.scope.workspaceId&&!state.scope.busy&&!state.action&&!state.loading&&state.fresh&&!state.uncertain&&!!state.view&&!state.view.busy&&!state.view.recoveryRequired;}
+function idle(state:AgentState){return state.scope.online&&hasScope(state.scope)&&!state.scope.busy&&!state.action&&!state.loading&&state.fresh&&!state.uncertain&&!!state.view&&!state.view.busy&&!state.view.recoveryRequired;}
 
 /** Owns real UI requests, including synchronous locks before receipt hashing and scope changes. */
 export function createPlanningAgentCoordinator(initial:Scope,deps:Dependencies){
@@ -56,7 +60,7 @@ export function createPlanningAgentCoordinator(initial:Scope,deps:Dependencies){
     const wasUncertain=state.uncertain,requestScope={...scope},text=state.text,request=begin(kind);if(!request)return;
     rememberUncertainty(requestScope,true);
     try{
-      const path=rootPath(requestScope),workspaceId=requestScope.workspaceId!;
+      const path=rootPath(requestScope),workspaceId=requestScope.workspaceId??null;
       if(kind==='start'){
         // The callback captures this epoch: a disposed request cannot send after async hashing.
         const start=createStudioMutator(async(url,body)=>{
@@ -90,7 +94,7 @@ export function createPlanningAgentCoordinator(initial:Scope,deps:Dependencies){
     activate(){if(!live){live=true;generation++;publish({uncertain:uncertain(scope)});}},
     dispose(){live=false;generation++;sequence++;publish({...discard,action:null,loading:false,fresh:false,uncertain:uncertain(scope)});},
     configure(next:Scope){
-      if(scope.projectId===next.projectId&&scope.workspaceId===next.workspaceId&&scope.online===next.online&&scope.busy===next.busy)return;
+      if(scope.projectId===next.projectId&&scope.workspaceId===next.workspaceId&&scope.online===next.online&&scope.busy===next.busy&&!!scope.general===!!next.general)return;
       const changed=scopeId(scope)!==scopeId(next);scope={...next};generation++;sequence++;
       publish({...discard,scope,text:changed?'':state.text,view:changed?null:state.view,action:null,loading:false,fresh:false,uncertain:uncertain(scope),error:'',message:''});
     },
@@ -100,10 +104,10 @@ export function createPlanningAgentCoordinator(initial:Scope,deps:Dependencies){
       publish({...discard,text,action:null,error:'',message:''});
     },
     async refresh(mode:ReadMode){
-      if(!live||!scope.online||!scope.workspaceId||state.action||state.loading)return;
+      if(!live||!scope.online||!hasScope(scope)||state.action||state.loading)return;
       const request=token(),requestScope={...scope};publish({loading:true});
       try{
-        const result=await deps.get(rootPath(requestScope)+'?workspaceId='+encodeURIComponent(requestScope.workspaceId!)) as PlanningAgentView;
+        const result=await deps.get(rootPath(requestScope)+(requestScope.workspaceId?'?workspaceId='+encodeURIComponent(requestScope.workspaceId):'')) as PlanningAgentView;
         if(!current(request))return;if(!matchesView(result,requestScope))throw Error('VIEW_SCOPE_MISMATCH');
         const invalidate=mode==='manual'||result.busy||result.recoveryRequired||(!!state.preview&&result.scope!==state.preview.scope);
         if(mode==='manual')rememberUncertainty(requestScope,false);
@@ -116,7 +120,7 @@ export function createPlanningAgentCoordinator(initial:Scope,deps:Dependencies){
       if(!idle(state)||!validText(state.text))return;
       const text=state.text,requestScope={...scope},request=begin('preview');if(!request)return;publish(discard);
       try{
-        const result=await deps.post(rootPath(requestScope)+'/preview',{workspaceId:requestScope.workspaceId,text}) as PlanningAgentPreview;
+        const result=await deps.post(rootPath(requestScope)+'/preview',{workspaceId:requestScope.workspaceId??null,text}) as PlanningAgentPreview;
         if(!current(request))return;if(!matchesPreview(result,requestScope)||result.scope!==state.view?.scope)throw Error('PREVIEW_SCOPE_MISMATCH');
         publish({preview:result,message:'전송할 정확한 기획 입력을 표시했습니다. 내용을 확인한 뒤 별도로 동의하세요.'});
       }catch{if(current(request))publish({...discard,error:'기획 요청 미리보기를 확인하지 못했습니다. 입력과 현재 상태를 확인한 뒤 다시 요청하세요.'});}
@@ -128,31 +132,32 @@ export function createPlanningAgentCoordinator(initial:Scope,deps:Dependencies){
   };
 }
 
-export function PlanningAgentPanel(props:PlanningAgentPanelProps){
+export function PlanningAgentPanel(props:PanelProps){
   const callbacks=useRef(props);callbacks.current=props;
   const coordinator=useMemo(()=>{let storage:Storage|undefined;try{storage=typeof window==='undefined'?undefined:window.sessionStorage;}catch{}
     return createPlanningAgentCoordinator(props,{storage,get:async path=>{const response=await fetch(path);if(!response.ok)throw Error('PLANNING_HISTORY_FAILED');return response.json();},post:(path,body)=>callbacks.current.post(path,body),onSaved:version=>callbacks.current.onSaved(version)});
   },[]);
   const state=useSyncExternalStore(coordinator.subscribe,coordinator.getSnapshot,coordinator.getSnapshot);
   useLayoutEffect(()=>{coordinator.activate();return()=>coordinator.dispose();},[coordinator]);
-  useLayoutEffect(()=>coordinator.configure(props),[coordinator,props.projectId,props.workspaceId,props.online,props.busy]);
+  useLayoutEffect(()=>coordinator.configure(props),[coordinator,props.projectId,props.workspaceId,props.online,props.busy,props.general]);
+  const scoped=!!props.workspaceId||!!props.general,label=runtimeLabel(state.preview?.runtime??state.view?.runtime);
   const running=!!state.view?.records.some(record=>record.execution==='running');
   useEffect(()=>{
     let disposed=false,timer:ReturnType<typeof setTimeout>|undefined;
     async function poll(){await coordinator.refresh('poll');if(!disposed)timer=setTimeout(()=>void poll(),running?1000:15000);}
-    if(props.online&&props.workspaceId&&!state.action)void poll();
+    if(props.online&&scoped&&!state.action)void poll();
     return()=>{disposed=true;if(timer)clearTimeout(timer);};
-  },[coordinator,props.projectId,props.workspaceId,props.online,props.busy,state.action,running]);
-  const ready=idle(state),canPreview=ready&&validText(state.text),blocked=!props.online||!props.workspaceId||!!state.action;
+  },[coordinator,props.projectId,props.workspaceId,props.general,props.online,props.busy,state.action,running]);
+  const ready=idle(state),canPreview=ready&&validText(state.text),blocked=!props.online||!scoped||!!state.action;
   const simple=props.presentation==='simple';
-  const explanation=<><p>공식 Codex CLI의 읽기 전용 세션을 사용하며, 읽기 전용도 네이티브 파일 읽기를 허용합니다. CLI의 컨텍스트 로딩·보존·공급자 전송은 Model Hub 게이트웨이 밖에서 처리됩니다.</p>
+  const explanation=<><p>공식 {label} CLI의 읽기 전용 세션을 사용하며, 읽기 전용도 네이티브 파일 읽기를 허용합니다. CLI의 컨텍스트 로딩·보존·공급자 전송은 Model Hub 게이트웨이 밖에서 처리됩니다.</p>
     <p>1 turn · 60초 제한과 프로세스 종료 확인을 사용합니다. 자동 시작·재시도·이어받기는 하지 않습니다. 검증된 제안도 별도로 저장해야 미승인 기획 초안이 됩니다.</p></>;
-  return <section className="planning-agent" aria-label="Codex 기획 제안" aria-busy={!!state.action||state.loading}>
-    <h3>{simple?'무엇을 만들고 싶으세요?':'Codex 기획 제안 · 선택 기능'}</h3>
+  return <section className="planning-agent" aria-label={label+' 기획 제안'} aria-busy={!!state.action||state.loading}>
+    <h3>{simple?'무엇을 만들고 싶으세요?':label+' 기획 제안 · 선택 기능'}</h3>
     {simple?<><p>누가 사용할지, 어떤 일을 할 수 있으면 좋을지 적어 주세요. 기획 도우미의 제안을 검토하고 초안으로 저장할 수 있습니다.</p><details><summary>기획 도우미의 실행 범위와 제한</summary>{explanation}</details></>:explanation}
-    {!props.workspaceId&&<p>등록한 격리 작업 공간을 선택하면 기획 제안을 요청할 수 있습니다. 수동 기획 작성은 계속 사용할 수 있습니다.</p>}
+    {!scoped&&<p>등록한 격리 작업 공간을 선택하면 기획 제안을 요청할 수 있습니다. 수동 기획 작성은 계속 사용할 수 있습니다.</p>}
     {!props.online&&<p>서버 연결 후 기획 제안 상태를 확인할 수 있습니다.</p>}{props.busy&&<p>다른 작업이 진행 중입니다. 완료 후 새 기획 제안을 요청하세요.</p>}
-    <button disabled={!props.online||!props.workspaceId||!!state.action||state.loading} onClick={()=>void coordinator.refresh('manual')}>기획 상태 새로고침</button>
+    <button disabled={!props.online||!scoped||!!state.action||state.loading} onClick={()=>void coordinator.refresh('manual')}>기획 상태 새로고침</button>
     {state.error&&<p role="alert">{state.error}</p>}{state.message&&<p role="status">{state.message}</p>}
     {state.uncertain&&<p role="status">이전 변경 요청의 응답은 미확인입니다. 기획 상태 새로고침을 직접 눌러 성공적으로 조회해야 다시 시작할 수 있습니다. 자동 조회는 이 잠금을 해제하거나 요청을 재전송하지 않습니다.</p>}
     {state.view?.recoveryRequired&&<p>종료가 확인되지 않은 기획 프로세스가 있습니다. 실제 종료를 확인한 뒤 아래 별도 확인란으로 복구하세요.</p>}

@@ -125,3 +125,19 @@ test('native proposal attribution is not described as explicitly user-authored o
   assert.match(html,/in_app_agent/);assert.match(html,/codex/);assert.match(html,/<h4>출처 정보 · 미검증<\/h4>/);assert.match(html,/직접 입력·가져오기 또는 Orbit 기획 제안 경로에서 저장된 표기/);
   assert.match(html,/신원과 내용은 검증하지 않았으며 기획 승인 근거가 아닙니다/);assert.doesNotMatch(html,/사용자가 입력한 표기|사용자 제공 출처 정보/);
 });
+test('a general project plans without a workspace: no workspace query, null workspace in bodies, runtime shown',async()=>{
+  const {createPlanningAgentCoordinator,PlanningAgentPanel}=await components();
+  const general={projectId:'project-a',workspaceId:null,online:true,busy:false,general:true};
+  const g=(value:object)=>({...value,workspaceId:null,runtime:'claude-code'});
+  const reads:string[]=[],posts:{path:string;body:Record<string,unknown>}[]=[];
+  const coordinator=createPlanningAgentCoordinator(general as never,{get:async path=>{reads.push(path);return g(view());},post:async(path,body)=>{posts.push({path,body:body as Record<string,unknown>});return g(preview);},onSaved:()=>{},storage:storage()});
+  coordinator.activate();await coordinator.refresh('manual');
+  assert.deepEqual(reads,[root],'no workspaceId query for a general project');
+  coordinator.setText('시장 조사 보고서를 만들고 싶어요');await coordinator.preview();
+  assert.deepEqual(posts,[{path:root+'/preview',body:{workspaceId:null,text:'시장 조사 보고서를 만들고 싶어요'}}]);
+  assert.equal(coordinator.getSnapshot().preview?.runtime,'claude-code');
+  const html=renderToStaticMarkup(createElement(PlanningAgentPanel,{...general,post:async()=>({}),onSaved:()=>{}} as never));
+  assert.doesNotMatch(html,/격리 작업 공간을 선택하면/);assert.doesNotMatch(html,/<textarea[^>]*disabled/);
+  const code=renderToStaticMarkup(createElement(PlanningAgentPanel,{projectId:'project-a',workspaceId:null,online:true,busy:false,post:async()=>({}),onSaved:()=>{}} as never));
+  assert.match(code,/격리 작업 공간을 선택하면/,'code projects still need a workspace');
+});
