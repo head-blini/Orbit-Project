@@ -21,7 +21,7 @@ export interface PlanningStudioProps {
   onExport?(projectId: string, version: PlanningVersion, format: PlanningExportFormat): Promise<void>;
   onCompare?:PlanningComparisonProps['onCompare'];
   onReplan?:PlanningComparisonProps['onReplan'];
-  agentPlanning?:Omit<PlanningAgentPanelProps,'projectId'|'onSaved'>;
+  agentPlanning?:Omit<PlanningAgentPanelProps,'projectId'|'onSaved'>&{general?:boolean};
 }
 
 const starter = '# 새 기획안\n\n## Goal\n\n## Requirements\n### REQ-01\n\n#### Acceptance criteria\n\n## Constraints\n\n## Decisions\n\n## Open questions\n';

@@ -36,7 +36,7 @@ function ProjectStudio({projectId,page,post,online,state,busy,canRunTask,onRunTa
     {error&&<p role="alert">{error}</p>}<button disabled={loading} onClick={()=>void reload()}>저장 기록 다시 불러오기</button>
     {page==='planning'&&<div>
       <PlanningStudio projectId={projectId} showTaskPreview={false} list={()=>get(root+'/plans')}
-        agentPlanning={{post,online,workspaceId:state?.workspaces?.find(workspace=>workspace.id===state.selectedWorkspaceId&&workspace.projectId===projectId)?.id??null,
+        agentPlanning={{post,online,general:state?.projects?.some(project=>project.id===projectId&&project.kind==='general'),workspaceId:state?.workspaces?.find(workspace=>workspace.id===state.selectedWorkspaceId&&workspace.projectId===projectId)?.id??null,
           busy:!!busy||!!state?.extensionBusy||!!state?.verificationBusy||!!state?.mergeBusy||!!state?.workflowBusy||!!state?.reviewBusy||!!state?.modelHubBusy||state?.provider==='connecting'||!!state?.runs.some(run=>!terminal(run.execution))}}
         onExport={async(_project,version,format)=>{
           const response=await fetch(`${root}/plans/${version.id}/export?revision=${version.revision}&hash=${encodeURIComponent(version.contentHash)}&format=${format}`);
