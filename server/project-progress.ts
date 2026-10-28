@@ -16,7 +16,8 @@ export class ProjectProgressService {
     const head=this.store.db.prepare('SELECT version_id FROM planning_heads WHERE lineage_id=?');
     const currentPlanIds=lineages.flatMap(id=>{const row=head.get(id);return row?[String(row.version_id)]:[];});
     const workspaces=new Set(this.store.workspaces().filter(w=>w.projectId===projectId).map(w=>w.id));
-    const runs=this.store.runs().filter(run=>run.workspaceId&&workspaces.has(run.workspaceId));
+    // Code-project runs belong to a project workspace; general-project runs carry projectId directly.
+    const runs=this.store.runs().filter(run=>run.workspaceId?workspaces.has(run.workspaceId):(run as typeof run&{projectId?:unknown}).projectId===projectId);
     const checks=this.checks().filter(check=>check.projectId===projectId&&workspaces.has(check.workspaceId));
     return buildProjectProgress({projectId,tasks,runs,checks,plans,currentPlanIds,signals});
   }
