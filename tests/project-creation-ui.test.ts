@@ -7,7 +7,7 @@ import {renderToStaticMarkup} from 'react-dom/server';
 import ts from 'typescript';
 import {resolveProject} from '../web/navigation.ts';
 
-const prepared={project:{id:'11111111-1111-4111-8111-111111111111',name:'우리 앱',path:'/fixture/project',createdAt:'2026-10-27T00:00:00Z',writeEnabled:true},workspace:{id:'22222222-2222-4222-8222-222222222222',projectId:'11111111-1111-4111-8111-111111111111',path:'/fixture/worktree',branch:'orbit/fixture',baseSha:'a'.repeat(40),createdAt:'2026-10-27T00:00:00Z',status:'ready'}};
+const prepared={project:{id:'11111111-1111-4111-8111-111111111111',name:'우리 앱',kind:'code' as const,path:'/fixture/project',createdAt:'2026-10-27T00:00:00Z',writeEnabled:true},workspace:{id:'22222222-2222-4222-8222-222222222222',projectId:'11111111-1111-4111-8111-111111111111',path:'/fixture/worktree',branch:'orbit/fixture',baseSha:'a'.repeat(40),createdAt:'2026-10-27T00:00:00Z',status:'ready'}};
 const elements=(value:any):any[]=>Array.isArray(value)?value.flatMap(elements):value&&typeof value==='object'&&value.props?[value,...elements(value.props.children)]:[];
 const text=(value:any):string=>Array.isArray(value)?value.map(text).join(''):value&&typeof value==='object'?text(value.props?.children):typeof value==='string'?value:'';
 const storageFor=(values=new Map<string,string>())=>({getItem:(key:string)=>values.get(key)??null,setItem:(key:string,value:string)=>{values.set(key,value);},removeItem:(key:string)=>{values.delete(key);}});
@@ -53,7 +53,7 @@ function fixture(storage=storageFor()){
 test('managed creation is capability gated while existing Git registration and read-only guidance remain available',()=>{
   const {WorkspacePanel}=load('workspaces.tsx',{},storageFor());
   for(const available of [undefined,false,true]){
-    const html=renderToStaticMarkup(React.createElement(WorkspacePanel,{state:{projectCreationAvailable:available,projects:[{id:'p',name:'Existing',path:'/fixture',writeEnabled:false}],workspaces:[]},projectId:'p',locked:false,onProject:()=>{},post:async()=>{},action:async(fn:any)=>fn()}));
+    const html=renderToStaticMarkup(React.createElement(WorkspacePanel,{state:{projectCreationAvailable:available,projects:[{id:'p',name:'Existing',kind:'code' as const,path:'/fixture',writeEnabled:false}],workspaces:[]},projectId:'p',locked:false,onProject:()=>{},post:async()=>{},action:async(fn:any)=>fn()}));
     assert.equal(html.includes('새 프로젝트 이름'),available===true);
     assert.match(html,/로컬 Git 저장소 경로/);assert.match(html,/ORBIT_ALLOWED_PROJECTS/);
   }

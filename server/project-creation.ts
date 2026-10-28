@@ -11,12 +11,14 @@ import {containsCredential} from './privacy.ts';
 import {AppError} from './errors.ts';
 
 type Directory={path:string;device:string;inode:string;birthtimeNs:string};
-type Receipt={requestId:string;digest:string;name:string;createdAt:string;state:'creating'|'ready'|'failed';
-  root:string;rootIdentity:Directory[];projectId:string;projectPath:string;workspaceId:string;workspacePath:string;
+type Receipt={requestId:string;digest:string;name:string;kind?:Project['kind'];createdAt:string;state:'creating'|'ready'|'failed';
+  root:string;rootIdentity:Directory[];projectId:string;projectPath:string;workspaceId:string|null;workspacePath:string|null;
   projectIdentity:Directory|null;gitIdentity:ReturnType<typeof repositoryIdentity>|null;baseSha:string|null};
 const uuid=(value:unknown):value is string=>typeof value==='string'&&/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(value);
 const equal=(a:unknown,b:unknown)=>JSON.stringify(a)===JSON.stringify(b);
 const hash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
+// Keep the code digest compatible with receipts written before kind existed.
+const creationDigest=(name:string,kind:Project['kind'])=>hash(kind==='code'?{name}:{name,kind});
 function contains(parent:string,child:string){
   const key=(path:string)=>process.platform==='win32'?path.toLowerCase():path;
   const delta=relative(key(parent),key(child));return !delta||delta!=='..'&&!delta.startsWith('..'+sep)&&!isAbsolute(delta);
@@ -26,18 +28,21 @@ function directory(path:string):Directory{
   return {path:actual,device:String(stat.dev),inode:String(stat.ino),birthtimeNs:String(stat.birthtimeNs)};
 }
 function chain(path:string){const result:Directory[]=[];for(let current=path;;current=dirname(current)){result.push(directory(current));if(dirname(current)===current)return result;}}
-function normalize(input:CreateProjectInput):CreateProjectInput{
+function normalize(input:CreateProjectInput):Required<CreateProjectInput>{
   try{
     if(!input||typeof input!=='object'||Array.isArray(input)||![Object.prototype,null].includes(Object.getPrototypeOf(input)))throw new Error();
     const fields=Object.getOwnPropertyDescriptors(input);
-    if(Reflect.ownKeys(fields).sort().join(',')!=='name,requestId'||Object.values(fields).some(field=>!('value' in field)))throw new Error();
+    const keys=Reflect.ownKeys(fields);
+    if(keys.some(key=>typeof key!=='string')||!['name,requestId','kind,name,requestId'].includes((keys as string[]).sort().join(','))||Object.values(fields).some(field=>!('value' in field)))throw new Error();
     const {requestId,name}=input;
+    const kind=Object.hasOwn(fields,'kind')?input.kind:'code';
+    if(kind!=='code'&&kind!=='general')throw new Error();
     if(typeof requestId!=='string'||!/^[A-Za-z0-9][A-Za-z0-9_-]{7,79}$/.test(requestId)||containsCredential(requestId)
       ||typeof name!=='string'||/[\x00-\x1f\x7f]/.test(name))throw new Error();
     const trimmed=name.trim();
     if(!trimmed||trimmed.length>80||containsCredential(trimmed)||/[/\\<>:=`$|;&]/.test(trimmed)||trimmed.startsWith('-')||trimmed==='.'||trimmed==='..'
       ||/\b(?:password|passwd|secret|token|api[-_ ]?key|authorization|credentials?)\b/i.test(trimmed))throw new Error();
-    return {requestId,name:trimmed};
+    return {requestId,name:trimmed,kind};
   }catch{throw new AppError('INVALID_FIELDS',400);}
 }
 
@@ -61,52 +66,61 @@ export class ManagedProjectCreation {
     if(!row)return null;
     try{
       const r:Receipt=JSON.parse(String(row.body));
-      if(!r||!uuid(r.projectId)||!uuid(r.workspaceId)||r.root!==this.root||r.projectPath!==join(this.root,r.projectId)
-        ||r.workspacePath!==join(this.managed,r.workspaceId)||!['creating','ready','failed'].includes(r.state)
-        ||!equal(normalize({requestId:r.requestId,name:r.name}),{requestId:r.requestId,name:r.name})
-        ||r.digest!==hash({name:r.name})||r.digest!==row.digest||typeof r.createdAt!=='string'||!Number.isFinite(Date.parse(r.createdAt)))throw new Error();
+      const kind=r.kind===undefined?'code':r.kind;
+      if(!r||!uuid(r.projectId)||r.root!==this.root||r.projectPath!==join(this.root,r.projectId)
+        ||(kind==='general'?(r.workspaceId!==null||r.workspacePath!==null||r.gitIdentity!==null||r.baseSha!==null):(!uuid(r.workspaceId)||r.workspacePath!==join(this.managed,r.workspaceId)))
+        ||!['creating','ready','failed'].includes(r.state)
+        ||!equal(normalize({requestId:r.requestId,name:r.name,kind}),{requestId:r.requestId,name:r.name,kind})
+        ||r.digest!==creationDigest(r.name,kind)||r.digest!==row.digest||typeof r.createdAt!=='string'||!Number.isFinite(Date.parse(r.createdAt)))throw new Error();
       return r;
     }catch{return null;}
   }
   private matchingIdentity(r:Receipt){
     try{return this.available&&equal(r.rootIdentity,this.rootIdentity)&&equal(directory(r.projectPath),r.projectIdentity)
-      &&equal(repositoryIdentity(join(r.projectPath,'.git')),r.gitIdentity);}catch{return false;}
+      &&(r.kind==='general'?lstatSync(join(r.projectPath,'.git'),{throwIfNoEntry:false})===undefined:equal(repositoryIdentity(join(r.projectPath,'.git')),r.gitIdentity));}catch{return false;}
   }
   owns(project:Project){
     try{return this.store.db.prepare('SELECT digest,body FROM project_creation_receipts').all().some(row=>{
-      const r=this.read(row);return !!r&&r.state==='ready'&&r.projectId===project.id&&r.projectPath===project.path&&r.name===project.name&&r.createdAt===project.createdAt&&this.matchingIdentity(r);
+      const r=this.read(row);return !!r&&r.state==='ready'&&(r.kind??'code')===project.kind&&r.projectId===project.id&&r.projectPath===project.path&&r.name===project.name&&r.createdAt===project.createdAt&&this.matchingIdentity(r);
     });}catch{return false;}
   }
   private save(r:Receipt){this.store.db.prepare('UPDATE project_creation_receipts SET body=? WHERE request_id=?').run(JSON.stringify(r),r.requestId);}
   create(input:CreateProjectInput,prepare:(project:Project,workspaceId:string)=>Workspace,validate:(id:string)=>Workspace):CreatedProject{
-    const normalized=normalize(input),digest=hash({name:normalized.name});
+    const normalized=normalize(input),digest=creationDigest(normalized.name,normalized.kind);
     const prior=this.store.db.prepare('SELECT digest,body FROM project_creation_receipts WHERE request_id=?').get(normalized.requestId);
     if(prior){
       if(prior.digest!==digest)throw new AppError('IDEMPOTENCY_CONFLICT',409);
       const r=this.read(prior);if(!r||r.state!=='ready')throw new AppError('PROJECT_CREATION_INCOMPLETE',409);
       const project=this.store.projects().find(project=>project.id===r.projectId),workspace=this.store.workspaces().find(workspace=>workspace.id===r.workspaceId);
-      if(!project||!workspace||!this.owns(project)||workspace.projectId!==r.projectId||workspace.path!==r.workspacePath||workspace.branch!=='orbit/'+r.workspaceId||workspace.baseSha!==r.baseSha)throw new AppError('PROJECT_CREATION_UNAVAILABLE',409);
+      if(!project||!this.owns(project))throw new AppError('PROJECT_CREATION_UNAVAILABLE',409);
+      if(r.kind==='general')return {project:{...project,writeEnabled:true},workspace:null};
+      if(!workspace||workspace.projectId!==r.projectId||workspace.path!==r.workspacePath||workspace.branch!=='orbit/'+r.workspaceId||workspace.baseSha!==r.baseSha)throw new AppError('PROJECT_CREATION_UNAVAILABLE',409);
       try{validate(workspace.id);}catch{throw new AppError('PROJECT_CREATION_UNAVAILABLE',409);}
       return {project:{...project,writeEnabled:true},workspace};
     }
     if(!this.available)throw new AppError('PROJECT_CREATION_UNAVAILABLE',409);
-    const projectId=randomUUID(),workspaceId=randomUUID(),createdAt=new Date().toISOString();
+    const projectId=randomUUID(),workspaceId=normalized.kind==='code'?randomUUID():null,createdAt=new Date().toISOString();
     const r:Receipt={...normalized,digest,createdAt,state:'creating',root:this.root,rootIdentity:this.rootIdentity,
-      projectId,projectPath:join(this.root,projectId),workspaceId,workspacePath:join(this.managed,workspaceId),projectIdentity:null,gitIdentity:null,baseSha:null};
+      projectId,projectPath:join(this.root,projectId),workspaceId,workspacePath:workspaceId?join(this.managed,workspaceId):null,projectIdentity:null,gitIdentity:null,baseSha:null};
     try{
       this.store.transaction(()=>{this.store.db.prepare('INSERT INTO project_creation_receipts VALUES(?,?,?)').run(r.requestId,r.digest,JSON.stringify(r));this.store.append('project.creation.intent',null,{projectId,workspaceId});});
       if(!this.available)throw new Error();mkdirSync(r.projectPath);r.projectIdentity=directory(r.projectPath);this.save(r);
       const assertIdentity=()=>{if(!this.available||!equal(directory(r.projectPath),r.projectIdentity))throw new Error();};
       assertIdentity();writeFileSync(join(r.projectPath,'README.md'),'# Orbit project\n\nThis project is ready for planning.\n',{flag:'wx',mode:0o644});
+      const project:Project={id:projectId,name:r.name,kind:normalized.kind,path:r.projectPath,createdAt,writeEnabled:false};
+      if(normalized.kind==='general'){
+        if(!this.matchingIdentity(r))throw new Error();
+        r.state='ready';this.store.transaction(()=>{this.store.saveProject(project);this.save(r);this.store.append('project.creation.ready',null,{projectId,workspaceId:null});});
+        if(!this.owns(project))throw new Error();return {project:{...project,writeEnabled:true},workspace:null};
+      }
       assertIdentity();trustedGit(r.projectPath,['init','--quiet','--initial-branch=main','--template=']);
       r.gitIdentity=repositoryIdentity(join(r.projectPath,'.git'));this.save(r);
       const assertRepository=()=>{assertIdentity();if(!equal(repositoryIdentity(join(r.projectPath,'.git')),r.gitIdentity))throw new Error();};
       assertRepository();trustedGit(r.projectPath,['add','--','README.md']);
       assertRepository();trustedGit(r.projectPath,['commit','--quiet','-m','Initialize Orbit project'],{identity:true});
       assertRepository();r.baseSha=trustedGit(r.projectPath,['rev-parse','--verify','HEAD^{commit}']).toString('utf8').trim();this.save(r);
-      const project:Project={id:projectId,name:r.name,path:r.projectPath,createdAt,writeEnabled:false};
       this.store.transaction(()=>this.store.saveProject(project));
-      assertRepository();const workspace=prepare(project,workspaceId);assertRepository();
+      assertRepository();const workspace=prepare(project,workspaceId!);assertRepository();
       if(workspace.path!==r.workspacePath||workspace.baseSha!==r.baseSha)throw new Error();
       r.state='ready';this.store.transaction(()=>{this.save(r);this.store.append('project.creation.ready',null,{projectId,workspaceId});});
       if(!this.owns(project))throw new Error();validate(workspace.id);return {project:{...project,writeEnabled:true},workspace};

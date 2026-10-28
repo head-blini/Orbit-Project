@@ -23,7 +23,12 @@ export class Store extends EventEmitter {
       CREATE TABLE IF NOT EXISTS run_metrics(run_id TEXT PRIMARY KEY,body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS run_acceptance_baselines(run_id TEXT PRIMARY KEY,digest TEXT NOT NULL,body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS events(seq INTEGER PRIMARY KEY AUTOINCREMENT,kind TEXT NOT NULL,at TEXT NOT NULL,run_id TEXT,data TEXT NOT NULL);`);
-    try{migrateSoloOperations(this.db);migrateNativeConnections(this.db);}catch(error){this.db.close();throw error;}
+    try{
+      if(!this.db.prepare('PRAGMA table_info(projects)').all().some(column=>column.name==='kind')){
+        this.db.exec("ALTER TABLE projects ADD COLUMN kind TEXT NOT NULL DEFAULT 'code' CHECK(kind IN ('code','general'))");
+      }
+      migrateSoloOperations(this.db);migrateNativeConnections(this.db);
+    }catch(error){this.db.close();throw error;}
     for(const r of this.runs()) if(!terminal(r.execution)||r.execution==='lost') {
       if(!terminal(r.execution))this.updateRun(r.id,{execution:'lost'},'run.lost');
       const metrics=this.getRunMetrics(r.id);
@@ -36,9 +41,9 @@ export class Store extends EventEmitter {
   setMeta(key:string,value:string) { this.db.prepare('INSERT INTO metadata VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(key,value); }
   getThread(workspaceId?:string) {return this.getMeta(workspaceId?'thread:'+workspaceId:'thread');}
   setThread(id:string,workspaceId?:string) {this.setMeta(workspaceId?'thread:'+workspaceId:'thread',id);}
-  projects():Project[] {return this.db.prepare('SELECT body FROM projects ORDER BY rowid').all().map(r=>JSON.parse(r.body as string));}
+  projects():Project[] {return this.db.prepare('SELECT body,kind FROM projects ORDER BY rowid').all().map(r=>({...JSON.parse(r.body as string),kind:r.kind}));}
   workspaces():Workspace[] {return this.db.prepare('SELECT body FROM workspaces ORDER BY rowid').all().map(r=>JSON.parse(r.body as string));}
-  saveProject(p:Project) {this.db.prepare('INSERT INTO projects VALUES(?,?)').run(p.id,JSON.stringify(p));this.append('project.registered',null,{projectId:p.id});}
+  saveProject(p:Omit<Project,'kind'>&{kind?:Project['kind']}) {this.db.prepare('INSERT INTO projects(id,body,kind) VALUES(?,?,?)').run(p.id,JSON.stringify(p),p.kind??'code');this.append('project.registered',null,{projectId:p.id});}
   saveWorkspace(w:Workspace) {this.db.prepare('INSERT INTO workspaces VALUES(?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body').run(w.id,JSON.stringify(w));this.append('workspace.'+w.status,null,{workspaceId:w.id,projectId:w.projectId});}
   runs():Run[] {return this.db.prepare('SELECT body FROM runs ORDER BY rowid').all().map(row=>JSON.parse(row.body as string));}
   getRun(id:string):Run|null {const row=this.db.prepare('SELECT body FROM runs WHERE id=?').get(id);return row?JSON.parse(row.body as string):null;}
