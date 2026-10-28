@@ -1,3 +1,4 @@
+import type {QualityProgress} from './quality-progress.ts';
 import type {CapabilityExecutionRecord} from './capability-execution.ts';
 import type {CapabilityRouteDecision} from './capability-routing.ts';
 import type {CodexModelAttribution} from './codex-model-attribution.ts';
@@ -25,11 +26,13 @@ export interface ProgressInput {
   activity?:Readonly<Record<string,{at:string;tool:string|null}>>;
 }
 export interface ProgressRun {
+  quality?:QualityProgress;
   modelAttribution?:CodexModelAttribution|null;
   id:string;assignee:string;execution:Run['execution'];startedAt:string;lastObservedAt:string;
   verification:ProgressVerification;checks:number;planningVersionId:string|null;lastActivity:string|null;
 }
 export interface ProgressTask {
+  quality?:QualityProgress;
   capabilityRoutes?:CapabilityRouteDecision[];
   capabilityExecutions?:CapabilityExecutionRecord[];
   qualityLoops?:QualityLoopRecord[];

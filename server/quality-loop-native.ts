@@ -49,9 +49,14 @@ export async function qualityVerifyGeneral(store:Store,projects:Projects,context
   const unsupported=listed.truncated||outputs.some(item=>item.checks.format==='unsupported');
   const result:QualityVerificationResult={status:failures.length?'failed':unsupported?'unknown':'passed',checkIds:[context.stepId],issue:failures.length?'QUALITY_ARTIFACT_CHECK_FAILED':unsupported?'QUALITY_ARTIFACT_CHECK_UNSUPPORTED':null,failures};
   store.db.exec('CREATE TABLE IF NOT EXISTS quality_artifact_checks(id TEXT PRIMARY KEY,loop_id TEXT NOT NULL,body TEXT NOT NULL)');
-  const body={id:context.stepId,loopId:context.loopId,sourceRunId:context.sourceRun.id,baselineDigest:context.version.contentHash,artifactDigest:digest,scope:'format_and_numeric_source_only',files:outputs.map(item=>({path:item.path,digest:item.sha256,checks:item.checks})),result};
+  const body={id:context.stepId,loopId:context.loopId,sourceRunId:context.sourceRun.id,projectId:project.id,taskId:context.task.id,planningVersionId:context.version.id,artifactId:context.artifact.id,evidenceSource:'local',baselineDigest:context.version.contentHash,artifactDigest:digest,scope:'format_and_numeric_source_only',files:outputs.map(item=>({path:item.path,digest:item.sha256,checks:item.checks})),result};
   const previous=store.db.prepare('SELECT body FROM quality_artifact_checks WHERE id=?').get(context.stepId);
-  if(previous){if(String(previous.body)!==JSON.stringify(body))fail('QUALITY_CHECK_REPLAY_MISMATCH');return result;}
+  if(previous){
+    // Accept the exact historical shape without upgrading or weakening its saved evidence.
+    const {projectId:_,taskId:__,planningVersionId:___,artifactId:____,evidenceSource:_____,...legacy}=body;
+    if(String(previous.body)!==JSON.stringify(body)&&String(previous.body)!==JSON.stringify(legacy))fail('QUALITY_CHECK_REPLAY_MISMATCH');
+    return result;
+  }
   store.transaction(()=>{store.db.prepare('INSERT INTO quality_artifact_checks VALUES(?,?,?)').run(context.stepId,context.loopId,JSON.stringify(body));store.append('quality.artifact_check',context.sourceRun.id,{projectId:project.id,qualityLoopId:context.loopId,checkId:context.stepId,status:result.status});});
   return result;
 }

@@ -41,7 +41,7 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
   const studio=new Studio(controller.store);
   const handoff=new HandoffService(controller.store,studio);
   const goals=new GoalService(controller.store);
-  const progress=new ProjectProgressService(controller.store,studio);
+  const progress=new ProjectProgressService(controller.store,studio,{deliverables:id=>controller.deliverables(id),verification:(workspaceId,runId)=>controller.verification.view(workspaceId,runId)});
   const planningHandoff=new PlanningHandoffService(controller.store,(workspaceId,runId)=>controller.verification.view(workspaceId,runId),id=>controller.workspaceDiff(id));
   const nativeProbe=options.nativeProbe??createNativeProbeService();
   const claudeAuthentication=options.claudeAuthentication??createClaudeAuthenticationService();
