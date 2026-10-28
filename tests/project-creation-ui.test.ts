@@ -40,6 +40,7 @@ function fixture(storage=storageFor()){
   return {settle,requests,selected,get planning(){return planning;},get actions(){return actions;},html:()=>renderToStaticMarkup(tree),
     input:()=>elements(tree).find(e=>e.type==='input'),
     async name(value:string){const input=elements(tree).find(e=>e.type==='input');assert.ok(input);input.props.onChange({target:{value}});await settle();},
+    async choose(kind:'code'|'general'){const radio=elements(tree).find(e=>e.type==='input'&&e.props.type==='radio'&&e.props.value===kind);assert.ok(radio,'Missing kind '+kind);radio.props.onChange();await settle();},
     submitNow(){const form=elements(tree).find(e=>e.type==='form');assert.ok(form);form.props.onSubmit({preventDefault(){}});},
     async submit(){this.submitNow();await settle();},
     async click(label:string){const value=button(label);assert.ok(!value.props.disabled,'Disabled button: '+label);value.props.onClick();await settle();},
@@ -142,4 +143,32 @@ test('first-project fallback does not forgive any transient unrelated project, w
     for(const transition of transitions)await panel.update(transition);
     await panel.resolve(0,prepared);assert.equal(panel.requests.length,1);assert.deepEqual(panel.selected,[]);assert.equal(panel.planning,0);
   }
+});
+
+const general={project:{...prepared.project,id:'33333333-3333-4333-8333-333333333333',name:'시장 조사',kind:'general' as const},workspace:null};
+test('a general project is created without Git or workspace selection and still offers planning',async t=>{
+  const panel=fixture();t.after(()=>panel.dispose());await panel.settle();await panel.name('시장 조사');
+  await panel.choose('general');assert.match(panel.html(),/Git이나 작업 공간은 만들지 않습니다/);
+  await panel.submit();assert.equal(panel.requests.length,1);assert.deepEqual(panel.requests[0].body.kind,'general');
+  await panel.resolve(0,general);
+  assert.equal(panel.requests.length,1,'no workspace selection request');assert.deepEqual(panel.selected,[general.project.id]);
+  assert.match(panel.html(),/일반 프로젝트가 준비됐습니다/);
+  await panel.click('기획으로 이동');assert.equal(panel.planning,1);
+});
+test('a general receipt survives reload and a response that looks like a code project is rejected as uncertain',async t=>{
+  const storage=storageFor(),first=fixture(storage);t.after(()=>first.dispose());await first.settle();await first.name('시장 조사');await first.choose('general');await first.submit();
+  await first.resolve(0,prepared);assert.match(first.html(),/생성 결과를 확인하지 못했습니다/);assert.deepEqual(first.selected,[]);first.dispose();
+  const restored=fixture(storage);t.after(()=>restored.dispose());await restored.settle();assert.equal(restored.requests.length,0);
+  await restored.click('같은 요청으로 다시 확인');assert.equal(restored.requests[0].body.kind,'general');
+  await restored.resolve(0,general);assert.deepEqual(restored.selected,[general.project.id]);
+});
+test('a receipt stored before project kinds existed is restored as a code project',async t=>{
+  const storage=storageFor();storage.setItem('orbit.project.creation',JSON.stringify({requestId:'44444444-4444-4444-8444-444444444444',name:'예전 앱',result:null,selected:false}));
+  const panel=fixture(storage);t.after(()=>panel.dispose());await panel.settle();
+  await panel.click('같은 요청으로 다시 확인');assert.deepEqual(Object.keys(panel.requests[0].body).sort(),['name','requestId']);
+});
+test('a general project shows no Git workspace controls',()=>{
+  const {WorkspacePanel}=load('workspaces.tsx',{},storageFor());
+  const html=renderToStaticMarkup(React.createElement(WorkspacePanel,{state:{projectCreationAvailable:true,projects:[{id:'g',name:'조사',kind:'general' as const,path:'/fixture/g',writeEnabled:true,createdAt:''}],workspaces:[]},projectId:'g',locked:false,onProject:()=>{},post:async()=>{},action:async(fn:any)=>fn()}));
+  assert.doesNotMatch(html,/새 작업 공간 만들기/);assert.match(html,/일반 프로젝트입니다/);assert.doesNotMatch(html,/쓰기는 잠겨 있습니다/);
 });

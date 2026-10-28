@@ -1,7 +1,9 @@
 import React,{useEffect,useRef,useState} from 'react';
 import type {CreatedProject} from '../shared/project-creation.ts';
 
-type Receipt={requestId:string;name:string;result:{projectId:string;workspaceId:string}|null;selected:boolean};
+type Kind='code'|'general';
+// workspaceId is null for a general project: it has no Git repository or worktree.
+type Receipt={requestId:string;name:string;kind:Kind;result:{projectId:string;workspaceId:string|null}|null;selected:boolean};
 type Props={projectId:string;projectCount:number;selectedWorkspaceId:string|null;online:boolean;locked:boolean;onProject:(id:string)=>void;onPlanning?:()=>void;action:(fn:()=>Promise<void>)=>Promise<void>;post:(path:string,body:object)=>Promise<any>};
 const storageKey='orbit.project.creation';
 const uuid=(value:unknown):value is string=>typeof value==='string'&&/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(value);
@@ -11,8 +13,9 @@ function readReceipt():{receipt:Receipt|null;issue:string}{
   try{
     const raw=sessionStorage.getItem(storageKey);if(!raw)return {receipt:null,issue:''};
     const value=JSON.parse(raw) as Receipt;
-    if(!value||!uuid(value.requestId)||typeof value.name!=='string'||!validName(value.name)||typeof value.selected!=='boolean'
-      ||(value.result!==null&&(!value.result||!uuid(value.result.projectId)||!uuid(value.result.workspaceId)))||(!value.result&&value.selected))throw new Error();
+    if(value&&value.kind===undefined)value.kind='code';
+    if(!value||!uuid(value.requestId)||typeof value.name!=='string'||!validName(value.name)||typeof value.selected!=='boolean'||(value.kind!=='code'&&value.kind!=='general')
+      ||(value.result!==null&&(!value.result||!uuid(value.result.projectId)||(value.kind==='general'?value.result.workspaceId!==null:!uuid(value.result.workspaceId))))||(!value.result&&value.selected))throw new Error();
     return {receipt:value,issue:''};
   }catch{return {receipt:null,issue:'저장된 프로젝트 생성 기록을 확인할 수 없어 새 요청을 보내지 않습니다. 이 사이트의 세션 저장소 설정과 기존 프로젝트를 확인하세요.'};}
 }
@@ -28,7 +31,7 @@ const messages:Record<string,string>={
 export function ProjectCreatePanel(props:Props){
   const {projectId,selectedWorkspaceId,online,locked,onPlanning}=props;
   const [initial]=useState(readReceipt),[receipt,setReceipt]=useState<Receipt|null>(initial.receipt),[name,setName]=useState(initial.receipt?.name??'');
-  const [issue,setIssue]=useState(initial.issue),[busy,setBusy]=useState(false);
+  const [issue,setIssue]=useState(initial.issue),[busy,setBusy]=useState(false),[kind,setKind]=useState<Kind>(initial.receipt?.kind??'code');
   const sending=useRef(false),alive=useRef(true),stored=useRef(receipt),latest=useRef(props);
   const scope=useRef({projectId,selectedWorkspaceId,online,version:0});
   if(scope.current.projectId!==projectId||scope.current.selectedWorkspaceId!==selectedWorkspaceId||scope.current.online!==online)scope.current={projectId,selectedWorkspaceId,online,version:scope.current.version+1};
@@ -58,16 +61,18 @@ export function ProjectCreatePanel(props:Props){
     const version=scope.current.version,startingProject=latest.current.projectId,startingWorkspace=latest.current.selectedWorkspaceId;
     let record=stored.current;
     const firstProject=startingProject===''&&startingWorkspace===null&&latest.current.projectCount===0&&!record?.result;
-    if(!record){const trimmed=name.trim();if(!validName(trimmed)){show(nameIssue);return;}record={requestId:crypto.randomUUID(),name:trimmed,result:null,selected:false};}
+    if(!record){const trimmed=name.trim();if(!validName(trimmed)){show(nameIssue);return;}record={requestId:crypto.randomUUID(),name:trimmed,kind,result:null,selected:false};}
     sending.current=true;setBusy(true);setIssue('');
     try{
       try{remember(record);}catch{show('브라우저가 생성 요청을 보존하지 못해 요청을 보내지 않았습니다. 이 사이트의 세션 저장소 설정을 확인하세요.');return;}
       await props.action(async()=>{
         try{
           if(!record!.result){
-            const result=await props.post('/api/projects/create',{requestId:record!.requestId,name:record!.name}) as CreatedProject;
-            if(!result||!uuid(result.project?.id)||!uuid(result.workspace?.id)||result.workspace.projectId!==result.project.id||result.workspace.status!=='ready')throw new Error('UNCERTAIN_RESPONSE');
-            record={...record!,result:{projectId:result.project.id,workspaceId:result.workspace.id}};
+            const general=record!.kind==='general';
+            const result=await props.post('/api/projects/create',{requestId:record!.requestId,name:record!.name,...(general?{kind:'general'}:{})}) as CreatedProject;
+            if(!result||!uuid(result.project?.id))throw new Error('UNCERTAIN_RESPONSE');
+            if(general?result.project.kind!=='general'||result.workspace!==null:!result.workspace||!uuid(result.workspace.id)||result.workspace.projectId!==result.project.id||result.workspace.status!=='ready')throw new Error('UNCERTAIN_RESPONSE');
+            record={...record!,result:{projectId:result.project.id,workspaceId:result.workspace?.id??null}};
             remember(record);
           }
           // action() itself sets locked. Scope and connectivity, rather than that
@@ -79,6 +84,12 @@ export function ProjectCreatePanel(props:Props){
           const firstFallback=firstProject&&scope.current.version===version+1&&latest.current.projectCount===1
             &&scope.current.projectId===result.projectId&&scope.current.selectedWorkspaceId===null;
           if(!alive.current||(scope.current.version!==version&&!firstFallback)||!latest.current.online){show('프로젝트는 준비됐습니다. 연결과 선택한 프로젝트를 확인한 뒤 작업 공간을 선택하세요.');return;}
+          if(result.workspaceId===null){
+            // A general project is project-scoped only; selecting it never touches workspaces.
+            record={...record!,selected:true};remember(record);
+            if(alive.current&&(latest.current.projectId===startingProject||latest.current.projectId===result.projectId))latest.current.onProject(result.projectId);
+            return;
+          }
           await props.post('/api/workspaces/select',{workspaceId:result.workspaceId});
           record={...record!,selected:true};remember(record);
           // workspace.selected reconnects SSE before its HTTP response. Preserve
@@ -105,20 +116,24 @@ export function ProjectCreatePanel(props:Props){
     catch{show('브라우저의 생성 기록을 갱신하지 못했습니다. 세션 저장소 설정을 확인하세요.');}
   }
   const disabled=locked||!online||busy||!!initial.issue;
-  const ready=!!receipt?.selected&&receipt.result?.projectId===projectId&&receipt.result.workspaceId===selectedWorkspaceId;
+  const ready=!!receipt?.selected&&receipt.result?.projectId===projectId&&(receipt.result.workspaceId===null||receipt.result.workspaceId===selectedWorkspaceId);
   return <section aria-label="새 프로젝트 준비">
     <h3>새 프로젝트 만들기</h3>
-    <p className="hint">이름을 입력하면 Git 저장소와 격리 작업 공간을 준비합니다. AI 실행과 검증 명령 설정은 별도입니다.</p>
+    <p className="hint">{kind==='general'?'문서·조사·분석 같은 일반 작업용 폴더를 준비합니다. Git이나 작업 공간은 만들지 않습니다.':'이름을 입력하면 Git 저장소와 격리 작업 공간을 준비합니다. AI 실행과 검증 명령 설정은 별도입니다.'}</p>
     <form className="register-project" onSubmit={event=>{event.preventDefault();void prepare();}}>
       <label htmlFor="new-project-name">새 프로젝트 이름</label>
       <div><input id="new-project-name" value={name} maxLength={80} autoComplete="off" placeholder="나의 첫 프로젝트" disabled={disabled||!!receipt} onChange={event=>{if(!stored.current&&!sending.current)setName(event.target.value);}}/>
         {!receipt&&<button className="primary" disabled={disabled||!name.trim()}>{busy?'준비 중…':'새 프로젝트 준비'}</button>}</div>
     </form>
+    <fieldset className="project-kind" disabled={disabled||!!receipt}><legend>작업 종류</legend>
+      <label><input type="radio" name="new-project-kind" value="general" checked={kind==='general'} onChange={()=>{if(!stored.current&&!sending.current)setKind('general');}}/> 일반 작업 (문서·조사·분석)</label>
+      <label><input type="radio" name="new-project-kind" value="code" checked={kind==='code'} onChange={()=>{if(!stored.current&&!sending.current)setKind('code');}}/> 코드 작업 (Git 저장소)</label>
+    </fieldset>
     <p className="subtle">일반 이름만 입력하세요. 경로, 명령, 비밀번호나 API 키는 넣지 마세요.</p>
-    {receipt&&!ready&&<p className="hint">{receipt.result?'프로젝트가 준비됐습니다. 이 작업 공간을 선택하면 기획을 시작할 수 있습니다.':'확인할 생성 요청이 저장돼 있습니다. 이름을 바꾸지 않고 같은 요청으로 확인합니다.'}</p>}
+    {receipt&&!ready&&<p className="hint">{receipt.result?receipt.result.workspaceId===null?'프로젝트가 준비됐습니다. 프로젝트를 선택하면 기획을 시작할 수 있습니다.':'프로젝트가 준비됐습니다. 이 작업 공간을 선택하면 기획을 시작할 수 있습니다.':'확인할 생성 요청이 저장돼 있습니다. 이름을 바꾸지 않고 같은 요청으로 확인합니다.'}</p>}
     {receipt&&!ready&&<button disabled={disabled} onClick={()=>void prepare()}>{busy?'준비 중…':receipt.result?'작업 공간 선택 다시 시도':'같은 요청으로 다시 확인'}</button>}
-    {ready&&<p className="hint">프로젝트와 작업 공간이 준비됐습니다.</p>}
-    {ready&&onPlanning&&<button className="primary" disabled={disabled} onClick={()=>{if(!sending.current&&!latest.current.locked&&latest.current.online&&stored.current?.selected&&latest.current.projectId===stored.current.result?.projectId&&latest.current.selectedWorkspaceId===stored.current.result?.workspaceId)latest.current.onPlanning?.();}}>기획으로 이동</button>}
+    {ready&&<p className="hint">{receipt?.result?.workspaceId===null?'일반 프로젝트가 준비됐습니다.':'프로젝트와 작업 공간이 준비됐습니다.'}</p>}
+    {ready&&onPlanning&&<button className="primary" disabled={disabled} onClick={()=>{if(!sending.current&&!latest.current.locked&&latest.current.online&&stored.current?.selected&&latest.current.projectId===stored.current.result?.projectId&&(stored.current.result?.workspaceId===null||latest.current.selectedWorkspaceId===stored.current.result?.workspaceId))latest.current.onPlanning?.();}}>기획으로 이동</button>}
     {receipt?.selected&&<button disabled={disabled} onClick={startAnother}>다른 프로젝트 만들기</button>}
     {issue&&<p role="alert" className="notice">{issue}</p>}
   </section>;
