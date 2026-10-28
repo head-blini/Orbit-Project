@@ -17,10 +17,12 @@ export interface ProgressSignals {provider?:ProviderStatus;quota?:'available'|'e
 export interface ProgressInput {
   projectId:string;tasks:readonly SavedTask[];runs:readonly Run[];checks:readonly CheckRecord[];
   plans:readonly PlanningVersion[];currentPlanIds:readonly string[];signals:ProgressSignals;
+  /** Last recorded event per run and the latest observed tool name (never tool input). */
+  activity?:Readonly<Record<string,{at:string;tool:string|null}>>;
 }
 export interface ProgressRun {
   id:string;assignee:string;execution:Run['execution'];startedAt:string;lastObservedAt:string;
-  verification:ProgressVerification;checks:number;planningVersionId:string|null;
+  verification:ProgressVerification;checks:number;planningVersionId:string|null;lastActivity:string|null;
 }
 export interface ProgressTask {
   id:string;title:string;requirementLabels:string[];stage:TaskStage;assignee:string|null;planCurrent:boolean;
@@ -72,8 +74,9 @@ export function buildProjectProgress(input:ProgressInput):ProjectProgress{
     const own=runs.filter(run=>run.taskId===task.id),planCurrent=current.has(task.planningVersionId);
     const views=own.map((run):ProgressRun=>{
       const checks=checksByRun.get(run.id)??[],last=checks.at(-1);
-      const observed=checks.reduce<string>((at,c)=>latest(at,checkTime(c))!,run.updatedAt);
-      return {id:run.id,assignee:runAssignee(run),execution:run.execution,startedAt:run.createdAt,lastObservedAt:observed,verification:checkState(last),checks:checks.length,planningVersionId:run.planningVersionId??null};
+      const activity=input.activity?.[run.id];
+      const observed=checks.reduce<string>((at,c)=>latest(at,checkTime(c))!,latest(run.updatedAt,activity?.at??null)!);
+      return {id:run.id,assignee:runAssignee(run),execution:run.execution,startedAt:run.createdAt,lastObservedAt:observed,verification:checkState(last),checks:checks.length,planningVersionId:run.planningVersionId??null,lastActivity:activity?.tool??null};
     });
     const head=own.at(-1),view=views.at(-1);
     let stage:TaskStage=head&&view?runStage(head,view.verification):signals.quota==='exhausted'?'quota_wait':'not_started';

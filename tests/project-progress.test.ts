@@ -135,3 +135,12 @@ test('unknown_quota_stays_unknown: only an observed exhausted window becomes a q
   assert.equal(quotaSignal(usage('available',40)),'available');
   assert.equal(quotaSignal(usage('partial',0)),'exhausted');
 });
+
+test('observed activity events advance last observation and expose the latest tool name only',()=>{
+  const progress=buildProjectProgress(input({runs:[run('r1','t1','running','2026-10-28T01:00:00.000Z')],
+    activity:{r1:{at:'2026-10-28T01:07:00.000Z',tool:'Write'}}}));
+  assert.equal(progress.tasks[0].lastObservedAt,'2026-10-28T01:07:00.000Z');assert.equal(progress.lastObservedAt,'2026-10-28T01:07:00.000Z');
+  assert.equal(progress.tasks[0].runs[0].lastActivity,'Write');assert.equal(progress.tasks[0].stage,'running','activity never changes the recorded stage');
+  const older=buildProjectProgress(input({runs:[run('r1','t1','completed','2026-10-28T02:00:00.000Z')],activity:{r1:{at:'2026-10-28T01:00:00.000Z',tool:null}}}));
+  assert.equal(older.tasks[0].lastObservedAt,'2026-10-28T02:00:00.000Z');assert.equal(older.tasks[0].runs[0].lastActivity,null);
+});
