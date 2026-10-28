@@ -56,7 +56,7 @@ test('dedicated Studio pages render only their editor, preserve safe preview and
       assert.ok(nav.indexOf('aria-label="관리 메뉴"')<nav.indexOf('title="Model Providers"'));
     }
     const {WorkspacePanel}=await import('../web/workspaces.tsx');
-    const state={provider:'ready' as const,issue:null,threadId:'t',workspace:'A-workspace',readOnly:false,lastSeq:0,runs:[],selectedWorkspaceId:'wa',projects:[{id:'a',name:'A',path:'A-path',writeEnabled:true,createdAt:''},{id:'b',name:'B',path:'B-path',writeEnabled:false,createdAt:''}],workspaces:[{id:'wa',projectId:'a',path:'A-workspace',branch:'a-branch',status:'ready' as const,baseSha:'sha',createdAt:''},{id:'wb',projectId:'b',path:'B-workspace',branch:'b-branch',status:'ready' as const,baseSha:'sha',createdAt:''}]};
+    const state={provider:'ready' as const,issue:null,threadId:'t',workspace:'A-workspace',readOnly:false,lastSeq:0,runs:[],selectedWorkspaceId:'wa',projects:[{id:'a',name:'A',kind:'code' as const,path:'A-path',writeEnabled:true,createdAt:''},{id:'b',name:'B',kind:'code' as const,path:'B-path',writeEnabled:false,createdAt:''}],workspaces:[{id:'wa',projectId:'a',path:'A-workspace',branch:'a-branch',status:'ready' as const,baseSha:'sha',createdAt:''},{id:'wb',projectId:'b',path:'B-workspace',branch:'b-branch',status:'ready' as const,baseSha:'sha',createdAt:''}]};
     const workspace=renderToStaticMarkup(createElement(WorkspacePanel,{state,projectId:'b',onProject:()=>{},locked:false,action:async()=>{},post}));
     assert.match(workspace,/b-branch/);assert.doesNotMatch(workspace,/a-branch|A-path/);assert.match(workspace,/<option value="" disabled="" selected=""/);
     const {AgentCenter}=await import('../web/agent-center.tsx');

@@ -42,6 +42,12 @@ function repository(path:string){
   scan(root,true);accessSync(root,constants.R_OK);return {root,sha};
 }
 const sensitive=(path:string)=>/(^|\/)(\.env(?:\..*)?|auth\.json|credentials(?:\..*)?|\.aws|\.codex|\.git)(\/|$)|\.(?:sqlite(?:-wal|-shm)?|db(?:-wal|-shm)?|pem|key|p12|pfx|log)$/i.test(path);
+/** Reject general project IDs, including attempts to use them as workspace IDs. */
+export function assertGitProject(store:Store,id:string|null|undefined):void {
+  if(!id)return;
+  const projectId=store.workspaces().find(workspace=>workspace.id===id)?.projectId;
+  if(store.projects().some(project=>(project.id===id||project.id===projectId)&&project.kind==='general'))throw new AppError('GIT_REQUIRED',409);
+}
 export class Projects {
   private store:Store;private managed:string;private allowed:string[];
   private creation?:ManagedProjectCreation;
@@ -53,14 +59,16 @@ export class Projects {
   register(path:string):Project {
     const {root}=repository(path);if(same(root,this.managed)||inside(root,this.managed)||inside(this.managed,root))throw new AppError('PROJECT_OVERLAP');
     const existing=this.list().find(p=>same(p.path,root));if(existing)return existing;
-    const p={id:randomUUID(),name:safeText(basename(root)),path:root,createdAt:new Date().toISOString(),writeEnabled:this.allowed.some(a=>same(a,root))};this.store.saveProject(p);return p;
+    const p:Project={id:randomUUID(),kind:'code',name:safeText(basename(root)),path:root,createdAt:new Date().toISOString(),writeEnabled:this.allowed.some(a=>same(a,root))};this.store.saveProject(p);return p;
   }
   private project(id:string){const p=this.list().find(p=>p.id===id);if(!p)throw new AppError('PROJECT_NOT_FOUND',404);return p;}
   create(projectId:string):Workspace {
+    assertGitProject(this.store,projectId);
     const p=this.project(projectId);if(!p.writeEnabled)throw new AppError('WRITES_DISABLED',403);
     return this.prepareWorktree(p,randomUUID());
   }
   private prepareWorktree(p:Project,id:string):Workspace {
+    if(p.kind==='general')throw new AppError('GIT_REQUIRED',409);
     const {sha}=repository(p.path);accessSync(join(p.path,'.git'),constants.W_OK);canonical(this.managed);
     const w:Workspace={id,projectId:p.id,path:join(this.managed,id),branch:'orbit/'+id,baseSha:sha,createdAt:new Date().toISOString(),status:'creating'};
     this.store.saveWorkspace(w);
@@ -68,6 +76,7 @@ export class Projects {
     catch(e){w.status='failed';this.store.saveWorkspace(w);throw e;}
   }
   validate(id:string):Workspace {
+    assertGitProject(this.store,id);
     const w=this.workspaces().find(w=>w.id===id);if(!w||w.status!=='ready')throw new AppError('WORKSPACE_NOT_READY');const p=this.project(w.projectId);
     repository(p.path);canonical(this.managed);if(!same(w.path,join(this.managed,w.id))||!/^orbit\/[a-f0-9-]{36}$/.test(w.branch))throw new AppError('INVALID_WORKSPACE');
     canonical(w.path);canonical(join(w.path,'.git'));scan(w.path);
@@ -97,6 +106,7 @@ export class Projects {
     return {workspace,project:this.project(workspace.projectId),scratchRoot:this.managed};
   }
   mergeProject(id:string){
+    assertGitProject(this.store,id);
     const project=this.project(id);if(!project.writeEnabled)throw new AppError('WRITES_DISABLED',403);
     repository(project.path);return project;
   }

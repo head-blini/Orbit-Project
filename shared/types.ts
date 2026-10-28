@@ -23,7 +23,7 @@ export interface Snapshot {
   workspace:string; readOnly:boolean; runs:Run[]; lastSeq:number;
   selectedWorkspaceId?:string|null; projects?:Project[]; workspaces?:Workspace[];
 }
-export interface Project {id:string;name:string;path:string;createdAt:string;writeEnabled:boolean}
+export interface Project {id:string;name:string;kind:'code'|'general';path:string;createdAt:string;writeEnabled:boolean}
 export interface Workspace {id:string;projectId:string;path:string;branch:string;baseSha:string;createdAt:string;status:'creating'|'ready'|'failed'}
 export interface FileDiff {path:string;status:string;patch:string|null;omitted?:string}
 export interface WorkspaceDiff {workspaceId:string;baseSha:string;files:FileDiff[]}

@@ -8,7 +8,7 @@ import { assertWorkspace } from './workspace.ts';
 import { safeText, safeTextItems, containsCredential } from './privacy.ts';
 import type { RpcPort } from './rpc.ts';
 import { AppError } from './errors.ts';
-import { Projects } from './projects.ts';
+import { Projects,assertGitProject } from './projects.ts';
 import { evaluateLaunch,outboundDenial,providerConnections } from './providers/policy.ts';
 import { Studio } from './studio.ts';
 import { VerificationService,type VerificationConfiguration } from './verification-service.ts';
@@ -68,20 +68,21 @@ export class Controller {
   }
   snapshot():Snapshot{return {soloRecoveryRequired:this.soloRecoveryRequired(),provider:this.provider,issue:this.issue,threadId:this.thread(),workspace:basename(this.workspace),readOnly:!this.workspaceId,runs:this.store.runs().filter(r=>r.workspaceId===this.workspaceId),lastSeq:this.store.lastSeq(),connections:providerConnections,externalApiEnabled:this.modelHub.externalEnabled,modelHubConfigured:this.modelHub.configured,modelHubBusy:this.modelHub.active,extensionBusy:!!this.extensionPending,verificationBusy:this.verification.active,mergeBusy:this.merges.active,workflowBusy:this.workflows.active,reviewBusy:this.reviews.active,planningBusy:this.planningSuggestions.active,...(this.projects?{projectCreationAvailable:this.projects.creationAvailable,selectedWorkspaceId:this.workspaceId??null,projects:this.projects.list(),workspaces:this.projects.workspaces()}:{})};}
   private thread(){return this.store.getThread(this.workspaceId);}
-  private validate(){this.assertExecutionAvailable();this.planningSuggestions.ensureAvailable(this.workspaceId);this.workflows.ensureAvailable(this.workspaceId);this.merges.ensureAvailable(this.workspaceId);this.verification.ensureAvailable(this.workspaceId);if(this.workspaceId)this.projects!.writable(this.workspaceId);else assertWorkspace(this.workspace);}
+  private validate(){assertGitProject(this.store,this.workspaceId);this.assertExecutionAvailable();this.planningSuggestions.ensureAvailable(this.workspaceId);this.workflows.ensureAvailable(this.workspaceId);this.merges.ensureAvailable(this.workspaceId);this.verification.ensureAvailable(this.workspaceId);if(this.workspaceId)this.projects!.writable(this.workspaceId);else assertWorkspace(this.workspace);}
   private idle(){this.assertExecutionAvailable();this.extensionIdle();this.planningSuggestions.ensureAvailable(this.workspaceId);this.reviews.ensureAvailable(this.workspaceId);this.workflows.ensureAvailable();this.merges.ensureAvailable();this.verification.ensureAvailable();if(this.modelHub.active)throw new AppError('MODEL_REQUEST_ACTIVE');if(this.active())throw new AppError('RUN_ACTIVE');if(this.connecting||this.switching)throw new AppError('SESSION_BUSY');}
   startModelRequest(input:Parameters<ModelHubService['start']>[0]){this.extensionIdle();this.planningSuggestions.ensureAvailable(this.workspaceId);this.reviews.ensureAvailable(this.workspaceId);this.workflows.ensureAvailable();this.merges.ensureAvailable();this.verification.ensureAvailable();if(this.active())throw new AppError('RUN_ACTIVE');if(this.connecting||this.switching)throw new AppError('SESSION_BUSY');return this.modelHub.start(input);}
   registerProject(path:string){this.idle();if(!this.projects)throw new AppError('UNSUPPORTED',404);return this.projects.register(path);}
   createProject(input:Parameters<Projects['createProject']>[0]){this.idle();if(!this.projects)throw new AppError('PROJECT_CREATION_UNAVAILABLE',503);return this.projects.createProject(input);}
   createWorktree(projectId:string){this.idle();this.merges.ensureProjectAvailable(projectId);if(!this.projects)throw new AppError('UNSUPPORTED',404);return this.projects.create(projectId);}
   workspaceDiff(id:string){if(!this.projects)throw new AppError('UNSUPPORTED',404);return this.projects.diff(id);}
-  appPreviewSnapshot(id:string){if(!this.projects)throw new AppError('UNSUPPORTED',404);if(id!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);return this.projects.snapshot(id);}
+  appPreviewSnapshot(id:string){assertGitProject(this.store,id);if(!this.projects)throw new AppError('UNSUPPORTED',404);if(id!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);return this.projects.snapshot(id);}
   assertAppPreviewAvailable(){this.idle();}
-  developmentResult(workspaceId:string,runId:string|null){if(!this.projects)throw new AppError('UNSUPPORTED',404);if(workspaceId!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);return getDevelopmentResult(this.store,this.projects,this.verification,workspaceId,runId);}
-  analyzeSourceGraph(id:string){this.idle();if(id!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);return this.sourceGraphs.analyze(id);}
-  sourceGraphArtifact(id:string,input:Parameters<SourceGraphService['artifact']>[1]){this.idle();if(id!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);return this.sourceGraphs.artifact(id,input);}
-  verificationSetupView(id:string){if(id!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);return this.verificationSetup.view(id);}
+  developmentResult(workspaceId:string,runId:string|null){assertGitProject(this.store,workspaceId);if(!this.projects)throw new AppError('UNSUPPORTED',404);if(workspaceId!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);return getDevelopmentResult(this.store,this.projects,this.verification,workspaceId,runId);}
+  analyzeSourceGraph(id:string){assertGitProject(this.store,id);this.idle();if(id!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);return this.sourceGraphs.analyze(id);}
+  sourceGraphArtifact(id:string,input:Parameters<SourceGraphService['artifact']>[1]){assertGitProject(this.store,id);this.idle();if(id!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);return this.sourceGraphs.artifact(id,input);}
+  verificationSetupView(id:string){assertGitProject(this.store,id);if(id!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);return this.verificationSetup.view(id);}
   configureVerification(id:string,input:Parameters<VerificationSetupService['configure']>[1]){
+    assertGitProject(this.store,id);
     this.idle();if(id!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);
     if(!this.projects)throw new AppError('VERIFICATION_SETUP_UNAVAILABLE',404);
     const workspace=this.projects.writable(id);
@@ -93,6 +94,7 @@ export class Controller {
     return this.verificationSetup.configure(id,input);
   }
   startVerification(input:Parameters<VerificationService['start']>[0]){this.extensionIdle();
+    assertGitProject(this.store,input.workspaceId);
     this.planningSuggestions.ensureAvailable(input.workspaceId);this.reviews.ensureAvailable(input.workspaceId);
     this.workflows.ensureAvailable(input.workspaceId);
     this.merges.ensureAvailable(input.workspaceId);
@@ -100,6 +102,7 @@ export class Controller {
     return this.verification.start(input);
   }
   approveVerification(input:Parameters<VerificationService['approve']>[0]){this.extensionIdle();
+    assertGitProject(this.store,input.workspaceId);
     this.planningSuggestions.ensureAvailable(input.workspaceId);this.reviews.ensureAvailable(input.workspaceId);
     this.workflows.ensureAvailable(input.workspaceId);
     this.merges.ensureAvailable(input.workspaceId);
@@ -107,6 +110,7 @@ export class Controller {
     return this.verification.approve(input);
   }
   prepareMerge(input:Parameters<MergeService['prepare']>[0]){this.extensionIdle();
+    assertGitProject(this.store,input.workspaceId);
     this.planningSuggestions.ensureAvailable(input.workspaceId);this.reviews.ensureAvailable(input.workspaceId);
     this.workflows.ensureAvailable(input.workspaceId);
     if(input.workspaceId!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);
@@ -155,14 +159,14 @@ export class Controller {
     });
     this.extensionPending=pending;this.store.append('extensions.updated',null,{workspaceId,busy:true});return pending;
   }
-  startWorkflow(input:Parameters<WorkflowService['start']>[0]){this.extensionIdle();if(input.workspaceId!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);return this.workflows.start(input);}
+  startWorkflow(input:Parameters<WorkflowService['start']>[0]){this.extensionIdle();assertGitProject(this.store,input.workspaceId);if(input.workspaceId!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);return this.workflows.start(input);}
   interruptWorkflow(workspaceId:string,runId:string){if(workspaceId!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);return this.workflows.interrupt(workspaceId,runId);}
   recoverWorkflow(input:Parameters<WorkflowService['recover']>[0]){this.extensionIdle();this.planningSuggestions.ensureAvailable(this.workspaceId);if(this.workflows.record(input.runId).workspaceId!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);return this.workflows.recover(input);}
-  startReview(input:Parameters<ReviewService['start']>[0]){this.extensionIdle();if(input.workspaceId!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);return this.reviews.start(input);}
+  startReview(input:Parameters<ReviewService['start']>[0]){this.extensionIdle();assertGitProject(this.store,input.workspaceId);if(input.workspaceId!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);return this.reviews.start(input);}
   interruptReview(workspaceId:string,reviewId:string){if(workspaceId!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);return this.reviews.interrupt(workspaceId,reviewId);}
   recoverReview(input:Parameters<ReviewService['recover']>[0]){this.extensionIdle();this.planningSuggestions.ensureAvailable(this.workspaceId);if(this.reviews.record(input.reviewId).workspaceId!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);return this.reviews.recover(input);}
-  previewPlanning(projectId:string,input:Parameters<PlanningAgentService['preview']>[1]){this.extensionIdle();if(input.workspaceId!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);return this.planningSuggestions.preview(projectId,input);}
-  startPlanning(projectId:string,input:Parameters<PlanningAgentService['start']>[1]){this.extensionIdle();if(input.workspaceId!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);return this.planningSuggestions.start(projectId,input);}
+  previewPlanning(projectId:string,input:Parameters<PlanningAgentService['preview']>[1]){this.extensionIdle();assertGitProject(this.store,projectId);assertGitProject(this.store,input.workspaceId);if(input.workspaceId!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);return this.planningSuggestions.preview(projectId,input);}
+  startPlanning(projectId:string,input:Parameters<PlanningAgentService['start']>[1]){this.extensionIdle();assertGitProject(this.store,projectId);assertGitProject(this.store,input.workspaceId);if(input.workspaceId!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);return this.planningSuggestions.start(projectId,input);}
   interruptPlanning(projectId:string,id:string,workspaceId:string){if(workspaceId!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);return this.planningSuggestions.interrupt(projectId,id,workspaceId);}
   recoverPlanning(projectId:string,input:Parameters<PlanningAgentService['recover']>[1]){if(input.workspaceId!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);return this.planningSuggestions.recover(projectId,input);}
   savePlanningDraft(projectId:string,id:string,input:Parameters<PlanningAgentService['saveDraft']>[2]){if(input.workspaceId!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);return this.planningSuggestions.saveDraft(projectId,id,input);}
@@ -187,6 +191,7 @@ export class Controller {
   private status(status:ProviderStatus,issue:string|null=null){this.provider=status;this.issue=issue;if(status!=='ready'){this.clearExtensions();this.launchValidated=false;this.usage=unknownUsage();}this.store.append('provider.status',null,{status,issue});}
   private active():Run|undefined{return this.store.runs().find(r=>!terminal(r.execution));}
   async connect():Promise<void>{
+    assertGitProject(this.store,this.workspaceId);
     this.assertExecutionAvailable();this.extensionIdle();
     this.planningSuggestions.ensureAvailable(this.workspaceId);this.reviews.ensureAvailable(this.workspaceId);
     if(this.modelHub.active)throw new AppError('MODEL_REQUEST_ACTIVE');
@@ -272,10 +277,12 @@ export class Controller {
     }
   }
   taskVerificationPreview(projectId:string,taskId:string,workspaceId:string){
+    assertGitProject(this.store,projectId);assertGitProject(this.store,workspaceId);
     if(workspaceId!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);
     return this.verification.acceptance.preview(projectId,workspaceId,taskId);
   }
   async submitTask(projectId:string,taskId:string,input:{requestId:string;workspaceId:string;expectedAcceptanceDigest?:string}):Promise<Run>{
+    assertGitProject(this.store,projectId);assertGitProject(this.store,input.workspaceId);
     if(typeof input.requestId!=='string'||!/^[a-zA-Z0-9-]{8,80}$/.test(input.requestId))throw new AppError('INVALID_REQUEST_ID',400);
     const workspace=this.projects?.workspaces().find(workspace=>workspace.id===input.workspaceId);
     if(!workspace||workspace.id!==this.workspaceId||workspace.projectId!==projectId)throw new AppError('WORKSPACE_MISMATCH');
@@ -288,6 +295,7 @@ export class Controller {
   }
   async submit(input:{requestId:string;prompt:string;workspaceId?:string|null}):Promise<Run>{return this.start(input);}
   private async start(input:{requestId:string;prompt:string;workspaceId?:string|null},task?:Pick<Run,'taskId'|'planningVersionId'|'requirementLabels'>,acceptance?:TaskVerificationPreview):Promise<Run>{
+    assertGitProject(this.store,input?.workspaceId);assertGitProject(this.store,this.workspaceId);
     if(typeof input?.requestId!=='string'||!/^[a-zA-Z0-9-]{8,80}$/.test(input.requestId)||typeof input.prompt!=='string'||!input.prompt.trim()||input.prompt.length>4000)throw new AppError('INVALID_PROMPT',400);
     if(containsCredential(input.prompt))throw new AppError('CREDENTIAL_LIKE_INPUT',400);
     const denial=outboundDenial(input.prompt);

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import type { Snapshot } from '../shared/types.ts';
 import { pages,parsePage,resolveProject,workspaceMatchesProject,readPreference,writePreference,projectPreferenceKey } from '../web/navigation.ts';
 
-const projects=[{id:'a',name:'A',path:'a',writeEnabled:true,createdAt:''},{id:'b',name:'B',path:'b',writeEnabled:false,createdAt:''}];
+const projects=[{id:'a',name:'A',kind:'code' as const,path:'a',writeEnabled:true,createdAt:''},{id:'b',name:'B',kind:'code' as const,path:'b',writeEnabled:false,createdAt:''}];
 const state:Snapshot={provider:'ready',issue:null,threadId:null,workspace:'fixture',readOnly:false,runs:[],lastSeq:0,selectedWorkspaceId:'wa',projects,workspaces:[{id:'wa',projectId:'a',path:'fixture',branch:'a',baseSha:'sha',createdAt:'',status:'ready'}]};
 test('the beginner start page is the default while all advanced page URLs survive refresh',()=>{
   assert.equal(pages.length,13);assert.equal(new Set(pages.map(page=>page.id)).size,13);

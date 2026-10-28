@@ -23,6 +23,7 @@ function receipt(store:Store,requestId:string):any{
 test('a name creates a committed owned project and isolated ready workspace without external allowlist',()=>{
   const f=fixture();try{
     assert.equal(f.projects.creationAvailable,true);const request=input(),result=f.projects.createProject(request);
+    assert.ok(result.workspace);assert.equal(result.project.kind,'code');
     assert.equal(result.project.name,request.name);assert.equal(result.project.writeEnabled,true);
     assert.equal(result.project.path,join(f.root,result.project.id));assert.equal(result.workspace.projectId,result.project.id);
     assert.equal(result.workspace.path,join(f.managed,result.workspace.id));assert.equal(result.workspace.status,'ready');
@@ -36,6 +37,7 @@ test('a name creates a committed owned project and isolated ready workspace with
 });
 test('ready requests survive response loss and Store restart without another project or worktree',()=>{
   const f=fixture(),request=input();const first=f.projects.createProject(request);
+  assert.ok(first.workspace);
   assert.deepEqual(f.projects.createProject(request),first);
   assert.throws(()=>f.projects.createProject({...request,name:'다른 이름'}),/IDEMPOTENCY_CONFLICT/);
   f.store.close();const reopened=new Store(f.db);try{
@@ -50,7 +52,8 @@ test('disabled construction creates no creation root and cannot grant persisted 
     assert.throws(()=>projects.createProject(input()),/PROJECT_CREATION_UNAVAILABLE/);assert.equal(existsSync(join(dir,'projects')),false);
   }finally{store.close();}
   const f=fixture();try{const result=f.projects.createProject(input()),disabled=new Projects(f.store,f.managed);
-    assert.equal(disabled.list()[0].writeEnabled,false);assert.throws(()=>disabled.writable(result.workspace.id),/WRITES_DISABLED/);
+    const workspace=result.workspace;assert.ok(workspace);
+    assert.equal(disabled.list()[0].writeEnabled,false);assert.throws(()=>disabled.writable(workspace.id),/WRITES_DISABLED/);
   }finally{f.store.close();}
 });
 test('display names and exact input reject path, command, markup, secret and control payloads before allocation',()=>{

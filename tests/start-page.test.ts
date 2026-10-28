@@ -6,7 +6,7 @@ import {renderToStaticMarkup} from 'react-dom/server';
 import ts from 'typescript';
 import type {Snapshot} from '../shared/types.ts';
 
-const project={id:'project-a',name:'나의 앱',path:'/fixture',writeEnabled:true,createdAt:''},workspace={id:'workspace-a',projectId:project.id,path:'/fixture/work',branch:'orbit/work',baseSha:'a'.repeat(40),createdAt:'',status:'ready' as const};
+const project={id:'project-a',name:'나의 앱',kind:'code' as const,path:'/fixture',writeEnabled:true,createdAt:''},workspace={id:'workspace-a',projectId:project.id,path:'/fixture/work',branch:'orbit/work',baseSha:'a'.repeat(40),createdAt:'',status:'ready' as const};
 const state:Snapshot={provider:'ready',issue:null,threadId:'thread',workspace:workspace.path,readOnly:false,runs:[],lastSeq:1,selectedWorkspaceId:workspace.id,projects:[project],workspaces:[workspace]};
 const plan={id:'plan-a',projectId:project.id,revision:1,contentHash:'a'.repeat(64),state:'approved',draft:{title:'할 일 앱',goal:'목록 관리',requirements:[{label:'R1',description:'항목 추가',acceptanceCriteria:['항목이 표시된다']}],constraints:[],openQuestions:[]}};
 const task={id:'task-a',projectId:project.id,planningVersionId:plan.id,title:'항목 추가',description:'추가하기',acceptanceCriteria:['항목이 표시된다'],requirementLabels:['R1'],state:'draft',verification:'not_run',createdAt:''};

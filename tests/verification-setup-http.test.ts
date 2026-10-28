@@ -16,6 +16,7 @@ import type {VerificationSetupView} from '../shared/verification-setup.ts';
 async function fixture(){
   const dir=mkdtempSync(join(tmpdir(),'orbit-setup-http-')),store=new Store(':memory:'),projects=new Projects(store,join(dir,'workspaces'),[],join(dir,'projects'));
   const {project,workspace}=projects.createProject({requestId:randomUUID(),name:'Node app'}),readonly=createWorkspace(dir);let nativeCalls=0;
+  assert.ok(workspace);
   writeFileSync(join(workspace.path,'model.mjs'),'export const add=(a,b)=>a+b;\n');
   writeFileSync(join(workspace.path,'model.test.mjs'),"import {test} from 'node:test';import assert from 'node:assert/strict';import {add} from './model.mjs';test('adds',()=>assert.equal(add(2,3),5));\n");
   const factory=()=>{nativeCalls++;throw new Error('NATIVE_FORBIDDEN');};const controller=new Controller(store,readonly,factory,projects);await controller.selectWorkspace(workspace.id);

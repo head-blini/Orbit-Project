@@ -13,6 +13,7 @@ import { PlanningHandoffService } from './planning-handoff-service.ts';
 import {controlPlaneStatus} from './control-plane.ts';
 import {GoalService} from './goal-service.ts';
 import {AppPreviewHost} from './app-preview.ts';
+import {assertGitProject} from './projects.ts';
 
 function json(res:ServerResponse,status:number,value:unknown){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(value));}
 async function body(req:IncomingMessage,limit=18000):Promise<Record<string,unknown>>{
@@ -72,12 +73,15 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
       const goalRoute=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/goals(?:\/([a-f0-9-]{36})\/(state|history))?$/);
       const appPreviewRoute=url.pathname.match(/^\/api\/workspaces\/([a-f0-9-]{36})\/app-preview$/);
       const verificationSetupRoute=url.pathname.match(/^\/api\/workspaces\/([a-f0-9-]{36})\/verification-setup$/);
+      const gitWorkspaceRoute=url.pathname.match(/^\/api\/workspaces\/([a-f0-9-]{36})(?:\/|$)/);
+      if(req.method==='GET'&&gitWorkspaceRoute)assertGitProject(controller.store,gitWorkspaceRoute[1]);
       if(req.method==='POST'){
         const token=req.headers['x-csrf-token'];
         if(req.headers.origin!==origin||typeof token!=='string'||token.length!==64||!timingSafeEqual(Buffer.from(token),Buffer.from(session.csrf)))throw new AppError('CSRF_REJECTED',403);
         const largeStudioInput=studioRoute&&studioRoute[2]!=='tasks'&&(!studioRoute[3]||studioRoute[4]==='revisions');
         const planningSuggestion=url.pathname.match(/^\/api\/projects\/([a-f0-9-]{36})\/planning-suggestions\/(preview|start|recover|([a-f0-9-]{36})\/(interrupt|save))$/);
         const data=await body(req,largeStudioInput?6*256*1024+256*1024:planningSuggestion?64000:18000);
+        if(gitWorkspaceRoute)assertGitProject(controller.store,gitWorkspaceRoute[1]);
         if(verificationSetupRoute){
           if(url.search)throw new AppError('INVALID_FIELDS',400);exact(data,['requestId','profileId','expectedPreviewDigest','confirmed']);
           json(res,200,controller.configureVerification(verificationSetupRoute[1],data as unknown as Parameters<Controller['configureVerification']>[1]));return;
@@ -94,6 +98,7 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
         }
         if(planningSuggestion){
           if(url.search)throw new AppError('INVALID_FIELDS',400);
+          assertGitProject(controller.store,planningSuggestion[1]);
           const projectId=planningSuggestion[1],action=planningSuggestion[2],id=planningSuggestion[3];
           if(action==='preview'){
             exact(data,['workspaceId','text']);json(res,200,controller.previewPlanning(projectId,data as unknown as Parameters<Controller['previewPlanning']>[1]));return;
@@ -238,9 +243,9 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
           json(res,200,{...result,mode:'mock_only',externalApiEnabled:false});return;
         }
         if(url.pathname==='/api/projects/create'){
-          exact(data,['requestId','name']);
-          if(url.search||typeof data.requestId!=='string'||typeof data.name!=='string')throw new AppError('INVALID_FIELDS',400);
-          json(res,200,controller.createProject({requestId:data.requestId,name:data.name}));return;
+          exact(data,['requestId','name',...(Object.hasOwn(data,'kind')?['kind']:[])]);
+          if(url.search||typeof data.requestId!=='string'||typeof data.name!=='string'||(Object.hasOwn(data,'kind')&&data.kind!=='code'&&data.kind!=='general'))throw new AppError('INVALID_FIELDS',400);
+          json(res,200,controller.createProject({requestId:data.requestId,name:data.name,...(Object.hasOwn(data,'kind')?{kind:data.kind as 'code'|'general'}:{})}));return;
         }
         if(url.pathname==='/api/projects'){
           if(Object.keys(data).join(',')!=='path'||typeof data.path!=='string')throw new AppError('INVALID_FIELDS',400);
@@ -296,6 +301,7 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
       }
       const planningSuggestionsView=url.pathname.match(/^\/api\/projects\/([a-f0-9-]{36})\/planning-suggestions$/);
       if(req.method==='GET'&&planningSuggestionsView){
+        assertGitProject(controller.store,planningSuggestionsView[1]);
         const workspaceId=url.searchParams.get('workspaceId');
         if([...url.searchParams.keys()].join(',')!=='workspaceId'||!workspaceId||!/^[a-f0-9-]{36}$/.test(workspaceId))throw new AppError('INVALID_FIELDS',400);
         json(res,200,controller.planningSuggestions.view(planningSuggestionsView[1],workspaceId));return;
