@@ -240,6 +240,12 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
         }
         const taskRun=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/tasks\/([a-f0-9-]{36})\/run$/);
         if(taskRun){
+          // A workspace-bound request keeps the code-project path, which answers GIT_REQUIRED for general projects.
+          if(!Object.hasOwn(data,'workspaceId')&&controller.store.projects().some(project=>project.id===taskRun[1]&&project.kind==='general')){
+            exact(data,['requestId']);
+            if(typeof data.requestId!=='string')throw new AppError('INVALID_FIELDS',400);
+            json(res,200,await controller.submitTask(taskRun[1],taskRun[2],{requestId:data.requestId}));return;
+          }
           exact(data,['requestId','workspaceId',...(Object.hasOwn(data,'expectedAcceptanceDigest')?['expectedAcceptanceDigest']:[])]);
           if(Object.hasOwn(data,'expectedAcceptanceDigest')&&(typeof data.expectedAcceptanceDigest!=='string'||!/^[a-f0-9]{64}$/.test(data.expectedAcceptanceDigest)))throw new AppError('INVALID_FIELDS',400);
           if(typeof data.requestId!=='string'||typeof data.workspaceId!=='string'||!/^[a-f0-9-]{36}$/.test(data.workspaceId))throw new AppError('INVALID_FIELDS',400);

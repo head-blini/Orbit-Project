@@ -1,0 +1,107 @@
+import {createHash} from 'node:crypto';
+import type {Run} from '../shared/types.ts';
+import {terminal} from '../shared/types.ts';
+import type {SavedTask} from '../shared/parallel.ts';
+import type {Store} from './store.ts';
+import type {Projects} from './projects.ts';
+import {Studio} from './studio.ts';
+import {HandoffService} from './handoff-service.ts';
+import {AppError} from './errors.ts';
+import {ClaudeCodeRun,findClaude,claudeEnv,type ClaudeEvent,type ClaudeOutcome} from './runtimes/claude-code.ts';
+import {claudeTaskPrompt,executionForClaudeOutcome} from './runtimes/claude-task.ts';
+
+type Runner=Pick<ClaudeCodeRun,'start'|'interrupt'>;
+type Quota=Extract<ClaudeEvent,{kind:'quota'}>;
+export interface ClaudeTaskServiceOptions {
+  findExecutable?:()=>string;
+  runnerFactory?:(options:{executable:string;cwd:string;mode:'write';env:NodeJS.ProcessEnv})=>Runner;
+}
+type Active={runner:Runner;done:Promise<void>};
+
+/** One owner per saved task; native execution remains entirely in ClaudeCodeRun. */
+export class ClaudeTaskService {
+  private store:Store;private projects?:Projects;private options:ClaudeTaskServiceOptions;
+  private active=new Map<string,Active>();private latestQuota:Quota|null=null;private closing=false;
+  constructor(store:Store,projects?:Projects,options:ClaudeTaskServiceOptions={}){this.store=store;this.projects=projects;this.options=options;}
+  quota():Quota|null{return this.latestQuota?structuredClone(this.latestQuota):null;}
+  submit(projectId:string,taskId:string,requestId:string):Run {
+    if(typeof requestId!=='string'||!/^[a-zA-Z0-9-]{8,80}$/.test(requestId))throw new AppError('INVALID_REQUEST_ID',400);
+    const prior=this.store.findRequest(requestId);
+    if(prior){
+      if(prior.run.runtime!=='claude-code'||prior.run.projectId!==projectId||prior.run.taskId!==taskId)throw new AppError('IDEMPOTENCY_CONFLICT',409);
+      return prior.run;
+    }
+    const runs=this.store.runs().filter(run=>run.taskId===taskId);
+    // One writer per project folder: tasks of the same general project run one at a time.
+    if(runs.some(run=>!terminal(run.execution))||this.store.runs().some(run=>run.runtime==='claude-code'&&run.projectId===projectId&&!terminal(run.execution)))throw new AppError('RUN_ACTIVE',409);
+    if(runs.some(run=>run.execution==='lost'))throw new AppError('SOLO_RECOVERY_REQUIRED',409);
+    if(this.closing)throw new AppError('SESSION_BUSY',409);
+    if(!this.projects)throw new AppError('PROJECT_CREATION_UNAVAILABLE',409);
+    const project=this.projects.generalProject(projectId),studio=new Studio(this.store);
+    const brief=studio.execution(projectId,taskId),handoff=new HandoffService(this.store,studio).build(projectId,taskId);
+    const task=(studio.read(projectId,'tasks') as SavedTask[]).find(task=>task.id===taskId)!;
+    const prompt=claudeTaskPrompt({title:task.title,goal:handoff.goal,baseline:handoff.baseline,
+      acceptanceCriteria:handoff.requirements.flatMap(requirement=>requirement.acceptanceCriteria),
+      constraints:handoff.constraints,nonGoals:handoff.nonGoals,decisions:handoff.decisions,deliverable:`task-${taskId.slice(0,8)}.md`});
+    const executable=(this.options.findExecutable??findClaude)();
+    // No await between ownership checks, durable intent and launch.
+    const run=this.store.createRun(requestId,createHash('sha256').update(prompt).digest('hex'),prompt,undefined,
+      {runtime:'claude-code',projectId,taskId,planningVersionId:brief.planningVersionId,planningContentHash:brief.planningContentHash,requirementLabels:brief.requirementLabels});
+    let runner:Runner;
+    try{
+      // Revalidate after synchronous Store observers, immediately before launch.
+      this.projects.generalProject(projectId);
+      runner=(this.options.runnerFactory??(options=>new ClaudeCodeRun(options)))({executable,cwd:project.path,mode:'write',env:claudeEnv()});
+    }catch{
+      return this.store.updateRun(run.id,{execution:'failed'},'run.failed',{reason:'RUNTIME_NOT_STARTED'});
+    }
+    const active:Active={runner,done:Promise.resolve()};this.active.set(run.id,active);
+    active.done=this.execute(run.id,runner).finally(()=>this.active.delete(run.id));
+    return this.store.getRun(run.id)!;
+  }
+  private observe(id:string,event:ClaudeEvent){
+    const run=this.store.getRun(id);if(!run||terminal(run.execution))return;
+    switch(event.kind){
+      case 'session':
+        this.store.updateRun(id,{execution:run.execution==='interrupting'?'interrupting':'running'},'run.started',{sessionId:event.sessionId});break;
+      case 'message':
+        this.store.updateRun(id,{response:event.text.slice(0,64000)},'message.updated',{});break;
+      case 'tool':this.store.append('claude.tool',id,{name:event.name});break;
+      case 'quota':{
+        const quota:Quota={kind:'quota',status:event.status,windows:event.windows.map(({id,utilization,resetsAt,status})=>({id,utilization,resetsAt,status}))};
+        this.store.append('claude.quota',id,{status:quota.status,windows:quota.windows});this.latestQuota=structuredClone(quota);break;
+      }
+      // Result/error lines are not exit observations. Only start()'s outcome is terminal.
+    }
+  }
+  private async execute(id:string,runner:Runner):Promise<void>{
+    let result:ReturnType<typeof executionForClaudeOutcome>;
+    try{
+      const outcome:ClaudeOutcome=await runner.start(this.store.getRun(id)!.prompt,event=>this.observe(id,event));
+      result=executionForClaudeOutcome(outcome);
+    }catch{result={execution:'lost',reason:'EXIT_NOT_OBSERVED'};}
+    try{this.store.updateRun(id,{execution:result.execution},'run.'+result.execution,{reason:result.reason});}
+    catch{/* The durable nonterminal intent still blocks this task and becomes lost on restart. */}
+  }
+  interrupt(id:string):void {
+    const run=this.store.getRun(id);if(!run||run.runtime!=='claude-code')throw new AppError('RUN_NOT_FOUND',404);
+    if(terminal(run.execution)||run.execution==='interrupting')return;
+    this.store.updateRun(id,{execution:'interrupting'},'run.interrupting',{});
+    const active=this.active.get(id);
+    if(!active){this.store.updateRun(id,{execution:'lost'},'run.lost',{reason:'EXIT_NOT_OBSERVED'});return;}
+    try{active.runner.interrupt();}
+    catch{throw new AppError('INTERRUPT_UNCERTAIN',503);}
+  }
+  async close():Promise<void>{
+    this.closing=true;
+    for(const [id,active] of this.active){
+      try{this.interrupt(id);}
+      catch{
+        // Shutdown must still stop the owned child if auditing is unavailable.
+        // The durable intent stays unresolved until exit is actually observed.
+        try{active.runner.interrupt();}catch{/* Best effort; never invent exit. */}
+      }
+    }
+    await Promise.all([...this.active.values()].map(active=>active.done));
+  }
+}
