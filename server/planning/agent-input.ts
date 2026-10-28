@@ -29,14 +29,19 @@ export function buildPlanningPrompt(text:unknown):{instructions:string;inputDige
 export const claudePlanningOutputSchema=freeze({...planningOutputSchema,properties:{...planningOutputSchema.properties,non_goals:list},
   required:[...planningOutputSchema.required,'non_goals']});
 /** Claude has no App Server outputSchema argument, so include the schema in its preview. */
-export function buildClaudePlanningPrompt(text:unknown):{instructions:string;inputDigest:string}{
-  const instructions=buildPlanningPrompt(text).instructions+'\nPut anything the user does not want or that is explicitly out of scope in non_goals, not in constraints.'
+export function buildClaudePlanningPrompt(text:unknown,materials:readonly string[]=[]):{instructions:string;inputDigest:string}{
+  // The only exception to "do not read project files": the user's own attached materials, listed by the server.
+  const exception=materials.length?'\nException: you may use Read only on these user-attached material files, to ground the plan in their actual fields and values. Read nothing else: '+JSON.stringify(materials):'';
+  const instructions=buildPlanningPrompt(text).instructions+exception+'\nPut anything the user does not want or that is explicitly out of scope in non_goals, not in constraints.'
     +'\nOutput JSON schema: '+JSON.stringify(claudePlanningOutputSchema);
   return {instructions,inputDigest:createHash('sha256').update(instructions).digest('hex')};
 }
 
 /** Reuse the existing JSON-v1/Markdown parser without trusting provider attribution. */
 export function parseClaudePlanningProposal(text:unknown):PlanningDraft {
+  // Claude often wraps the whole JSON answer in one code fence; unwrap only that exact shape.
+  const fenced=typeof text==='string'?/^\s*```(?:json)?[ \t]*\r?\n([\s\S]*?)\r?\n```\s*$/.exec(text):null;
+  if(fenced&&fenced[1].trimStart().startsWith('{'))text=fenced[1];
   if(typeof text!=='string'||!text.trim()||text.length>64000||Buffer.byteLength(text,'utf8')>256*1024)throw new AppError('PLANNING_PROPOSAL_INVALID',422);
   if(text.includes('[REDACTED]'))throw new AppError('PLANNING_PROPOSAL_BLOCKED',422);
   const format=text.trimStart().startsWith('{')?'json':'markdown';

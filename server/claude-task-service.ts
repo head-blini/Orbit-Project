@@ -11,6 +11,7 @@ import {containsCredential} from './privacy.ts';
 import {outboundDenial} from './providers/policy.ts';
 import {ClaudeCodeRun,findClaude,claudeEnv,type ClaudeEvent,type ClaudeOutcome} from './runtimes/claude-code.ts';
 import {claudeTaskPrompt,executionForClaudeOutcome} from './runtimes/claude-task.ts';
+import {listMaterials} from './materials.ts';
 
 type Runner=Pick<ClaudeCodeRun,'start'|'interrupt'>;
 type Quota=Extract<ClaudeEvent,{kind:'quota'}>;
@@ -49,7 +50,7 @@ export class ClaudeTaskService {
     if(denial){this.store.append('guardrail.denied',null,{providerId:'claude-code',code:denial});throw new AppError(denial,400);}
     const prompt=claudeTaskPrompt({title:task.title,goal:handoff.goal,baseline:handoff.baseline,
       acceptanceCriteria:handoff.requirements.flatMap(requirement=>requirement.acceptanceCriteria),
-      constraints:handoff.constraints,nonGoals:handoff.nonGoals,decisions:handoff.decisions,deliverable:`task-${taskId.slice(0,8)}.md`});
+      constraints:handoff.constraints,nonGoals:handoff.nonGoals,decisions:handoff.decisions,deliverable:`task-${taskId.slice(0,8)}.md`,materials:listMaterials(project.path).map(item=>item.path)});
     const executable=(this.options.findExecutable??findClaude)();
     // No await between ownership checks, durable intent and launch.
     const run=this.store.createRun(requestId,createHash('sha256').update(prompt).digest('hex'),prompt,undefined,

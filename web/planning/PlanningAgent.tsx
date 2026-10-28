@@ -6,7 +6,7 @@ import {PlanningPreview} from './PlanningStudio.tsx';
 import './agent.css';
 
 // A general (non-Git) project plans without a workspace: its scope is the project itself.
-type PanelProps=PlanningAgentPanelProps&{general?:boolean};
+type PanelProps=PlanningAgentPanelProps&{general?:boolean;initialText?:string};
 type Scope=Pick<PanelProps,'projectId'|'workspaceId'|'online'|'busy'|'general'>;
 const hasScope=(scope:Scope)=>!!scope.workspaceId||!!scope.general;
 const runtimeLabel=(runtime:string|undefined)=>runtime==='claude-code'?'Claude Code':'Codex';
@@ -140,6 +140,8 @@ export function PlanningAgentPanel(props:PanelProps){
   const state=useSyncExternalStore(coordinator.subscribe,coordinator.getSnapshot,coordinator.getSnapshot);
   useLayoutEffect(()=>{coordinator.activate();return()=>coordinator.dispose();},[coordinator]);
   useLayoutEffect(()=>coordinator.configure(props),[coordinator,props.projectId,props.workspaceId,props.online,props.busy,props.general]);
+  // A request handed over from the home screen only fills the box; preview and consent stay explicit.
+  useLayoutEffect(()=>{if(props.initialText)coordinator.setText(props.initialText);},[coordinator,props.initialText]);
   const scoped=!!props.workspaceId||!!props.general,label=runtimeLabel(state.preview?.runtime??state.view?.runtime);
   const running=!!state.view?.records.some(record=>record.execution==='running');
   useEffect(()=>{
@@ -153,15 +155,15 @@ export function PlanningAgentPanel(props:PanelProps){
   const explanation=<><p>공식 {label} CLI의 읽기 전용 세션을 사용하며, 읽기 전용도 네이티브 파일 읽기를 허용합니다. CLI의 컨텍스트 로딩·보존·공급자 전송은 Model Hub 게이트웨이 밖에서 처리됩니다.</p>
     <p>1 turn · 60초 제한과 프로세스 종료 확인을 사용합니다. 자동 시작·재시도·이어받기는 하지 않습니다. 검증된 제안도 별도로 저장해야 미승인 기획 초안이 됩니다.</p></>;
   return <section className="planning-agent" aria-label={label+' 기획 제안'} aria-busy={!!state.action||state.loading}>
-    <h3>{simple?'무엇을 만들고 싶으세요?':label+' 기획 제안 · 선택 기능'}</h3>
-    {simple?<><p>누가 사용할지, 어떤 일을 할 수 있으면 좋을지 적어 주세요. 기획 도우미의 제안을 검토하고 초안으로 저장할 수 있습니다.</p><details><summary>기획 도우미의 실행 범위와 제한</summary>{explanation}</details></>:explanation}
+    <h3>{simple?(props.general?'요청을 기획으로 만들기':'무엇을 만들고 싶으세요?'):label+' 기획 제안 · 선택 기능'}</h3>
+    {simple?<><p>{props.general?'요청을 확인하고 기획 요청 미리보기 → 동의 → 시작을 누르세요. 기획 도우미의 제안을 검토하고 초안으로 저장할 수 있습니다.':'누가 사용할지, 어떤 일을 할 수 있으면 좋을지 적어 주세요. 기획 도우미의 제안을 검토하고 초안으로 저장할 수 있습니다.'}</p><details><summary>기획 도우미의 실행 범위와 제한</summary>{explanation}</details></>:explanation}
     {!scoped&&<p>등록한 격리 작업 공간을 선택하면 기획 제안을 요청할 수 있습니다. 수동 기획 작성은 계속 사용할 수 있습니다.</p>}
     {!props.online&&<p>서버 연결 후 기획 제안 상태를 확인할 수 있습니다.</p>}{props.busy&&<p>다른 작업이 진행 중입니다. 완료 후 새 기획 제안을 요청하세요.</p>}
     <button disabled={!props.online||!scoped||!!state.action||state.loading} onClick={()=>void coordinator.refresh('manual')}>기획 상태 새로고침</button>
     {state.error&&<p role="alert">{state.error}</p>}{state.message&&<p role="status">{state.message}</p>}
     {state.uncertain&&<p role="status">이전 변경 요청의 응답은 미확인입니다. 기획 상태 새로고침을 직접 눌러 성공적으로 조회해야 다시 시작할 수 있습니다. 자동 조회는 이 잠금을 해제하거나 요청을 재전송하지 않습니다.</p>}
     {state.view?.recoveryRequired&&<p>종료가 확인되지 않은 기획 프로세스가 있습니다. 실제 종료를 확인한 뒤 아래 별도 확인란으로 복구하세요.</p>}
-    <label>{simple?'만들고 싶은 프로그램':'기획 요청'}<textarea rows={5} maxLength={8000} value={state.text} disabled={blocked} placeholder={simple?'예: 소규모 팀이 할 일을 추가하고 진행 상태를 확인하는 웹 앱을 만들고 싶어요. 담당자와 마감일을 정하고 완료한 일을 모아 볼 수 있으면 좋겠어요.':undefined} onChange={event=>coordinator.setText(event.target.value)}/></label>
+    <label>{simple?(props.general?'요청':'만들고 싶은 프로그램'):'기획 요청'}<textarea rows={5} maxLength={8000} value={state.text} disabled={blocked} placeholder={simple&&props.general?'예: 첨부한 자료를 비교해서 표와 요약 보고서를 만들어 줘.':simple?'예: 소규모 팀이 할 일을 추가하고 진행 상태를 확인하는 웹 앱을 만들고 싶어요. 담당자와 마감일을 정하고 완료한 일을 모아 볼 수 있으면 좋겠어요.':undefined} onChange={event=>coordinator.setText(event.target.value)}/></label>
     <p>최대 8,000자 · UTF-8 32 KiB. Orbit 실행 기록에는 요청 원문을 저장하지 않습니다. 네이티브 CLI의 컨텍스트·보존 정책은 별도로 적용됩니다.</p>
     <button disabled={!canPreview} onClick={()=>void coordinator.preview()}>기획 요청 미리보기</button>
     {state.preview&&<PlanningAgentExecutionPreview preview={state.preview} consent={state.consent} disabled={!ready} presentation={props.presentation} onConsent={coordinator.consent} onStart={()=>void coordinator.start()}/>}

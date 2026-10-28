@@ -47,6 +47,18 @@ test('dedicated Studio pages render only their editor, preserve safe preview and
     assert.doesNotMatch(modes,/<button|<select/,'unconnected executors must not be offered as launch actions');
     const {Navigation}=await import('../web/shell.tsx');
     const {pages}=await import('../web/navigation.ts');
+    // Contract change (2026-10-28, first-flow acceptance 2): simple mode shows only the new-task pages plus the
+    // current page; the original all-14 contract below still holds once 고급 메뉴 is on.
+    const {simpleMenu,advancedMenuKey}=await import('../web/shell.tsx');
+    const storage=new Map<string,string>(),previous=Object.getOwnPropertyDescriptor(globalThis,'localStorage');
+    Object.defineProperty(globalThis,'localStorage',{configurable:true,value:{getItem:(key:string)=>storage.get(key)??null,setItem:(key:string,value:string)=>storage.set(key,value)}});
+    for(const page of pages){
+      const simple=renderToStaticMarkup(createElement(Navigation,{page:page.id,open:false,onNavigate:()=>{},onClose:()=>{}}));
+      assert.equal((simple.match(/class="nav-item /g)??[]).length,simpleMenu.length+(simpleMenu.includes(page.id)?0:1));
+      assert.match(simple,new RegExp(`href="#/${page.id}"[^>]*aria-current="page"`));
+      assert.match(simple,/고급 메뉴 보기/);
+    }
+    storage.set(advancedMenuKey,'1');
     for(const page of pages){
       const nav=renderToStaticMarkup(createElement(Navigation,{page:page.id,open:false,onNavigate:()=>{},onClose:()=>{}}));
       assert.equal((nav.match(/aria-current="page"/g)??[]).length,1);
@@ -55,6 +67,7 @@ test('dedicated Studio pages render only their editor, preserve safe preview and
       assert.ok(nav.indexOf('title="Automation"')<nav.indexOf('aria-label="관리 메뉴"'));
       assert.ok(nav.indexOf('aria-label="관리 메뉴"')<nav.indexOf('title="Model Providers"'));
     }
+    if(previous)Object.defineProperty(globalThis,'localStorage',previous);else delete (globalThis as any).localStorage;
     const {WorkspacePanel}=await import('../web/workspaces.tsx');
     const state={provider:'ready' as const,issue:null,threadId:'t',workspace:'A-workspace',readOnly:false,lastSeq:0,runs:[],selectedWorkspaceId:'wa',projects:[{id:'a',name:'A',kind:'code' as const,path:'A-path',writeEnabled:true,createdAt:''},{id:'b',name:'B',kind:'code' as const,path:'B-path',writeEnabled:false,createdAt:''}],workspaces:[{id:'wa',projectId:'a',path:'A-workspace',branch:'a-branch',status:'ready' as const,baseSha:'sha',createdAt:''},{id:'wb',projectId:'b',path:'B-workspace',branch:'b-branch',status:'ready' as const,baseSha:'sha',createdAt:''}]};
     const workspace=renderToStaticMarkup(createElement(WorkspacePanel,{state,projectId:'b',onProject:()=>{},locked:false,action:async()=>{},post}));

@@ -15,7 +15,7 @@ async function view(){
   }});
   try{return await import('../web/deliverables.tsx');}finally{hooks.deregister();}
 }
-const item=(path:string,over:Partial<Deliverable>={}):Deliverable=>({path,size:120,modifiedAt:'2026-10-28T03:33:13.000Z',sha256:'ab'.repeat(32),mediaType:'text/markdown',taskId:null,taskTitle:null,previewable:true,
+const item=(path:string,over:Partial<Deliverable>={}):Deliverable=>({path,size:120,modifiedAt:'2026-10-28T03:33:13.000Z',sha256:'ab'.repeat(32),mediaType:'text/markdown',taskId:null,taskTitle:null,previewable:true,role:'output',
   checks:{exists:true,readable:true,nonEmpty:true,format:'passed',meaning:'unverified'},...over});
 
 test('deliverables show producing task, layered checks and never claim the content is correct',async()=>{

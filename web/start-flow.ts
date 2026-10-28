@@ -1,6 +1,8 @@
 import type {PlanningVersion,SavedTask} from '../shared/parallel.ts';
 
-export interface StartFlowScope {projectId:string;workspaceId:string|null;online:boolean;blocked:boolean;refreshKey:string}
+export interface StartFlowScope {projectId:string;workspaceId:string|null;online:boolean;blocked:boolean;refreshKey:string;
+  /** A general (non-Git) project prepares tasks without a workspace. */
+  general?:boolean}
 export interface StartFlowState {scope:StartFlowScope;plans:PlanningVersion[];tasks:SavedTask[];selectedPlanId:string|null;loading:boolean;fresh:boolean;action:null|'prepare';uncertain:boolean;error:string}
 interface Dependencies {get(path:string):Promise<unknown>;post(path:string,body:Record<string,unknown>):Promise<unknown>;storage?:Pick<Storage,'getItem'|'setItem'|'removeItem'>}
 
@@ -100,7 +102,7 @@ export function createStartFlowCoordinator(initial:StartFlowScope,deps:Dependenc
       publish({selectedPlanId,error:''});
     },
     async prepareTasks():Promise<boolean>{
-      if(!live||!scope.online||!scope.workspaceId||scope.blocked||state.action||state.loading||!state.fresh||state.uncertain)return false;
+      if(!live||!scope.online||(!scope.workspaceId&&!scope.general)||scope.blocked||state.action||state.loading||!state.fresh||state.uncertain)return false;
       const selected=currentStartPlans(state.plans,scope.projectId).find(plan=>plan.id===state.selectedPlanId);
       if(!selected||!ready(selected))return false;
       if(selected.state==='approved'&&selected.draft.requirements.every(requirement=>state.tasks.some(task=>task.planningVersionId===selected.id&&task.requirementLabels.includes(requirement.label))))return true;

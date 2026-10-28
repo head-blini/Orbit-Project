@@ -1,3 +1,4 @@
+import {listMaterials} from './materials.ts';
 import {createHash,randomUUID} from 'node:crypto';
 import {isDeepStrictEqual} from 'node:util';
 import type {Projects} from './projects.ts';
@@ -85,7 +86,7 @@ export class PlanningAgentService {
   preview(projectId:string,input:{workspaceId?:string|null;text:string}):PlanningAgentPreview {
     exact(input,Object.hasOwn(input??{},'workspaceId')?['workspaceId','text']:['text']);this.context(projectId,input.workspaceId);this.ensureAvailable(input.workspaceId??projectId);if(input.workspaceId)this.guard(input.workspaceId);
     if(this.externalBusy(projectId))throw new AppError('PLANNING_BUSY',409);if(!this.projects)throw new AppError('PLANNING_UNAVAILABLE',404);
-    const workspace=this.validated(projectId,input.workspaceId),selection=this.selection(projectId),prompt=(selection.runtime==='claude-code'?buildClaudePlanningPrompt:buildPlanningPrompt)(input.text);
+    const workspace=this.validated(projectId,input.workspaceId),selection=this.selection(projectId),prompt=selection.runtime==='claude-code'?buildClaudePlanningPrompt(input.text,workspace.id===null?listMaterials(workspace.path).map(item=>item.path):[]):buildPlanningPrompt(input.text);
     return {projectId,workspaceId:workspace.id,...selection,...prompt,previewDigest:this.previewHash(projectId,workspace,prompt.inputDigest,selection.runtime,selection.preferencesRevision),timeoutMs,turnLimit,scope:scope(selection.runtime)};
   }
   start(projectId:string,input:StartPlanningSuggestionInput):PlanningSuggestion {
