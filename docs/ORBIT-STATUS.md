@@ -12,12 +12,12 @@ HEAD `d39679e`: `npm ci` → `npm run typecheck` exit 0, `npm run build` exit 0,
 
 | ID | 구현 상태 | 단위/통합 | 브라우저 | 실연동 | 관련 A | 증거 참조/시각 | 차단 이유 | 다음 행동 |
 |---|---|---|---|---|---|---|---|---|
-| F01 입력·AI 기획 | 부분: Codex 1턴 기획 제안·초안 저장 | 있음(FakeRpc) | 과거 Mac Task33 | Codex 0.162.1 과거 1회, 0.163.0 미검증 | A01 | `server/codex-planning.ts`, `planning-agent-service.ts` | — | 프로젝트별 기획 AI 선택(F10 연계), 간소/상세 명세 |
-| F02 범용 프로젝트 | **미구현**: 등록·생성 모두 Git 필수 | — | — | — | A01,A16 | `server/projects.ts:34`, `project-creation.ts:101` | — | Codex C1: `kind: general` 프로젝트(폴더만), Git/worktree는 code에서만 |
+| F01 입력·AI 기획 | 부분: Codex 1턴 기획 제안·초안 저장. 수동 기획 작성·승인은 일반 프로젝트에서도 동작. **AI 기획 제안은 작업 공간(Git) 필요 → 일반 프로젝트에서 `GIT_REQUIRED`** | 있음(FakeRpc) | 2026-10-28 수동 기획→승인→Task (일반 프로젝트) | Codex 0.162.1 과거 1회, 0.163.0 미검증 | A01 | `server/codex-planning.ts`, `planning-agent-service.ts` | — | 기획 AI를 작업 공간 없이 읽기 전용으로 실행(Claude 어댑터 read 모드 또는 Codex 비작업공간 세션), 프로젝트별 기획 AI 선택 |
+| F02 범용 프로젝트 | **구현**: `kind: general` 생성(폴더만, Git·worktree 없음), Git 전용 API `GIT_REQUIRED`, 브라우저 작업 종류 선택 | 일반 9 + UI 15 | **2026-10-28 Chrome: 생성→선택→기획 이동→수동 기획 저장·승인→Task 2개→진행판→서버 재시작 후 보존** | — | A01,A16 | `977a564`, `2c4f3b3` | — | 일반 프로젝트의 작업 실행(비코드 실행기 연결), 결과물 파일 저장 |
 | F03 기준·변경 관리 | 부분: 버전·승인·CAS·stale 거부·decisions | 있음 | 과거 | — | A02,A03 | `server/studio.ts`, `planning/execution.ts` | — | Codex C2: nonGoals, Run에 기준 contentHash 결속 |
 | F04 세 도구 연동 | Codex: 기존 구현. **Claude Code: 실행 어댑터 구현**(`server/runtimes/claude-code.ts`, Controller/Run 미연결). ChatGPT 웹: 없음 | Claude 11/11(합성 stream-json) | — | **Claude Code 2.1.312 live: 완료·중단 확인**(`scripts/verify-claude-runtime.mjs`, 2026-10-28). Codex 0.163.0 미검증 | A04~A06 | `tests/claude-runtime.test.ts` | ChatGPT 웹: 이용 조건·공식 경로 미확인으로 자동화 **차단**(BrowserAdapter 정책 `POLICY_REVIEW_REQUIRED`) | Codex: Run에 runtime 필드·Controller dispatch 연결(C3) |
 | F05 AI 간 인계 | 부분(수동 Markdown) | 있음 | — | — | A07 | `planning-handoff-service.ts` | — | 기준 결속 후 구조화 인계 패키지 |
-| F06 진행 상태 | **부분 구현**: 3단계 읽기 모델·수집기·진행판 화면(`shared/project-progress.ts`, `server/project-progress.ts`, `web/project-progress.tsx`). HTTP 라우트 미연결 | 22/22(모델16·수집기3·UI3) | 미실행 | — | A09,A10,A11 | `tests/project-progress*.test.ts` | 라우트는 `server/http.ts`(Codex 소유) | 통합 단계에서 `GET /api/projects/:id/progress` 연결 후 브라우저 확인 |
+| F06 진행 상태 | **부분 구현**: 3단계 읽기 모델·수집기·진행판 화면·읽기 전용 라우트 `GET /api/projects/:id/progress` | 23(모델16·수집기3·UI3·HTTP1) | 2026-10-28 Chrome: 실데이터 표시·새로고침·재시작 보존, 콘솔 오류 0 | 실제 실행 이벤트로는 미확인 | A09,A10,A11 | `fdce439` | — | 실행 중 상태(실제 Codex/Claude 실행)의 실시간 갱신 확인, 브라우저 세션 이벤트 연결 |
 | F07 실행·검토 | 부분: Solo + 같은 Codex 리뷰 | 있음 | 과거 | — | A08 | `shared/execution-modes.ts` | — | 다른 실행기 교차 검토는 F04 이후 |
 | F08 결과물·검증 | 구현(코드 작업 중심) | 있음 | 과거 | 로컬 명령 | A13 | `verification-service.ts`, `visualization/pptx.ts` | — | Git 없는 프로젝트의 Artifact 연결 |
 | F09 중단·복구 | 부분: lost/quarantine/interrupt/중복 방지. 한도 대기 없음 | 있음 | 과거 | — | A10 | `shared/recovery.ts`, `controller.ts` | — | 한도 대기 상태를 진행판에 표시 |
@@ -29,10 +29,18 @@ HEAD `d39679e`: `npm ci` → `npm run typecheck` exit 0, `npm run build` exit 0,
 | 시각(KST) | 담당 | 작업 | 결과 |
 |---|---|---|---|
 | 2026-10-28 | Claude Code | T0 문서 정리: SCOPE v1.1 공동 개발 정정, 경로 수정, COLLABORATION·STATUS 작성 | 문서만 변경, `615fc72` |
-| 2026-10-28 | Codex (`codex exec`) | C1 F02 일반 프로젝트 — `codex/core-general-projects` | 진행 중 |
+| 2026-10-28 | Codex (`codex exec`) | C1 F02 일반 프로젝트 — `codex/core-general-projects` | Codex sandbox에서는 loopback listen EPERM으로 HTTP 테스트 실행 불가. Claude가 검토·UI fixture 보완 후 sandbox 밖 검증: 전체 1059/1057 pass/0 fail(동시 4). 기본 병렬은 2회 중 각 1건 ECONNRESET(기존 알려진 현상) |
+| 2026-10-28 | Claude Code | 통합: C1+진행판+어댑터 병합, 진행판 라우트 연결 | typecheck·build 0, 전체 1099/1097 pass/0 fail/2 skip(동시 4, 기본 병렬 모두), `fdce439` |
+| 2026-10-28 | Claude Code | 일반 프로젝트 생성 UI, 진행판 문구 수정 | UI 27/27, `29c03ff` 병합 |
+| 2026-10-28 | Codex (`codex exec`) | C2 T1 기준 결속(nonGoals·Run contentHash) + F05 구조화 인계 — `codex/core-baseline-handoff` | 진행 중 |
 | 2026-10-28 | Claude Code | 진행판 읽기 모델·수집기·화면 (`claude/progress-board`) | 단위 27/27(내비게이션 포함), typecheck·build 0, `0756149` |
 | 2026-10-28 | Claude Code | Claude Code 어댑터 + live 검증 | 단위 11/11, live 완료·중단 exit 0, `60cf685` |
 | 2026-10-28 | Claude Code | BrowserAdapter 경계(probe·대상 정책·세션 이벤트 정제) | 단위 6/6, 설치 없음, `598eb63`. agent-browser·Playwright 미설치로 실제 드라이버 미연결 |
+
+## 발견한 문제
+
+- 재빌드 후 브라우저가 이전 `app.js`를 계속 사용해 새 화면이 보이지 않았다(쿼리 문자열로 우회). 정적 자산 캐시 헤더/파일명 해시 검토 필요.
+- 기본 병렬 `npm test`에서 무거운 HTTP 통합 테스트가 간헐적으로 `fetch failed / ECONNRESET`(merge-http, verification-setup-http). 동시 4에서는 재현 안 됨. 원인 미확정.
 
 ## 실연동 관찰 기록
 
