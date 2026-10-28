@@ -27,7 +27,7 @@ function TaskRow({task}:{task:ProgressTask}){
     <summary>
       <span className="progress-task-title">{task.title}</span>
       <span className={'progress-stage tone-'+stageTone[task.stage]}>{stageLabels[task.stage]}</span>
-      <span className="progress-meta">담당 {runtime(task.assignee)} · 마지막 관측 {time(task.lastObservedAt)}</span>
+      <span className="progress-meta">담당 {runtime(task.assignee)} · 마지막 관측 {task.lastObservedAt?time(task.lastObservedAt):'없음'}</span>
     </summary>
     <dl className="progress-facts">
       <div><dt>검증</dt><dd>{verificationLabels[task.verification]}</dd></div>
