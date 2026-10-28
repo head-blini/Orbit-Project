@@ -24,6 +24,32 @@ export function buildPlanningPrompt(text:unknown):{instructions:string;inputDige
   return {instructions,inputDigest:createHash('sha256').update(instructions).digest('hex')};
 }
 
+/** Claude has no App Server outputSchema argument, so include the same schema in its preview. */
+export function buildClaudePlanningPrompt(text:unknown):{instructions:string;inputDigest:string}{
+  const instructions=buildPlanningPrompt(text).instructions+'\nOutput JSON schema: '+JSON.stringify(planningOutputSchema);
+  return {instructions,inputDigest:createHash('sha256').update(instructions).digest('hex')};
+}
+
+/** Reuse the existing JSON-v1/Markdown parser without trusting provider attribution. */
+export function parseClaudePlanningProposal(text:unknown):PlanningDraft {
+  if(typeof text!=='string'||!text.trim()||text.length>64000||Buffer.byteLength(text,'utf8')>256*1024)throw new AppError('PLANNING_PROPOSAL_INVALID',422);
+  if(text.includes('[REDACTED]'))throw new AppError('PLANNING_PROPOSAL_BLOCKED',422);
+  const format=text.trimStart().startsWith('{')?'json':'markdown';
+  let inspected=text;
+  if(format==='json'){
+    try{const values:unknown[]=[JSON.parse(text)],strings:string[]=[];
+      while(values.length){const value=values.pop();if(typeof value==='string')strings.push(value);else if(value&&typeof value==='object')values.push(...Object.values(value));}
+      inspected=strings.join('\n');
+    }catch{throw new AppError('PLANNING_PROPOSAL_INVALID',422);}
+  }
+  if(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(inspected)||inspectOutbound(inspected).length||containsCredential(inspected))throw new AppError('PLANNING_PROPOSAL_BLOCKED',422);
+  const parsed=parsePlanningDraft({format,source:'import',text});
+  if(!parsed.ok)throw new AppError('PLANNING_PROPOSAL_INVALID',422);
+  const draft:PlanningDraft={...parsed.draft,provenance:{kind:'in_app_agent',providerId:'claude-code',externalUrl:null}};
+  try{serializePlanningExport(draft,'json');}catch{throw new AppError('PLANNING_PROPOSAL_BLOCKED',422);}
+  return draft;
+}
+
 /** Model output is parsed unmodified, inspected, then attributed by the server. */
 export function parsePlanningProposal(text:unknown):PlanningDraft {
   const invalid=()=>new AppError('PLANNING_PROPOSAL_INVALID',422);

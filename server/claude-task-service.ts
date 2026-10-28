@@ -7,6 +7,8 @@ import type {Projects} from './projects.ts';
 import {Studio} from './studio.ts';
 import {HandoffService} from './handoff-service.ts';
 import {AppError} from './errors.ts';
+import {containsCredential} from './privacy.ts';
+import {outboundDenial} from './providers/policy.ts';
 import {ClaudeCodeRun,findClaude,claudeEnv,type ClaudeEvent,type ClaudeOutcome} from './runtimes/claude-code.ts';
 import {claudeTaskPrompt,executionForClaudeOutcome} from './runtimes/claude-task.ts';
 
@@ -40,6 +42,11 @@ export class ClaudeTaskService {
     const project=this.projects.generalProject(projectId),studio=new Studio(this.store);
     const brief=studio.execution(projectId,taskId),handoff=new HandoffService(this.store,studio).build(projectId,taskId);
     const task=(studio.read(projectId,'tasks') as SavedTask[]).find(task=>task.id===taskId)!;
+    // Same input gate as Codex runs (Controller.start), applied to the same raw execution brief:
+    // block instead of silently redacting, and audit the denial.
+    const raw=brief.prompt+'\n'+task.title;
+    const denial=containsCredential(raw)?'CREDENTIAL_LIKE_INPUT':outboundDenial(raw);
+    if(denial){this.store.append('guardrail.denied',null,{providerId:'claude-code',code:denial});throw new AppError(denial,400);}
     const prompt=claudeTaskPrompt({title:task.title,goal:handoff.goal,baseline:handoff.baseline,
       acceptanceCriteria:handoff.requirements.flatMap(requirement=>requirement.acceptanceCriteria),
       constraints:handoff.constraints,nonGoals:handoff.nonGoals,decisions:handoff.decisions,deliverable:`task-${taskId.slice(0,8)}.md`});
