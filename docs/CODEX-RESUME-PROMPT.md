@@ -11,7 +11,7 @@
 
 [기준과 역할]
 첨부 ORBIT-SCOPE-2026-10-27.md 전체를 먼저 읽고 docs/ORBIT-SCOPE.md에 보존하라. 같은 파일이 있으면 비교하고 변경 이력을 남기며 병합하라. 첨부 구현 계획은 docs/superpowers/plans/2026-10-27-orbit-resume.md로 반영하되 실제 로컬 경로와 중복 구현을 먼저 확인하라.
-Orbit 자체 개발·수정·테스트는 Codex만 담당한다. Claude Code와 ChatGPT 웹은 제품에서 연결·실검증할 대상이지 Orbit 코드 개발을 위임할 도구가 아니다.
+(2026-10-28 정정) Orbit 개발은 Claude Code·Codex 공동 수행이다. 분담과 파일 소유권은 `docs/ORBIT-COLLABORATION.md`를 따른다. 제품이 연동하는 Claude Code·ChatGPT 웹과 개발 도구 역할은 구분한다.
 최신 사용자 승인을 받은 범위가 충돌하는 과거 제품 범위·우선순위보다 우선한다. 기존 안전 규칙은 낮추지 마라. 사용자에게 필요성을 다시 묻거나 제품을 코딩 전용으로 축소하지 마라.
 
 [고정 기능]

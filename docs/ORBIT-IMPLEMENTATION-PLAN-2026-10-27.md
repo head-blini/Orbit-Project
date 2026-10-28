@@ -1,6 +1,6 @@
 # Orbit Scope Lock & Progress — Implementation Plan
 
-> **For agentic workers:** Codex가 구현한다. 환경에 설치되어 있다면 `superpowers:executing-plans` 또는 `superpowers:subagent-driven-development`를 사용한다. 별도 설치를 강제하지 않는다.
+> **For agentic workers:** Claude Code·Codex가 `docs/ORBIT-COLLABORATION.md`의 분담으로 구현한다(2026-10-28 정정). 환경에 설치되어 있다면 `superpowers:executing-plans` 또는 `superpowers:subagent-driven-development`를 사용한다. 별도 설치를 강제하지 않는다.
 
 **Goal:** 고정 범위 F01~F11을 기존 Orbit 위에 통합하고 A01~A16의 실제 증거로 개인 실사용을 검증한다.
 
@@ -8,11 +8,11 @@
 
 **Tech Stack:** 현재 로컬의 TypeScript/React/Node/SQLite 및 기존 테스트·빌드 도구를 우선한다. 원격 package.json의 Node >=24 <25와 로컬이 같은지 먼저 확인한다.
 
-**Spec:** `docs/ORBIT-SCOPE.md` — 기준 ID `ORBIT-SCOPE-2026-10-27-v1.0`
+**Spec:** `docs/ORBIT-SCOPE-2026-10-27.md` — 기준 ID `ORBIT-SCOPE-2026-10-27-v1.0` (v1.1: 개발 담당 정정만)
 
 ## Global Constraints
 
-- 개발 담당: **Codex만**. Claude Code·ChatGPT 웹은 Orbit 제품의 연동 대상이다.
+- 개발 담당: **Claude Code·Codex 공동 개발**(2026-10-28 정정). Orbit 제품의 연동 대상인 Codex·Claude Code·ChatGPT 웹과 구분한다.
 - 목적: 개인 실사용이 우선. 충분히 검증한 뒤 사내 공유를 검토한다.
 - 승인 없는 원격 push·배포·운영 변경, reset --hard/clean/강제 덮어쓰기를 하지 않는다.
 - A04~A06은 모의 테스트만으로 통과 처리할 수 없다.
@@ -47,7 +47,7 @@
 
 ## T0. 승인 범위 적용과 로컬 기준선
 
-**Files:** `AGENTS.md`, `docs/ORBIT-SCOPE.md`, `docs/ORBIT-GOAL.md`, `docs/ORBIT-STATUS.md`, `docs/ORBIT-MASTER-PLAN.md`, `docs/ORBIT-MASTER-RESULTS.md`, 이 계획.
+**Files:** `AGENTS.md`, `docs/ORBIT-SCOPE-2026-10-27.md`, `docs/ORBIT-GOAL.md`, `docs/ORBIT-STATUS.md`, `docs/ORBIT-MASTER-PLAN.md`, `docs/ORBIT-MASTER-RESULTS.md`, 이 계획.
 
 **Input:** 첨부 고정 범위, 실제 로컬 Git/지침/실행 상태. **Output:** 적용 기준 ID, 경로 매핑, 실제 검사 기준선, 재사용/보완/차단 목록.
 
