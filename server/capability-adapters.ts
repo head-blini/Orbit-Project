@@ -65,7 +65,10 @@ function discoverProvider(runtimeId:RuntimeId,input:CapabilityDiscoveryInput):Pr
     if(codex&&id==='model.actual')evidence.push('codex.app_server.no_turn_model_attestation');
     if(codex&&id==='review.text')evidence.push('orbit.quality_loop.actual_model_required');
     if(extension)evidence.push('orbit.extension.activation_not_authorized');
-    return {id,implementation:implemented?'implemented':uncertain?'unknown':'unsupported',observation:metadata?'confirmed':'unknown',policy:blocked?'blocked':'allowed',evidence};
+    return {id,discovery:codex&&extension?'implemented':uncertain?'unknown':'implemented',
+      invocation:implemented&&id!=='model.actual'?'implemented':'unsupported',
+      verification:implemented?'implemented':'unsupported',
+      implementation:implemented?'implemented':uncertain?'unknown':'unsupported',observation:metadata?'confirmed':'unknown',policy:blocked?'blocked':'allowed',evidence};
   });
   return {runtimeId,version:native.version,installation:native.status,connection:ready?'ready':'unknown',authentication:ready?'confirmed':'unknown',capabilities};
 }

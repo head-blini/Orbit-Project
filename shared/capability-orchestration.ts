@@ -3,8 +3,11 @@ import type {ExtensionInventory} from './extensions.ts';
 
 export type OrchestrationCapabilityId='execute.code'|'execute.general'|'plan'|'review.text'|'model.actual'|'skills'|'slash_commands'|'hooks'|'mcp'|'resume'|'interrupt';
 export type RuntimeId='codex'|'claude-code';
+export type CapabilitySupport='implemented'|'unsupported'|'unknown';
 export interface CapabilityEntry {
   id:OrchestrationCapabilityId;
+  /** Current Orbit adapter support, not proof a native operation succeeded. */
+  discovery:CapabilitySupport;invocation:CapabilitySupport;verification:CapabilitySupport;
   implementation:'implemented'|'unsupported'|'unknown';
   observation:'confirmed'|'unknown';
   policy:'allowed'|'blocked';

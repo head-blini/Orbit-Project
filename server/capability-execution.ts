@@ -1,0 +1,166 @@
+import {createHash,randomUUID} from 'node:crypto';
+import type {Store} from './store.ts';
+import type {Controller} from './controller.ts';
+import type {OrchestrationRegistry} from '../shared/capability-orchestration.ts';
+import type {CapabilityPlanInput,CapabilityExecutionApproval,CapabilityExecutionRecord} from '../shared/capability-execution.ts';
+import type {QualityLoopStart,QualityLoopRecord,QualitySelection} from '../shared/quality-loop-record.ts';
+import type {QualityLoopInput} from '../shared/quality-loop.ts';
+import {CapabilityRoutingService} from './capability-routing.ts';
+import {CapabilityRuntimeAdapters} from './capability-runtime-adapters.ts';
+import {ProjectAiPreferencesService} from './project-ai-preferences.ts';
+import {Studio,exact} from './studio.ts';
+import {qualityRunEvidence} from './quality-loop-native.ts';
+import {containsCredential} from './privacy.ts';
+import {AppError} from './errors.ts';
+const hash=(v:unknown)=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
+const validId=(v:unknown)=>typeof v==='string'&&/^[A-Za-z0-9-]{1,80}$/.test(v)&&!containsCredential(v);
+function fail(code:string):never{throw new AppError(code,409);}
+const unknownModels=()=>({selectedModelId:null,requestedModelId:null,serverModelId:null,actualModelId:'unknown',source:'unknown' as const});
+
+/** Owns the plan/approval journal only. Controller and QualityLoopService own all execution. */
+export class CapabilityExecutionService {
+ private store:Store;private controller:Controller;private registry:()=>OrchestrationRegistry;private adapters:CapabilityRuntimeAdapters;
+ private routing:CapabilityRoutingService;private studio:Studio;private prefs:ProjectAiPreferencesService;
+ constructor(store:Store,controller:Controller,registry:()=>OrchestrationRegistry,adapters=new CapabilityRuntimeAdapters(controller)){
+  this.store=store;this.controller=controller;this.registry=registry;this.adapters=adapters;
+  this.routing=new CapabilityRoutingService(store);this.studio=new Studio(store);this.prefs=new ProjectAiPreferencesService(store);
+  store.db.exec('CREATE TABLE IF NOT EXISTS capability_executions(id TEXT PRIMARY KEY,project_id TEXT NOT NULL,request_id TEXT NOT NULL UNIQUE,input_digest TEXT NOT NULL,body TEXT NOT NULL)');
+  for(const row of store.db.prepare('SELECT body FROM capability_executions').all()){
+   const r=JSON.parse(String(row.body)) as CapabilityExecutionRecord;
+   if(['dispatching','running','interrupt_requested'].includes(r.status)){
+    r.recoveryRequired=true;r.status='recovery_required';r.issue='EXECUTION_RESTART_RECOVERY_REQUIRED';this.save(r);
+   }
+  }
+ }
+ private raw(projectId:string,id:string):CapabilityExecutionRecord {
+  const row=this.store.db.prepare('SELECT body FROM capability_executions WHERE id=? AND project_id=?').get(id,projectId);
+  if(!row)throw new AppError('CAPABILITY_EXECUTION_NOT_FOUND',404);return JSON.parse(String(row.body));
+ }
+ private save(record:CapabilityExecutionRecord){
+  record.updatedAt=new Date().toISOString();this.store.transaction(()=>{
+   this.store.db.prepare('UPDATE capability_executions SET body=? WHERE id=?').run(JSON.stringify(record),record.id);
+   this.store.append('capability.execution',record.runId,{projectId:record.projectId,taskId:record.taskId,executionId:record.id,status:record.status,issue:record.issue});
+  });
+ }
+ private taskBlocked(projectId:string,taskId:string,excludeId?:string){
+  return this.store.db.prepare("SELECT id FROM capability_executions WHERE project_id=? AND json_extract(body,'$.taskId')=?").all(projectId,taskId).some(row=>{
+   if(row.id===excludeId)return false;const record=this.record(projectId,String(row.id));
+   return record.recoveryRequired||['dispatching','running','interrupt_requested'].includes(record.status);
+  });
+ }
+ records(projectId:string){this.routing.records(projectId);return this.store.db.prepare('SELECT id FROM capability_executions WHERE project_id=? ORDER BY rowid DESC LIMIT 200').all(projectId).map(row=>this.record(projectId,String(row.id)));}
+ record(projectId:string,id:string){return readCapabilityExecution(this.store,projectId,id);}
+ private binding(projectId:string,input:CapabilityPlanInput){
+  const route=this.routing.records(projectId).find(r=>r.id===input.routeId);
+  if(!route||route.status!=='recommended'||route.intent!=='execution'||!route.runtimeId)fail('ROUTE_NOT_EXECUTABLE');
+  const brief=this.studio.execution(projectId,route.taskId),prefs=this.prefs.read(projectId),registry=this.registry();
+  if(route.baseline.planningVersionId!==brief.planningVersionId||route.baseline.planningContentHash!==brief.planningContentHash||route.preferencesRevision!==prefs.revision||route.runtimeId!==prefs.execution)fail('PLAN_CHANGED');
+  const provider=registry.providers.find(p=>p.runtimeId===route.runtimeId),capability=provider?.capabilities.find(c=>c.id===route.capabilityId);
+  if(capability?.implementation!=='implemented'||capability.policy!=='allowed')fail('CAPABILITY_BLOCKED');
+  const adapter=this.adapters.snapshot(route.runtimeId,provider?.version??null);
+  if(!adapter.compatible)fail(adapter.issue??'RUNTIME_VERSION_UNSUPPORTED');
+  if(!route.capabilityId||!adapter.capabilities.includes(route.capabilityId))fail('CAPABILITY_NOT_IMPLEMENTED');
+  const project=this.store.projects().find(p=>p.id===projectId)!;
+  if(project.kind==='code'){
+   if(!input.workspaceId)fail('WORKSPACE_REQUIRED');
+   const preview=this.controller.taskVerificationPreview(projectId,route.taskId,input.workspaceId!);
+   if(preview?.digest!==input.expectedAcceptanceDigest)fail('ACCEPTANCE_PREVIEW_STALE');
+  }else if(input.workspaceId!==undefined||input.expectedAcceptanceDigest!==undefined)fail('INVALID_FIELDS');
+  return {route,adapter,bindingDigest:hash({brief,prefs,registry,adapter,workspaceId:input.workspaceId??null,acceptance:input.expectedAcceptanceDigest??null})};
+ }
+ plan(projectId:string,input:CapabilityPlanInput):CapabilityExecutionRecord {
+  if(!input||typeof input!=='object'||Array.isArray(input))throw new AppError('INVALID_FIELDS',400);
+  exact(input as unknown as Record<string,unknown>,['requestId','routeId',...(Object.hasOwn(input,'workspaceId')?['workspaceId']:[]),...(Object.hasOwn(input,'expectedAcceptanceDigest')?['expectedAcceptanceDigest']:[])]);
+  if(!validId(input.requestId)||!validId(input.routeId)||input.workspaceId!==undefined&&!validId(input.workspaceId)||input.expectedAcceptanceDigest!==undefined&&!/^[a-f0-9]{64}$/.test(input.expectedAcceptanceDigest))throw new AppError('INVALID_FIELDS',400);
+  const key=hash({projectId,input}),prior=this.store.db.prepare('SELECT input_digest,body FROM capability_executions WHERE request_id=?').get(input.requestId);
+  if(prior){if(prior.input_digest!==key)fail('IDEMPOTENCY_CONFLICT');return this.record(projectId,(JSON.parse(String(prior.body)) as CapabilityExecutionRecord).id);}
+  if(this.store.projects().find(p=>p.id===projectId)?.kind==='code'&&input.workspaceId===undefined){
+   const workspaceId=this.controller.snapshot().selectedWorkspaceId;
+   if(!workspaceId)fail('WORKSPACE_REQUIRED');
+   const route=this.routing.records(projectId).find(r=>r.id===input.routeId);if(!route)fail('ROUTE_NOT_EXECUTABLE');
+   const preview=this.controller.taskVerificationPreview(projectId,route.taskId,workspaceId);
+   input={...input,workspaceId,...(preview?{expectedAcceptanceDigest:preview.digest}:{})};
+  }
+  const {route,adapter,bindingDigest}=this.binding(projectId,input);
+  if(this.taskBlocked(projectId,route.taskId))fail('EXECUTION_RECOVERY_REQUIRED');
+  const now=new Date().toISOString(),id=randomUUID();
+  const record:CapabilityExecutionRecord={id,requestId:input.requestId,projectId,taskId:route.taskId,routeId:route.id,runtimeId:route.runtimeId!,createdAt:now,updatedAt:now,
+   planDigest:hash({id,bindingDigest}),bindingDigest,dispatchRequestId:randomUUID(),workspaceId:input.workspaceId??null,expectedAcceptanceDigest:input.expectedAcceptanceDigest??null,
+   baseline:route.baseline,preferencesRevision:route.preferencesRevision,adapter,status:'awaiting_approval',issue:null,runId:null,qualityLoopId:null,recoveryRequired:false,approvedAt:null,
+   executionScope:'approved_task',validationSource:'runtime_evidence_required',models:unknownModels(),quality:null};
+  this.store.transaction(()=>{this.store.db.prepare('INSERT INTO capability_executions VALUES(?,?,?,?,?)').run(id,projectId,input.requestId,key,JSON.stringify(record));this.store.append('capability.plan',null,{projectId,taskId:record.taskId,executionId:id});});return record;
+ }
+ async start(projectId:string,id:string,input:CapabilityExecutionApproval){
+  if(!input||typeof input!=='object'||Array.isArray(input))throw new AppError('INVALID_FIELDS',400);
+  exact(input as unknown as Record<string,unknown>,['confirmed','expectedPlanDigest']);
+  if(input.confirmed!==true)fail('EXECUTION_CONFIRMATION_REQUIRED');
+  const r=this.raw(projectId,id);if(input.expectedPlanDigest!==r.planDigest)fail('PLAN_CHANGED');
+  if(r.status!=='awaiting_approval')return this.record(projectId,id);
+  const submit={requestId:r.dispatchRequestId,...(r.workspaceId?{workspaceId:r.workspaceId}:{}),...(r.expectedAcceptanceDigest?{expectedAcceptanceDigest:r.expectedAcceptanceDigest}:{})};
+  const current=this.binding(projectId,{requestId:r.requestId,routeId:r.routeId,...(r.workspaceId?{workspaceId:r.workspaceId}:{}),...(r.expectedAcceptanceDigest?{expectedAcceptanceDigest:r.expectedAcceptanceDigest}:{})});
+  if(current.bindingDigest!==r.bindingDigest)fail('PLAN_CHANGED');
+  if(this.taskBlocked(projectId,r.taskId,id))fail('EXECUTION_RECOVERY_REQUIRED');
+  r.status='dispatching';r.approvedAt=new Date().toISOString();this.save(r);
+  try{
+   // Store observers can change policy synchronously; recheck immediately before dispatch.
+   if(this.binding(projectId,{requestId:r.requestId,routeId:r.routeId,...(r.workspaceId?{workspaceId:r.workspaceId}:{}),...(r.expectedAcceptanceDigest?{expectedAcceptanceDigest:r.expectedAcceptanceDigest}:{})}).bindingDigest!==r.bindingDigest)fail('PLAN_CHANGED');
+  }catch{r.status='failed';r.issue='EXECUTION_PREFLIGHT_CHANGED';this.save(r);return this.record(projectId,id);}
+  try{
+   const run=await this.adapters.dispatch(r.runtimeId,projectId,r.taskId,submit);
+   const receipt=this.store.findRequest(r.dispatchRequestId)?.run;
+   if(!receipt||receipt.id!==run.id||receipt.taskId!==r.taskId||receipt.planningVersionId!==r.baseline.planningVersionId||receipt.planningContentHash!==r.baseline.planningContentHash)fail('EXECUTION_RECEIPT_MISMATCH');
+   r.runId=receipt.id;r.status='running';this.save(r);
+  }catch{r.runId=this.store.findRequest(r.dispatchRequestId)?.run.id??null;r.status='recovery_required';r.issue='EXECUTION_DISPATCH_UNCONFIRMED';r.recoveryRequired=true;this.save(r);}
+  return this.record(projectId,id);
+ }
+ async interrupt(projectId:string,id:string){
+  const r=this.record(projectId,id);if(!r.runId)fail('EXECUTION_UNCONFIRMED');
+  if(['interrupted','failed','execution_completed','quality_passed','quality_failed','quality_blocked'].includes(r.status))return r;
+  if(r.quality&&r.status==='quality_running'){this.controller.qualityLoops.interrupt(r.quality.id);return this.record(projectId,id);}
+  await this.adapters.interrupt(r.runtimeId,r.runId!);return this.record(projectId,id);
+ }
+ async recover(projectId:string,id:string){
+  const r=this.raw(projectId,id),run=this.store.findRequest(r.dispatchRequestId)?.run;
+  if(!run||!['completed','failed','interrupted'].includes(run.execution))fail('EXECUTION_UNCONFIRMED');
+  r.runId=run.id;r.recoveryRequired=false;r.issue=null;r.status=run.execution==='completed'?'execution_completed':run.execution==='failed'?'failed':'interrupted';this.save(r);return this.record(projectId,id);
+ }
+ qualityPreview(projectId:string,id:string,reviewers:QualitySelection[],limits:QualityLoopInput['limits']){
+  if(containsCredential(JSON.stringify({reviewers,limits})))throw new AppError('SENSITIVE_EXECUTION_INPUT',400);
+  const r=this.record(projectId,id);if(!r.runId||r.recoveryRequired||!['execution_completed','quality_blocked','quality_failed'].includes(r.status)||r.quality?.recoveryRequired)fail('QUALITY_SOURCE_INVALID');
+  return this.controller.qualityLoops.preview(projectId,r.runId!,reviewers,limits);
+ }
+ async resumeQuality(projectId:string,id:string){
+  const r=this.record(projectId,id);if(!r.qualityLoopId||!r.quality?.recoveryRequired)fail('QUALITY_RECOVERY_NOT_REQUIRED');
+  await this.controller.qualityLoops.resume(r.qualityLoopId);return this.record(projectId,id);
+ }
+ startQuality(projectId:string,id:string,input:Omit<QualityLoopStart,'projectId'|'sourceRunId'>){
+  if(containsCredential(JSON.stringify(input)))throw new AppError('SENSITIVE_EXECUTION_INPUT',400);
+  const r=this.record(projectId,id);if(!r.runId||r.recoveryRequired)fail('QUALITY_SOURCE_INVALID');
+  const loop=this.controller.qualityLoops.start({...input,projectId,sourceRunId:r.runId!});
+  const saved=this.raw(projectId,id);saved.qualityLoopId=loop.id;this.save(saved);return this.record(projectId,id);
+ }
+}
+
+export function readCapabilityExecution(store:Store,projectId:string,id:string):CapabilityExecutionRecord {
+  const row=store.db.prepare('SELECT body FROM capability_executions WHERE id=? AND project_id=?').get(id,projectId);
+  if(!row)throw new AppError('CAPABILITY_EXECUTION_NOT_FOUND',404);
+  const r=JSON.parse(String(row.body)) as CapabilityExecutionRecord,run=r.runId?store.getRun(r.runId):store.findRequest(r.dispatchRequestId)?.run;
+  if(run){
+   r.runId=run.id;
+   const evidence=qualityRunEvidence(store,run),codex=evidence.codex;
+   const configRow=store.db.prepare("SELECT data FROM events WHERE run_id=? AND kind='run.model_configuration' ORDER BY seq DESC LIMIT 1").get(run.id);
+   const config=configRow?JSON.parse(String(configRow.data)):null;
+   r.models={selectedModelId:codex?.selectedModelId??null,requestedModelId:codex?.requestedModelId??null,serverModelId:codex?.serverModelId??config?.serverModelId??null,actualModelId:evidence.source==='native_observed'?evidence.modelId!:'unknown',source:evidence.source};
+   if(run.execution==='completed')r.status='execution_completed';
+   else if(run.execution==='interrupted')r.status='interrupted';
+   else if(run.execution==='failed')r.status='failed';
+   else if(run.execution==='lost'){r.status='recovery_required';r.issue='EXECUTION_UNCONFIRMED';r.recoveryRequired=true;}
+   else if(!r.recoveryRequired)r.status=run.execution==='interrupting'?'interrupt_requested':'running';
+   if(store.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='quality_loops'").get()){
+    const loops=store.db.prepare('SELECT body FROM quality_loops WHERE project_id=? ORDER BY rowid DESC').all(projectId).map(row=>JSON.parse(String(row.body)) as QualityLoopRecord);
+    r.quality=loops.find(loop=>loop.sourceRunId===run.id)??null;
+    if(r.quality){r.qualityLoopId=r.quality.id;r.status=r.quality.result.status==='passed'?'quality_passed':r.quality.result.status==='blocked'?'quality_blocked':['reviewing','repairing'].includes(r.quality.result.status)?'quality_running':'quality_failed';}
+   }
+  }
+  return r;
+ }

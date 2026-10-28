@@ -1,3 +1,6 @@
+import {CapabilityRuntimeAdapters} from './capability-runtime-adapters.ts';
+import {CapabilityExecutionService} from './capability-execution.ts';
+import type {CapabilityPlanInput,CapabilityExecutionApproval} from '../shared/capability-execution.ts';
 import {discoverCapabilities} from './capability-adapters.ts';
 import {CapabilityRoutingService} from './capability-routing.ts';
 import type {CapabilityRouteInput} from '../shared/capability-routing.ts';
@@ -29,7 +32,7 @@ async function body(req:IncomingMessage,limit=18000):Promise<Record<string,unkno
   for await(const chunk of req){size+=chunk.length;if(size>limit)throw new AppError('BODY_TOO_LARGE',413);chunks.push(chunk);}
   try{const value=JSON.parse(Buffer.concat(chunks).toString('utf8'));if(!value||typeof value!=='object'||Array.isArray(value))throw new Error();return value;}catch{throw new AppError('INVALID_JSON',400);}
 }
-export function createHttpServer(controller:Controller,assets:string,options:{nativeProbe?:ReturnType<typeof createNativeProbeService>}={}){
+export function createHttpServer(controller:Controller,assets:string,options:{nativeProbe?:ReturnType<typeof createNativeProbeService>;runtimeAdapters?:CapabilityRuntimeAdapters}={}){
   const studio=new Studio(controller.store);
   const handoff=new HandoffService(controller.store,studio);
   const goals=new GoalService(controller.store);
@@ -37,7 +40,12 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
   const planningHandoff=new PlanningHandoffService(controller.store,(workspaceId,runId)=>controller.verification.view(workspaceId,runId),id=>controller.workspaceDiff(id));
   const nativeProbe=options.nativeProbe??createNativeProbeService();
   const capabilityRouting=new CapabilityRoutingService(controller.store);
-  const capabilityRegistry=()=>discoverCapabilities({probe:nativeProbe.get(),codexReady:controller.snapshot().provider==='ready',extensions:controller.extensionSnapshot()});
+  const runtimeAdapters=options.runtimeAdapters??new CapabilityRuntimeAdapters(controller);
+  const capabilityRegistry=()=>{
+    const registry=discoverCapabilities({probe:nativeProbe.get(),codexReady:controller.snapshot().provider==='ready',extensions:controller.extensionSnapshot()});
+    return {...registry,runtimeAdapters:registry.providers.map(provider=>runtimeAdapters.snapshot(provider.runtimeId,provider.version))};
+  };
+  const capabilityExecution=new CapabilityExecutionService(controller.store,controller,capabilityRegistry,runtimeAdapters);
   const sessions=new Map<string,{csrf:string;expires:number}>();
   const appPreview=new AppPreviewHost(id=>controller.appPreviewSnapshot(id));
   let previewReady:Promise<void>=Promise.resolve();
@@ -94,6 +102,11 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
       }
       const capabilityEvidence=url.pathname.match(/^\/api\/capability-orchestration\/evidence\/([a-f0-9]{64})$/);
       if(req.method==='GET'&&capabilityEvidence){if(url.search)throw new AppError('INVALID_FIELDS',400);json(res,200,capabilityRouting.discovery(capabilityEvidence[1]));return;}
+      const executionRoute=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/capability-executions(?:\/([a-f0-9-]{36})(?:\/(start|interrupt|recover|quality-preview|quality-start|quality-resume))?)?$/);
+      if(req.method==='GET'&&executionRoute&&!executionRoute[3]){
+        if(url.search)throw new AppError('INVALID_FIELDS',400);
+        json(res,200,executionRoute[2]?capabilityExecution.record(executionRoute[1],executionRoute[2]):{records:capabilityExecution.records(executionRoute[1])});return;
+      }
       const capabilityRoutes=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/capability-routes$/);
       if(req.method==='GET'&&capabilityRoutes){
         if(url.search)throw new AppError('INVALID_FIELDS',400);json(res,200,{records:capabilityRouting.records(capabilityRoutes[1])});return;
@@ -226,6 +239,17 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
         if(url.pathname==='/api/capability-orchestration/refresh'){
           if(url.search)throw new AppError('INVALID_FIELDS',400);exact(data,[]);
           controller.assertExecutionAvailable();await nativeProbe.refresh();const registry=capabilityRegistry();capabilityRouting.recordDiscovery(registry);json(res,200,registry);return;
+        }
+        if(executionRoute){
+          if(url.search)throw new AppError('INVALID_FIELDS',400);
+          const projectId=executionRoute[1],id=executionRoute[2],action=executionRoute[3];
+          if(!id){json(res,200,capabilityExecution.plan(projectId,data as unknown as CapabilityPlanInput));return;}
+          if(action==='start'){json(res,200,await capabilityExecution.start(projectId,id,data as unknown as CapabilityExecutionApproval));return;}
+          if(action==='interrupt'||action==='recover'){exact(data,[]);json(res,200,await capabilityExecution[action](projectId,id));return;}
+          if(action==='quality-resume'){exact(data,[]);json(res,200,await capabilityExecution.resumeQuality(projectId,id));return;}
+          if(action==='quality-preview'){exact(data,['reviewers','limits']);json(res,200,capabilityExecution.qualityPreview(projectId,id,data.reviewers as Parameters<typeof capabilityExecution.qualityPreview>[2],data.limits as Parameters<typeof capabilityExecution.qualityPreview>[3]));return;}
+          if(action==='quality-start'){exact(data,['requestId','reviewers','limits','expectedPreviewDigest','confirmed']);json(res,200,capabilityExecution.startQuality(projectId,id,data as unknown as Parameters<typeof capabilityExecution.startQuality>[2]));return;}
+          throw new AppError('INVALID_FIELDS',400);
         }
         if(capabilityRoutes){
           if(url.search)throw new AppError('INVALID_FIELDS',400);

@@ -1,4 +1,15 @@
-# 현재 재개 요약 (2026-10-28 · 담당 Codex · Capability Orchestration 시작)
+# 현재 재개 요약 (2026-10-28 · Codex · Capability Orchestration Phase 2 로컬 구현·검증 완료)
+
+- 기준: `AGENTS.md`, `ORBIT-VISION.md`, `ORBIT-SCOPE-2026-10-27.md`, `ORBIT-IMPLEMENTATION-PLAN-2026-10-27.md`, `ORBIT-CAPABILITY-PHASE2-2026-10-28.md`, `ORBIT-CAPABILITY-PROVIDER-CONTRACTS-2026-10-28.md`.
+- 기존 미커밋 Registry/Router 변경은 읽기 전용 리뷰·영향33/타입/빌드 후 **e9c8425** 로컬 커밋. 기존 전체 1294 / pass1292 / fail0 / skip2 확인. 초기 sandbox loopback 제한 실패 후 승인된 로컬 테스트 환경에서 재검증.
+- Phase2: 실행 계획·digest 승인·최신 기준/선택/버전 검사·durable dispatch intent·중복 방지·중단/관측 복구·기존 Controller/Quality Loop·진행판 연결 구현. 자연어는 승인된 작업 실행 방식 선택에 사용하고 작업 본문을 무음 변경하지 않음. 코드 실행은 기존 선택 workspace/acceptance 캡처.
+- 모델: Codex actual unknown 유지. Claude system init 설정 모델을 실제 assistant 관측과 별도 event에 기록. 선택/요청 미지정은 null이며 실제값으로 복사하지 않음.
+- 최종 검증: Node24.22.1 `npm run verify` exit0, **1324 tests / pass1322 / fail0 / Windows-only skip2**, 타입/빌드 pass (`/tmp/orbit-capability-phase2-release.log`). 모의 Chrome 승인/중복/상태 테스트 exit0 (`tests/capability-execution.browser.cjs`). 리뷰 지적과 200개 기록 경계 결함은 실패 테스트로 재현·수정·전체 재검증했다.
+- Phase2 완료 단위는 이 문서를 포함한 로컬 커밋으로 보존한다(`git log -1` 참조). 동적 trusted Adapter 구현 교체/지원 기능 갱신과 HTTP 서버 주입을 구현했다. 새 제3자 runtime ID나 외부 코드 자동 설치를 지원한다는 뜻은 아님.
+- 실제 Provider 모델 호출 0회. Codex 0.162.1 version/help 확인만; Claude 미발견. 공식 flags 최소 Claude2.1.259. managed hooks 및 실인증/중단/복구 미검증. 실제 검증과 mock은 분리. unknown 모델 독립 리뷰 차단 유지.
+- 알려진 복구 제한: adapter 진입 이후 실패에서 원래 실행 종료 증거가 없으면 격리하며 자동 재실행하지 않음. 신뢰된 서버 코드 외 등록/외부 설치/실모델/전송은 추가 승인 필요. Push·배포·main 병합 없음. .DS_Store 두 파일 제외.
+
+# 이전 재개 요약 (2026-10-28 · 담당 Codex · Capability Orchestration 시작)
 
 - **현재 완료 단위:** 모델 식별 변경 보안/회귀 리뷰 후 로컬 커밋, Capability Registry→Discovery 투영→Provider Adapter→자연어 추천→DB/HTTP/진행판의 초기 연결. 자동 실행 전체 계층 완료를 뜻하지 않는다.
 - **기준 원문:** `AGENTS.md`, `ORBIT-VISION.md`, `ORBIT-SCOPE-2026-10-27.md`, `ORBIT-IMPLEMENTATION-PLAN-2026-10-27.md`, `ORBIT-COLLABORATION.md`, [모델 식별 계약](ORBIT-CODEX-MODEL-IDENTITY-2026-10-28.md), [Capability 설계·구현 기록](ORBIT-CAPABILITY-ORCHESTRATION-2026-10-28.md). code/general 지원과 provider-neutral 범용 비전 유지.

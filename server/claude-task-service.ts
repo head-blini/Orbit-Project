@@ -11,6 +11,7 @@ import {containsCredential} from './privacy.ts';
 import {outboundDenial} from './providers/policy.ts';
 import {ClaudeCodeRun,findClaude,claudeEnv,type ClaudeEvent,type ClaudeOutcome} from './runtimes/claude-code.ts';
 import {claudeTaskPrompt,executionForClaudeOutcome} from './runtimes/claude-task.ts';
+import {nativeModelId} from './runtimes/model-identity.ts';
 import {listMaterials} from './materials.ts';
 
 type Runner=Pick<ClaudeCodeRun,'start'|'interrupt'>;
@@ -84,6 +85,7 @@ export class ClaudeTaskService {
     const run=this.store.getRun(id);if(!run||terminal(run.execution))return;
     switch(event.kind){
       case 'session':
+        this.store.append('run.model_configuration',id,{selectedModelId:null,requestedModelId:null,serverModelId:nativeModelId(event.model),source:'claude.system.init'});
         this.store.updateRun(id,{execution:run.execution==='interrupting'?'interrupting':'running'},'run.started',{sessionId:event.sessionId});break;
       case 'message':
         this.store.updateRun(id,{response:event.text.slice(0,64000)},'message.updated',{});break;

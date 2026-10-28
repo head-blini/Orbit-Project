@@ -88,6 +88,7 @@ export class QualityLoopService {
     const controller=new AbortController();this.controllers.set(loopId,controller);
     const task=Promise.resolve().then(()=>this.execute(loopId,controller)).finally(()=>{this.pending.delete(loopId);this.controllers.delete(loopId);});this.pending.set(loopId,task);
   }
+  interrupt(loopId:string){this.record(loopId);this.controllers.get(loopId)?.abort();}
   async settled(loopId:string){await this.pending.get(loopId);return this.record(loopId);}
   private async execute(loopId:string,controller:AbortController){
     let record=this.record(loopId),index=0,stepIssue:string|null=null;

@@ -253,3 +253,12 @@ test('task dispatch follows the stored execution preference and never silently s
     assert.equal(f.store.runs()[0].runtime,f.controller.aiPreferences.read(f.project.id).execution);
   }finally{await f.close();}
 });
+test('Claude init configuration is stored separately from actual assistant model identity',async()=>{
+ const f=claudeFixture();try{const {task}=f.plan();const run=await f.controller.submitTask(f.project.id,task.id,{requestId:randomUUID()});
+ f.runners[0].emit({...session,model:'configured-alias'});
+ const row=f.store.db.prepare("SELECT data FROM events WHERE run_id=? AND kind='run.model_configuration'").get(run.id);
+ assert.ok(row);assert.deepEqual(JSON.parse(String(row.data)),{selectedModelId:null,requestedModelId:null,serverModelId:'configured-alias',source:'claude.system.init'});
+ f.runners[0].finish(outcome('completed'));await tick();
+ assert.equal(f.store.db.prepare("SELECT data FROM events WHERE run_id=? AND kind='run.identity'").get(run.id),undefined);
+ }finally{for(const runner of f.runners)runner.finish();await f.close();}
+});

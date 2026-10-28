@@ -1,3 +1,5 @@
+import {CapabilityExecution} from './capability-execution.tsx';
+import type {CapabilityExecutionRecord} from '../shared/capability-execution.ts';
 import {useEffect,useRef,useState} from 'react';
 import type {CapabilityRouteDecision} from '../shared/capability-routing.ts';
 
@@ -23,7 +25,7 @@ export function CapabilityRouteRecord({decision,advanced}:{decision:CapabilityRo
 }
 
 /** Local recommendation only: no run/model dispatch and no client model override. */
-export function CapabilityRouting({projectId,taskId,records=[],advanced,post,disabled=false}:{projectId:string;taskId:string;records?:CapabilityRouteDecision[];advanced:boolean;post?:CapabilityRoutePost;disabled?:boolean}){
+export function CapabilityRouting({projectId,taskId,records=[],advanced,post,disabled=false,executions=[],canPlan=false}:{projectId:string;taskId:string;records?:CapabilityRouteDecision[];advanced:boolean;post?:CapabilityRoutePost;disabled?:boolean;executions?:CapabilityExecutionRecord[];canPlan?:boolean}){
   const scope=`${projectId}/${taskId}`,scopeRef=useRef(scope),ticket=useRef(0),pending=useRef(false);
   scopeRef.current=scope;
   const [text,setText]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState('');
@@ -50,6 +52,6 @@ export function CapabilityRouting({projectId,taskId,records=[],advanced,post,dis
       <p>선택된 설정과 승인 기준으로 추천만 기록합니다. 모델을 호출하거나 실행하지 않습니다.</p>
       {error&&<p role="alert">{error}</p>}
     </div>}
-    {visible.slice(0,advanced?20:1).map(decision=><CapabilityRouteRecord key={decision.id} decision={decision} advanced={advanced}/>)}
+    {visible.slice(0,advanced?20:1).map(decision=><div key={decision.id}><CapabilityRouteRecord decision={decision} advanced={advanced}/><CapabilityExecution decision={decision} records={executions} advanced={advanced} post={post} disabled={disabled} canPlan={canPlan}/></div>)}
   </section>;
 }

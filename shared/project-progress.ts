@@ -1,3 +1,4 @@
+import type {CapabilityExecutionRecord} from './capability-execution.ts';
 import type {CapabilityRouteDecision} from './capability-routing.ts';
 import type {CodexModelAttribution} from './codex-model-attribution.ts';
 import type {QualityLoopRecord} from './quality-loop-record.ts';
@@ -30,6 +31,7 @@ export interface ProgressRun {
 }
 export interface ProgressTask {
   capabilityRoutes?:CapabilityRouteDecision[];
+  capabilityExecutions?:CapabilityExecutionRecord[];
   qualityLoops?:QualityLoopRecord[];
   id:string;title:string;requirementLabels:string[];stage:TaskStage;assignee:string|null;planCurrent:boolean;
   latestRunId:string|null;startedAt:string|null;lastObservedAt:string|null;verification:ProgressVerification;

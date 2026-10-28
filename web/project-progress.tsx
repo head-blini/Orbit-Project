@@ -61,7 +61,7 @@ function TaskRow({task,actions,advanced,projectId,routePost,routeDisabled}:{task
     </dl>
     {nextActions[task.stage]&&<p className="progress-next">{nextActions[task.stage]}</p>}
     {task.qualityLoops?.map(loop=><QualityLoopStatus key={loop.id} loop={loop} advanced={advanced}/>)}
-    <CapabilityRouting key={`${projectId}/${task.id}`} projectId={projectId} taskId={task.id} records={task.capabilityRoutes} advanced={advanced} post={routePost} disabled={routeDisabled}/>
+    <CapabilityRouting key={`${projectId}/${task.id}`} projectId={projectId} taskId={task.id} records={task.capabilityRoutes} executions={task.capabilityExecutions} canPlan={!!routePost} advanced={advanced} post={routePost} disabled={routeDisabled}/>
     {actions&&<TaskButtons task={task} actions={actions}/>}
     {task.runs.length>0?<table className="progress-runs"><caption>실행 기록 {task.runsTotal}개{task.runsTotal>task.runs.length?` 중 최근 ${task.runs.length}개`:''}</caption>
       <thead><tr><th>실행</th><th>담당</th><th>실행 상태</th><th>최근 도구</th><th>검증</th><th>마지막 관측</th></tr></thead>

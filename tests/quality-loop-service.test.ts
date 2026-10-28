@@ -68,3 +68,11 @@ test('synchronous created observers cannot start a second loop before pending re
 test('observed stopped quota failure releases quarantine without retry or paid fallback',async()=>{
   const f=fixture();try{let calls=0;f.ports.review=async()=>{calls++;throw Error('RATE_LIMITED');};f.ports.recover=async()=>({failureIssue:'RATE_LIMITED',processStopped:true});const done=await f.service.settled(f.service.start(f.request()).id);assert.equal(done.result.status,'failed');assert.equal(done.result.issue,'RATE_LIMITED');assert.equal(done.recoveryRequired,false);assert.equal(done.steps[0].state,'failed');assert.equal(calls,1);}finally{await f.close();}
 });
+test('explicit quality interrupt aborts active work without claiming process stop or quality success',async()=>{
+ const f=fixture();try{let entered!:()=>void;const ready=new Promise<void>(resolve=>entered=resolve);
+ f.ports.review=async()=>{entered();return new Promise(()=>{});};
+ const record=f.service.start(f.request());await ready;f.service.interrupt(record.id);
+ const stopped=await f.service.settled(record.id);assert.equal(stopped.recoveryRequired,true);assert.notEqual(stopped.result.status,'passed');
+ assert.throws(()=>f.service.interrupt('missing'),/QUALITY_LOOP_NOT_FOUND/);
+ }finally{await f.close();}
+});
