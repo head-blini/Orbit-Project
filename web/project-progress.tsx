@@ -11,7 +11,7 @@ const stageTone:Record<TaskStage,string>={not_started:'idle',quota_wait:'wait',r
   verification_failed:'bad',revalidation_required:'wait',verified:'good',interrupted:'idle',error:'bad',lost:'bad'};
 const verificationLabels:Record<ProgressVerification,string>={not_run:'검증 기록 없음',running:'검사 실행 중',passed:'검사 통과',failed:'검사 실패',stale:'기준 변경 · 재검증 필요',lost:'검사 결과 미확인'};
 const nextActions:Partial<Record<TaskStage,string>>={
-  not_started:'작업을 실행할 AI와 작업 공간을 선택하세요.',quota_wait:'관측된 사용량 한도가 소진되었습니다. 초기화 후 다시 실행하거나 다른 AI로 인계하세요. 자동 재시도하지 않습니다.',
+  not_started:'실행할 AI를 정해 시작하세요. 코드 작업은 작업 공간 선택과 검증 기준 확인이 먼저 필요합니다.',quota_wait:'관측된 사용량 한도가 소진되었습니다. 초기화 후 다시 실행하거나 다른 AI로 인계하세요. 자동 재시도하지 않습니다.',
   response_unverified:'AI 응답만 완료되었습니다. 결과를 검증 설정의 검사로 확인하세요.',verification_failed:'실패한 검사 결과를 확인하고 수정 작업을 만드세요.',
   revalidation_required:'승인 기준이 바뀌었습니다. 현재 기준으로 다시 검증하세요.',lost:'종료를 확인하지 못했습니다. 기록을 확인하기 전에는 같은 작업을 다시 실행하지 마세요.',
   error:'오류 기록을 확인한 뒤 다시 실행하거나 인계하세요.',interrupt_requested:'중단 요청을 보냈지만 종료는 아직 확인되지 않았습니다.',
@@ -57,8 +57,8 @@ function TaskRow({task,actions}:{task:ProgressTask;actions?:TaskActions}){
     {nextActions[task.stage]&&<p className="progress-next">{nextActions[task.stage]}</p>}
     {actions&&<TaskButtons task={task} actions={actions}/>}
     {task.runs.length>0?<table className="progress-runs"><caption>실행 기록 {task.runsTotal}개{task.runsTotal>task.runs.length?` 중 최근 ${task.runs.length}개`:''}</caption>
-      <thead><tr><th>실행</th><th>담당</th><th>실행 상태</th><th>검증</th><th>마지막 관측</th></tr></thead>
-      <tbody>{task.runs.map(run=><tr key={run.id}><td><code>{run.id.slice(0,8)}</code></td><td>{runtime(run.assignee)}</td><td>{run.execution}</td><td>{verificationLabels[run.verification]}{run.checks>1?` (${run.checks}회)`:''}</td><td>{time(run.lastObservedAt)}</td></tr>)}</tbody>
+      <thead><tr><th>실행</th><th>담당</th><th>실행 상태</th><th>최근 도구</th><th>검증</th><th>마지막 관측</th></tr></thead>
+      <tbody>{task.runs.map(run=><tr key={run.id}><td><code>{run.id.slice(0,8)}</code></td><td>{runtime(run.assignee)}</td><td>{run.execution}</td><td>{run.lastActivity??'—'}</td><td>{verificationLabels[run.verification]}{run.checks>1?` (${run.checks}회)`:''}</td><td>{time(run.lastObservedAt)}</td></tr>)}</tbody>
     </table>:<p className="progress-empty">아직 실행 기록이 없습니다.</p>}
   </details>;
 }

@@ -68,3 +68,14 @@ test('runs bound by projectId without a workspace (general projects) are include
     assert.equal(f.service.read('project-b',{}).untaskedRuns,0);
   }finally{f.store.close();}
 });
+
+test('the collector reads per-run last event time and tool name from recorded events without exposing payloads',()=>{
+  const f=fixture();try{
+    const task=f.tasks[0];
+    const run=f.store.createRun(randomUUID(),'d'.repeat(64),'collect','ws-a',{taskId:task.id,planningVersionId:f.plan.id,requirementLabels:task.requirementLabels});
+    f.store.append('claude.tool',run.id,{name:'Read'});f.store.append('claude.tool',run.id,{name:'Write'});
+    const progress=f.service.read('project-a',{});
+    assert.equal(progress.tasks[0].runs[0].lastActivity,'Write');
+    assert.ok(progress.tasks[0].lastObservedAt!>=run.updatedAt);
+  }finally{f.store.close();}
+});

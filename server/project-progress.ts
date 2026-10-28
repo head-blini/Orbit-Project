@@ -19,7 +19,18 @@ export class ProjectProgressService {
     // Code-project runs belong to a project workspace; general-project runs carry projectId directly.
     const runs=this.store.runs().filter(run=>run.workspaceId?workspaces.has(run.workspaceId):(run as typeof run&{projectId?:unknown}).projectId===projectId);
     const checks=this.checks().filter(check=>check.projectId===projectId&&workspaces.has(check.workspaceId));
-    return buildProjectProgress({projectId,tasks,runs,checks,plans,currentPlanIds,signals});
+    return buildProjectProgress({projectId,tasks,runs,checks,plans,currentPlanIds,signals,activity:this.activity(new Set(runs.map(run=>run.id)))});
+  }
+  /** Latest event time per run plus the most recent tool name; other event payloads are never read out. */
+  private activity(ids:ReadonlySet<string>){
+    const result:Record<string,{at:string;tool:string|null}>={};
+    if(!ids.size)return result;
+    for(const row of this.store.db.prepare('SELECT run_id,MAX(at) AS at FROM events WHERE run_id IS NOT NULL GROUP BY run_id').all()){
+      const id=String(row.run_id);if(ids.has(id))result[id]={at:String(row.at),tool:null};
+    }
+    const tool=this.store.db.prepare("SELECT json_extract(data,'$.name') AS name FROM events WHERE run_id=? AND kind='claude.tool' ORDER BY seq DESC LIMIT 1");
+    for(const id of Object.keys(result)){const name=tool.get(id)?.name;if(typeof name==='string'&&/^[A-Za-z][\w.-]{0,79}$/.test(name))result[id].tool=name;}
+    return result;
   }
   private checks():CheckRecord[]{
     // The table belongs to VerificationService and may not exist yet in a fresh database.
