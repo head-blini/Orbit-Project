@@ -54,3 +54,17 @@ test('a restart preserves progress and turns an unfinished run into lost, never 
     assert.equal(progress.tasks[0].stage,'lost');assert.equal(progress.totals.verifiedTasks,0);
   }finally{reopened?.close();rmSync(root,{recursive:true,force:true});}
 });
+
+test('runs bound by projectId without a workspace (general projects) are included and attributed to their runtime',()=>{
+  const f=fixture();try{
+    const task=f.tasks[0];
+    const run=f.store.createRun(randomUUID(),'d'.repeat(64),'collect',undefined,{taskId:task.id,planningVersionId:f.plan.id,requirementLabels:task.requirementLabels});
+    // Simulates the Claude dispatch contract: runtime and projectId on a workspace-less run.
+    f.store.db.prepare('UPDATE runs SET body=? WHERE id=?').run(JSON.stringify({...run,projectId:'project-a',runtime:'claude-code'}),run.id);
+    f.store.createRun(randomUUID(),'f'.repeat(64),'other',undefined,{taskId:task.id,planningVersionId:f.plan.id,requirementLabels:task.requirementLabels});
+    const progress=f.service.read('project-a',{});
+    assert.equal(progress.tasks[0].runsTotal,1,'a workspace-less run without projectId is not attributed');
+    assert.equal(progress.tasks[0].assignee,'claude-code');
+    assert.equal(f.service.read('project-b',{}).untaskedRuns,0);
+  }finally{f.store.close();}
+});

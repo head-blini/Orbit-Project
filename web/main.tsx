@@ -88,6 +88,8 @@ export function App(){
     reload.current=bootstrap;
     void bootstrap();return()=>{disposed=true;++generation.current;source?.close();if(retry)clearTimeout(retry);};
   },[]);
+  // Raw POST for callers that must tell a definite server answer from an uncertain one.
+  function rawPost(path:string,body:object){return fetch(path,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf.current},body:JSON.stringify(body)});}
   async function post(path:string,body:object){
     const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf.current},body:JSON.stringify(body)});
     const data=await r.json();if(!r.ok)throw new Error(data.error==='WORKSPACE_MISMATCH'?'다른 탭에서 작업 공간이 바뀌었습니다. 현재 선택을 확인한 뒤 새 요청을 보내세요.':data.error==='POLICY_MISMATCH'?'작업 공간·네트워크·승인 정책이 일치하지 않아 연결을 차단했습니다.':errors[data.error]??acceptanceErrors[data.error]??data.error??'요청을 완료하지 못했습니다.');return data;
@@ -145,7 +147,7 @@ export function App(){
       {!online&&<div className="banner" role="status">서버 연결을 기다리고 있습니다. 다시 연결될 때 기록만 복원하며 프롬프트는 재전송하지 않습니다.</div>}
       {error&&<div className="banner error" role="alert">{error}</div>}
       {taskIntent&&taskAllowed&&taskIntent.scope===taskScope&&<TaskVerificationPreviewPanel projectId={taskIntent.task.projectId} workspaceId={taskIntent.workspaceId} taskId={taskIntent.task.id} taskTitle={taskIntent.task.title} scopeKey={taskIntent.scope} active={taskAllowed} onCancel={cancelTask} onRun={digest=>startTask(taskIntent,digest)}/>}
-      {page==='progress'&&<ProjectProgressPanel key={projectId} projectId={projectId} online={online} lastSeq={state?.lastSeq??0} lastEventAt={lastEventTime(events)} freshness={connectionFreshness({online,lastEventAt:lastEventTime(events),now:Date.now()})}/>}
+      {page==='progress'&&<ProjectProgressPanel key={projectId} projectId={projectId} projectKind={selectedProject?.kind??null} post={rawPost} online={online} lastSeq={state?.lastSeq??0} lastEventAt={lastEventTime(events)} freshness={connectionFreshness({online,lastEventAt:lastEventTime(events),now:Date.now()})}/>}
       {page==='dashboard'&&<Dashboard key={projectId} state={state} projectId={projectId} onNavigate={navigate}/>}
       {page==='start'&&<StartPage state={state} projectId={projectId} online={online} locked={locked||!!pending} planningBlocked={planningBlocked||!!pending} canRunTask={taskAllowed&&!taskIntent} post={post} onNavigate={navigate} onProject={selectProject} workspaceAction={workspaceAction} onConnect={connect} onRunTask={runTask} onInterrupt={interrupt}/>}
       {page==='projects'&&<WorkspacePanel state={state} projectId={projectId} onProject={selectProject} onPlanning={()=>navigate('planning')} online={online} locked={!online||locked} action={workspaceAction} post={post}/>}

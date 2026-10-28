@@ -55,3 +55,34 @@ test('a project without an approved plan renders an honest empty state',async()=
   const html=renderToStaticMarkup(createElement(ProjectProgressView,{progress,freshness:'quiet',lastEventAt:null}));
   assert.match(html,/승인된 기획 없음/);assert.match(html,/작업이 아직 없습니다/);assert.match(html,/관측 기록 없음/);
 });
+
+const actions=(over:Record<string,unknown>={})=>({runtimeLabel:'Claude Code',canRun:true,busy:false,pendingTaskId:null,handoff:null,onRun:()=>{},onInterrupt:()=>{},onHandoff:()=>{},...over});
+test('run buttons appear only for runnable stages; a lost run is never offered a retry',async()=>{
+  const {ProjectProgressView}=await view();
+  const progress=buildProjectProgress({projectId:'p',plans:[plan],currentPlanIds:['v1'],checks:[],signals:{},
+    tasks:[task('t1','새 작업'),task('t2','유실'),task('t3','실행 중')],runs:[run('b','t2','lost'),run('c','t3','running')]});
+  const html=renderToStaticMarkup(createElement(ProjectProgressView,{progress,freshness:'live',lastEventAt:null,actions:actions()}));
+  assert.equal((html.match(/Claude Code로 실행/g)??[]).length,1);
+  assert.doesNotMatch(html,/다시 실행<\/button>/);
+  assert.equal((html.match(/중단 요청<\/button>/g)??[]).length,1);
+  assert.equal((html.match(/인계 자료 보기/g)??[]).length,3);
+});
+test('a pinned uncertain request is re-checked with the same request, and other runs wait for it',async()=>{
+  const {ProjectProgressView}=await view();
+  const progress=buildProjectProgress({projectId:'p',plans:[plan],currentPlanIds:['v1'],checks:[],signals:{},runs:[],tasks:[task('t1','첫 작업'),task('t2','둘째 작업')]});
+  const html=renderToStaticMarkup(createElement(ProjectProgressView,{progress,freshness:'live',lastEventAt:null,actions:actions({pendingTaskId:'t1'})}));
+  assert.match(html,/같은 요청으로 다시 확인/);
+  assert.match(html,/<button class="primary" disabled="">Claude Code로 실행<\/button>/);
+});
+test('code projects show records and handoff but no run controls on the board',async()=>{
+  const {ProjectProgressView}=await view();
+  const progress=buildProjectProgress({projectId:'p',plans:[plan],currentPlanIds:['v1'],checks:[],signals:{},runs:[run('c','t1','running')],tasks:[task('t1','코드 작업'),task('t2','대기')]});
+  const html=renderToStaticMarkup(createElement(ProjectProgressView,{progress,freshness:'live',lastEventAt:null,actions:actions({canRun:false,runtimeLabel:'Codex'})}));
+  assert.doesNotMatch(html,/로 실행|중단 요청<\/button>/);assert.match(html,/인계 자료 보기/);
+});
+test('handoff markdown renders as inert text',async()=>{
+  const {ProjectProgressView}=await view();
+  const progress=buildProjectProgress({projectId:'p',plans:[plan],currentPlanIds:['v1'],checks:[],signals:{},runs:[],tasks:[task('t1','작업')]});
+  const html=renderToStaticMarkup(createElement(ProjectProgressView,{progress,freshness:'live',lastEventAt:null,actions:actions({handoff:{taskId:'t1',markdown:'# 인계\n<script>alert(1)</script>'}})}));
+  assert.match(html,/&lt;script&gt;/);assert.doesNotMatch(html,/<script>/);
+});
