@@ -1,7 +1,7 @@
 import {createHash} from 'node:crypto';
 import {closeSync,fstatSync,lstatSync,openSync,readSync,readdirSync,constants} from 'node:fs';
 import {extname,join,normalize,relative,sep,isAbsolute} from 'node:path';
-import type {Deliverable,DeliverableList,DeliverablePreview} from '../shared/deliverables.ts';
+import type {Deliverable,DeliverableChecks,DeliverableList,DeliverablePreview} from '../shared/deliverables.ts';
 import {safeText} from './privacy.ts';
 import {AppError} from './errors.ts';
 
@@ -35,8 +35,24 @@ function format(type:string,buffer:Buffer):'passed'|'failed'|'unsupported'{
   return 'passed';
 }
 
+// A comma is a thousands separator only before exactly three digits, so CSV fields stay separate.
+const numberPattern=/-?\d{1,3}(?:,\d{3})+(?![\d])(?:\.\d+)?|-?\d+(?:\.\d+)?/g;
+const normal=(token:string)=>{const value=Number(token.replace(/,/g,''));return Number.isFinite(value)?String(value):null;};
+const numbers=(text:string)=>(text.match(numberPattern)??[]).map(normal).filter((value):value is string=>value!==null);
+/** Numbers inside Markdown table rows (or every CSV row). Headers and prose are not checked. */
+function tableNumbers(type:string,text:string){
+  const rows=type==='text/csv'?text.split(/\r?\n/).slice(1):text.split(/\r?\n/).filter(line=>/^\s*\|/.test(line)&&!/^\s*\|[\s:|-]+\|\s*$/.test(line));
+  return [...new Set(rows.flatMap(numbers))];
+}
+export function evidenceCheck(type:string,text:string,inputs:readonly string[]):NonNullable<DeliverableChecks['evidence']>{
+  const found=type==='text/markdown'||type==='text/csv'?tableNumbers(type,text):[];
+  if(!inputs.length||!found.length)return {status:'unverified',numbers:found.length,matched:0,unmatched:[]};
+  const known=new Set(inputs.flatMap(numbers)),unmatched=found.filter(value=>!known.has(value));
+  return {status:unmatched.length?'needs_review':'passed',numbers:found.length,matched:found.length-unmatched.length,unmatched:unmatched.slice(0,20)};
+}
+
 export function listDeliverables(root:string,tasks:readonly {id:string;title:string}[]):DeliverableList{
-  const items:Deliverable[]=[];let skipped=0,truncated=false;
+  const items:(Deliverable&{buffer?:Buffer})[]=[];let skipped=0,truncated=false;
   const walk=(dir:string,depth:number)=>{
     for(const entry of readdirSync(dir,{withFileTypes:true}).sort((a,b)=>a.name.localeCompare(b.name))){
       if(items.length>=MAX_FILES){truncated=true;return;}
@@ -49,10 +65,17 @@ export function listDeliverables(root:string,tasks:readonly {id:string;title:str
       const task=tasks.find(task=>new RegExp(`^task-${task.id.slice(0,8)}\\.`).test(path))??null;
       items.push({path,size:file.size,modifiedAt:file.mtime.toISOString(),sha256:createHash('sha256').update(file.buffer).digest('hex'),mediaType:type,
         taskId:task?.id??null,taskTitle:task?.title??null,previewable:textual.has(type),
-        checks:{exists:true,readable:true,nonEmpty:file.size>0,format:file.size>0?format(type,file.buffer):textual.has(type)?'failed':'unsupported',meaning:'unverified'}});
+        role:path.startsWith('inputs/')?'input':'output',
+        checks:{exists:true,readable:true,nonEmpty:file.size>0,format:file.size>0?format(type,file.buffer):textual.has(type)?'failed':'unsupported',meaning:'unverified'},buffer:file.buffer});
     }
   };
   walk(root,0);
+  const inputs=items.filter(item=>item.role==='input'&&item.previewable).map(item=>item.buffer!.toString('utf8'));
+  for(const item of items){
+    // A project without materials has nothing to compare; keep its checks unchanged.
+    if(inputs.length&&item.role==='output'&&item.previewable&&item.checks.format==='passed')item.checks.evidence=evidenceCheck(item.mediaType,item.buffer!.toString('utf8'),inputs);
+    delete item.buffer;
+  }
   items.sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0);
   return {items,skipped,truncated};
 }

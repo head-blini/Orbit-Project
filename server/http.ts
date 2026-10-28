@@ -100,7 +100,8 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
         if(req.headers.origin!==origin||typeof token!=='string'||token.length!==64||!timingSafeEqual(Buffer.from(token),Buffer.from(session.csrf)))throw new AppError('CSRF_REJECTED',403);
         const largeStudioInput=studioRoute&&studioRoute[2]!=='tasks'&&(!studioRoute[3]||studioRoute[4]==='revisions');
         const planningSuggestion=url.pathname.match(/^\/api\/projects\/([a-f0-9-]{36})\/planning-suggestions\/(preview|start|recover|([a-f0-9-]{36})\/(interrupt|save))$/);
-        const data=await body(req,largeStudioInput?6*256*1024+256*1024:planningSuggestion?64000:18000);
+        const materialsPost=/^\/api\/projects\/[a-f0-9-]{36}\/materials$/.test(url.pathname);
+        const data=await body(req,largeStudioInput?6*256*1024+256*1024:materialsPost?10*(128*1024+512):planningSuggestion?64000:18000);
         if(aiPreferencesRoute){
           if(url.search)throw new AppError('INVALID_FIELDS',400);exact(data,['expectedRevision','planning','execution']);
           json(res,200,controller.aiPreferences.update(aiPreferencesRoute[1],data as unknown as Parameters<Controller['aiPreferences']['update']>[1]));return;
@@ -274,6 +275,8 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
           if(!result.ok)throw new AppError(result.code,422);
           json(res,200,{...result,mode:'mock_only',externalApiEnabled:false});return;
         }
+        const materialsRoute=url.pathname.match(/^\/api\/projects\/([a-f0-9-]{36})\/materials$/);
+        if(materialsRoute){if(url.search)throw new AppError('INVALID_FIELDS',400);json(res,200,controller.addMaterials(materialsRoute[1],data));return;}
         if(url.pathname==='/api/projects/create'){
           exact(data,['requestId','name',...(Object.hasOwn(data,'kind')?['kind']:[])]);
           if(url.search||typeof data.requestId!=='string'||typeof data.name!=='string'||(Object.hasOwn(data,'kind')&&data.kind!=='code'&&data.kind!=='general'))throw new AppError('INVALID_FIELDS',400);
@@ -299,6 +302,8 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
         const match=url.pathname.match(/^\/api\/runs\/([a-f0-9-]{36})\/interrupt$/);
         if(match){if(Object.keys(data).length)throw new AppError('INVALID_FIELDS',400);await controller.interrupt(match[1]);json(res,200,controller.snapshot());return;}
       }
+      const materialsView=url.pathname.match(/^\/api\/projects\/([a-f0-9-]{36})\/materials$/);
+      if(req.method==='GET'&&materialsView){if(url.search)throw new AppError('INVALID_FIELDS',400);json(res,200,controller.materials(materialsView[1]));return;}
       const deliverablesRoute=url.pathname.match(/^\/api\/projects\/([a-f0-9-]{36})\/deliverables(\/preview)?$/);
       if(req.method==='GET'&&deliverablesRoute){
         const keys=[...url.searchParams.keys()];

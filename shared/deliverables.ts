@@ -5,10 +5,17 @@ export interface DeliverableChecks {
   format:'passed'|'failed'|'unsupported';
   /** Whether the content satisfies the task is never inferred from file checks. */
   meaning:'unverified';
+  /** Table numbers of a text deliverable compared with the project's input materials.
+   * 'passed' only means every table number also appears in an input; it is not semantic proof. */
+  evidence?:{status:'passed'|'needs_review'|'unverified';numbers:number;matched:number;unmatched:string[]};
 }
+/** A user-supplied source file in the project's inputs/ folder. */
+export interface Material {path:string;size:number;sha256:string}
 export interface Deliverable {
   path:string;size:number;modifiedAt:string;sha256:string;mediaType:string;
   taskId:string|null;taskTitle:string|null;previewable:boolean;checks:DeliverableChecks;
+  /** 'input' files are user materials, never AI results. */
+  role:'input'|'output';
 }
 export interface DeliverableList {items:Deliverable[];skipped:number;truncated:boolean}
 export type DeliverablePreview=

@@ -33,6 +33,7 @@ import {RunTelemetry} from './run-telemetry.ts';
 import {getDevelopmentResult} from './development-results.ts';
 import {staticAppPreviewCapability} from './app-preview-policy.ts';
 import {listDeliverables,previewDeliverable} from './deliverables.ts';
+import {addMaterials,listMaterials} from './materials.ts';
 import {ClaudeTaskService,type ClaudeTaskServiceOptions} from './claude-task-service.ts';
 export { AppError } from './errors.ts';
 export class Controller {
@@ -302,6 +303,15 @@ export class Controller {
     if(!this.projects)throw new AppError('PROJECT_CREATION_UNAVAILABLE',409);
     const project=this.projects.generalProject(projectId),tasks=(new Studio(this.store).read(projectId,'tasks') as SavedTask[]).map(task=>({id:task.id,title:task.title}));
     return listDeliverables(project.path,tasks);
+  }
+  /** User materials of a general project (inputs/). Adding never overwrites. */
+  materials(projectId:string){if(!this.projects)throw new AppError('PROJECT_CREATION_UNAVAILABLE',409);return listMaterials(this.projects.generalProject(projectId).path);}
+  addMaterials(projectId:string,input:unknown){
+    if(!this.projects)throw new AppError('PROJECT_CREATION_UNAVAILABLE',409);
+    // AI runtimes read this folder; do not change it under an active run of this project.
+    if(this.store.runs().some(run=>run.projectId===projectId&&!terminal(run.execution)))throw new AppError('RUN_ACTIVE',409);
+    const items=addMaterials(this.projects.generalProject(projectId).path,input);
+    this.store.append('project.materials',null,{projectId,paths:items.map(item=>item.path)});return items;
   }
   deliverablePreview(projectId:string,path:string){if(!this.projects)throw new AppError('PROJECT_CREATION_UNAVAILABLE',409);return previewDeliverable(this.projects.generalProject(projectId).path,path);}
   async submitTask(projectId:string,taskId:string,input:{requestId:string;workspaceId?:string;expectedAcceptanceDigest?:string}):Promise<Run>{
