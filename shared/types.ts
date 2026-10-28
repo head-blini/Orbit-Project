@@ -1,6 +1,7 @@
 export type Execution = 'starting'|'running'|'interrupting'|'completed'|'interrupted'|'failed'|'lost';
 export type ProviderStatus = 'disconnected'|'connecting'|'ready'|'auth_required'|'not_installed'|'error';
 export interface Run {
+  runtime?:'codex'|'claude-code'; projectId?:string;
   workspaceId?:string;
   taskId?:string; planningVersionId?:string; planningContentHash?:string; requirementLabels?:string[];
   acceptanceDigest?:string;

@@ -62,6 +62,14 @@ export class Projects {
     const p:Project={id:randomUUID(),kind:'code',name:safeText(basename(root)),path:root,createdAt:new Date().toISOString(),writeEnabled:this.allowed.some(a=>same(a,root))};this.store.saveProject(p);return p;
   }
   private project(id:string){const p=this.list().find(p=>p.id===id);if(!p)throw new AppError('PROJECT_NOT_FOUND',404);return p;}
+  /** A general write grant requires the exact server-created folder receipt. */
+  generalProject(id:string):Project {
+    const project=this.store.projects().find(project=>project.id===id);
+    if(!project)throw new AppError('PROJECT_NOT_FOUND',404);
+    if(project.kind!=='general')throw new AppError('GENERAL_PROJECT_REQUIRED',409);
+    if(!this.creation?.owns(project))throw new AppError('PROJECT_CREATION_UNAVAILABLE',409);
+    return project;
+  }
   create(projectId:string):Workspace {
     assertGitProject(this.store,projectId);
     const p=this.project(projectId);if(!p.writeEnabled)throw new AppError('WRITES_DISABLED',403);

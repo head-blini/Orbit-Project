@@ -29,6 +29,7 @@ import {projectAnalytics} from './project-analytics.ts';
 import {RunTelemetry} from './run-telemetry.ts';
 import {getDevelopmentResult} from './development-results.ts';
 import {staticAppPreviewCapability} from './app-preview-policy.ts';
+import {ClaudeTaskService,type ClaudeTaskServiceOptions} from './claude-task-service.ts';
 export { AppError } from './errors.ts';
 export class Controller {
   store:Store;workspace:string;private factory:(workspace:string,write:boolean)=>RpcPort;private rpc:RpcPort|null=null;
@@ -48,11 +49,13 @@ export class Controller {
   private knownMcpNames:readonly string[]|null=null;
   private telemetry:RunTelemetry;
   private soloLost=false;
+  private claudeTasks:ClaudeTaskService;
   private readonly ownerIncarnation=randomUUID();
-  private soloRecoveryRequired(){return this.soloLost||this.store.runs().some(run=>run.execution==='lost');}
+  private soloRecoveryRequired(){return this.soloLost||this.store.runs().some(run=>run.runtime!=='claude-code'&&run.execution==='lost');}
   assertExecutionAvailable(){if(this.soloRecoveryRequired())throw new AppError('SOLO_RECOVERY_REQUIRED',409);}
-  constructor(store:Store,workspace:string,factory:(workspace:string,write:boolean)=>RpcPort,projects?:Projects,verificationConfig:VerificationConfiguration[]=[],modelHubConfig:readonly ModelHubConfiguration[]=[]){
+  constructor(store:Store,workspace:string,factory:(workspace:string,write:boolean)=>RpcPort,projects?:Projects,verificationConfig:VerificationConfiguration[]=[],modelHubConfig:readonly ModelHubConfiguration[]=[],claudeOptions:ClaudeTaskServiceOptions={}){
     this.store=store;this.workspace=workspace;this.factory=factory;this.projects=projects;
+    this.claudeTasks=new ClaudeTaskService(store,projects,claudeOptions);
     this.soloLost=store.unresolvedNativeConnections();
     this.telemetry=new RunTelemetry(metrics=>this.store.saveRunMetrics(metrics));
     const selected=projects?.workspaces().find(w=>w.id===store.getMeta('selectedWorkspace'));if(selected){this.workspaceId=selected.id;this.workspace=selected.path;}
@@ -189,7 +192,7 @@ export class Controller {
   private approvalPolicy(){return this.workspaceId?'on-request':'untrusted';}
   private sandbox(){return this.workspaceId?{type:'workspaceWrite',writableRoots:[],networkAccess:false,excludeTmpdirEnvVar:true,excludeSlashTmp:true}:{type:'readOnly',networkAccess:false};}
   private status(status:ProviderStatus,issue:string|null=null){this.provider=status;this.issue=issue;if(status!=='ready'){this.clearExtensions();this.launchValidated=false;this.usage=unknownUsage();}this.store.append('provider.status',null,{status,issue});}
-  private active():Run|undefined{return this.store.runs().find(r=>!terminal(r.execution));}
+  private active():Run|undefined{return this.store.runs().find(r=>r.runtime!=='claude-code'&&!terminal(r.execution));}
   async connect():Promise<void>{
     assertGitProject(this.store,this.workspaceId);
     this.assertExecutionAvailable();this.extensionIdle();
@@ -281,7 +284,12 @@ export class Controller {
     if(workspaceId!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);
     return this.verification.acceptance.preview(projectId,workspaceId,taskId);
   }
-  async submitTask(projectId:string,taskId:string,input:{requestId:string;workspaceId:string;expectedAcceptanceDigest?:string}):Promise<Run>{
+  claudeQuota(){return this.claudeTasks.quota();}
+  async submitTask(projectId:string,taskId:string,input:{requestId:string;workspaceId?:string;expectedAcceptanceDigest?:string}):Promise<Run>{
+    if(this.store.projects().some(project=>project.id===projectId&&project.kind==='general')&&!Object.hasOwn(input,'workspaceId')){
+      if(Object.keys(input).length!==1||!Object.hasOwn(input,'requestId'))throw new AppError('INVALID_FIELDS',400);
+      return this.claudeTasks.submit(projectId,taskId,input.requestId);
+    }
     assertGitProject(this.store,projectId);assertGitProject(this.store,input.workspaceId);
     if(typeof input.requestId!=='string'||!/^[a-zA-Z0-9-]{8,80}$/.test(input.requestId))throw new AppError('INVALID_REQUEST_ID',400);
     const workspace=this.projects?.workspaces().find(workspace=>workspace.id===input.workspaceId);
@@ -331,6 +339,7 @@ export class Controller {
     }
   }
   async interrupt(id:string){
+    if(this.store.getRun(id)?.runtime==='claude-code')return this.claudeTasks.interrupt(id);
     const run=this.store.getRun(id);if(!run||run.workspaceId!==this.workspaceId)throw new AppError('RUN_NOT_FOUND',404);
     if(terminal(run.execution)||run.execution==='interrupting')return;
     if(!run.turnId||!this.rpc)throw new AppError('TURN_NOT_READY');
@@ -385,5 +394,5 @@ export class Controller {
     // Closing the connection is best effort, never evidence permitting a new dispatch.
     try{if(rpc)await rpc.close();}catch{/* The generation remains fenced and recovery stays required. */}
   }
-  async close(){await this.planningSuggestions.close();await this.reviews.close();await this.workflows.close();await this.modelHub.close();await this.verification.close();this.loseActive();this.telemetry.disconnect();const rpc=this.rpc;this.rpc=null;++this.generation;if(rpc)await rpc.close();this.provider='disconnected';this.launchValidated=false;this.clearExtensions();}
+  async close(){await this.claudeTasks.close();await this.planningSuggestions.close();await this.reviews.close();await this.workflows.close();await this.modelHub.close();await this.verification.close();this.loseActive();this.telemetry.disconnect();const rpc=this.rpc;this.rpc=null;++this.generation;if(rpc)await rpc.close();this.provider='disconnected';this.launchValidated=false;this.clearExtensions();}
 }

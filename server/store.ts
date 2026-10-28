@@ -9,6 +9,11 @@ import {migrateSoloOperations,readSoloOperation,insertSoloOperation,updateSoloOp
 import type {NativeProcessObservation} from '../shared/native-process.ts';
 import type {TaskVerificationPreview} from '../shared/acceptance.ts';
 import {migrateNativeConnections,readNativeConnection,beginNativeConnection,bindNativeSession,observeNativeProcess,closeNativeTransport,finishNativeConnectionJournal,unresolvedNativeConnections} from './native-connection-journal.ts';
+// Claude task text belongs in the Run record, never in observable activity events.
+function runEventData(run:Run):Record<string,unknown>{
+  if(run.runtime!=='claude-code')return {run};
+  return {runtime:run.runtime,projectId:run.projectId,taskId:run.taskId,planningVersionId:run.planningVersionId,planningContentHash:run.planningContentHash,execution:run.execution};
+}
 export class Store extends EventEmitter {
   db:DatabaseSync;
   private pendingEvents:AppEvent[]|null=null;
@@ -30,7 +35,7 @@ export class Store extends EventEmitter {
       migrateSoloOperations(this.db);migrateNativeConnections(this.db);
     }catch(error){this.db.close();throw error;}
     for(const r of this.runs()) if(!terminal(r.execution)||r.execution==='lost') {
-      if(!terminal(r.execution))this.updateRun(r.id,{execution:'lost'},'run.lost');
+      if(!terminal(r.execution))this.updateRun(r.id,{execution:'lost'},'run.lost',r.runtime==='claude-code'?{reason:'SERVER_RESTART'}:undefined);
       const metrics=this.getRunMetrics(r.id);
       if(metrics&&(metrics.tokens!==null||metrics.tokenStatus!=='incomplete'||metrics.tokenIssue!=='CONNECTION_LOST'||metrics.durationMs!==null||metrics.finishedAt!==null)){
         try{this.saveRunMetrics({...metrics,tokens:null,tokenStatus:'incomplete',tokenIssue:'CONNECTION_LOST',durationMs:null,finishedAt:null});}catch{/* The volatile metrics quarantine remains readable; execution recovery already succeeded. */}
@@ -75,21 +80,21 @@ export class Store extends EventEmitter {
     const row=this.db.prepare('SELECT body,digest FROM runs WHERE request_id=?').get(id);
     return row?{run:JSON.parse(row.body as string),digest:row.digest as string}:null;
   }
-  createRun(requestId:string,digest:string,prompt:string,workspaceId?:string,task?:Pick<Run,'taskId'|'planningVersionId'|'planningContentHash'|'requirementLabels'>,identity?:SoloOperationIdentity,acceptance?:TaskVerificationPreview):Run {
+  createRun(requestId:string,digest:string,prompt:string,workspaceId?:string,task?:Pick<Run,'taskId'|'planningVersionId'|'planningContentHash'|'requirementLabels'|'runtime'|'projectId'>,identity?:SoloOperationIdentity,acceptance?:TaskVerificationPreview):Run {
     const now=new Date().toISOString();
     const r:Run={id:randomUUID(),requestId,turnId:null,prompt,response:'',execution:'starting',verification:'not_run',createdAt:now,updatedAt:now,...(workspaceId?{workspaceId}:{}),...task,...(acceptance?{acceptanceDigest:acceptance.digest}:{})};
     this.db.exec('BEGIN IMMEDIATE');
     let event:AppEvent;
-    try {this.db.prepare('INSERT INTO runs VALUES(?,?,?,?)').run(r.id,requestId,digest,JSON.stringify(r));if(acceptance)this.db.prepare('INSERT INTO run_acceptance_baselines VALUES(?,?,?)').run(r.id,acceptance.digest,JSON.stringify(acceptance));if(identity!==undefined)insertSoloOperation(this.db,r,identity);event=this.insert('run.created',r.id,{run:r});this.db.exec('COMMIT');}
+    try {this.db.prepare('INSERT INTO runs VALUES(?,?,?,?)').run(r.id,requestId,digest,JSON.stringify(r));if(acceptance)this.db.prepare('INSERT INTO run_acceptance_baselines VALUES(?,?,?)').run(r.id,acceptance.digest,JSON.stringify(acceptance));if(identity!==undefined)insertSoloOperation(this.db,r,identity);event=this.insert('run.created',r.id,runEventData(r));this.db.exec('COMMIT');}
     catch(e){this.db.exec('ROLLBACK');throw e;}
     this.emit('event',event);return r;
   }
-  updateRun(id:string,patch:Partial<Pick<Run,'turnId'|'execution'|'response'>>,kind:string):Run {
+  updateRun(id:string,patch:Partial<Pick<Run,'turnId'|'execution'|'response'>>,kind:string,eventData?:Record<string,unknown>):Run {
     const old=this.getRun(id);if(!old)throw new Error('RUN_NOT_FOUND');
     if(terminal(old.execution)) return old;
     const next={...old,...patch,updatedAt:new Date().toISOString()};
     this.db.exec('BEGIN IMMEDIATE');let event:AppEvent;
-    try {this.db.prepare('UPDATE runs SET body=? WHERE id=?').run(JSON.stringify(next),id);updateSoloOperation(this.db,old,next,kind);event=this.insert(kind,id,{run:next});this.db.exec('COMMIT');}
+    try {this.db.prepare('UPDATE runs SET body=? WHERE id=?').run(JSON.stringify(next),id);updateSoloOperation(this.db,old,next,kind);event=this.insert(kind,id,eventData??runEventData(next));this.db.exec('COMMIT');}
     catch(e){this.db.exec('ROLLBACK');throw e;}
     this.emit('event',event);return next;
   }
@@ -105,7 +110,7 @@ export class Store extends EventEmitter {
     if(run.verification==='recorded')return;
     const next={...run,verification:'recorded' as const};
     this.db.prepare('UPDATE runs SET body=? WHERE id=?').run(JSON.stringify(next),runId);
-    this.append('run.verification_recorded',runId,{run:next});
+    this.append('run.verification_recorded',runId,runEventData(next));
   }
   /** Synchronous atomic Studio mutation; observers only see committed events. */
   transaction<T>(work:()=>T):T {
