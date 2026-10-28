@@ -73,6 +73,12 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
     }
     if(url.pathname.startsWith('/api/')){
       if(!session||session.expires<=Date.now())throw new AppError('SESSION_REQUIRED',401);
+      const qualityRoute=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/quality-loops(?:\/(preview|start|([a-f0-9-]{36})\/resume))?$/);
+      if(req.method==='GET'&&qualityRoute&&!qualityRoute[2]){
+        if(url.search)throw new AppError('INVALID_FIELDS',400);
+        if(!controller.store.projects().some(p=>p.id===qualityRoute[1]))throw new AppError('PROJECT_NOT_FOUND',404);
+        json(res,200,{records:controller.qualityLoops.records(qualityRoute[1])});return;
+      }
       const taskHandoff=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/tasks\/([a-f0-9-]{36})\/handoff$/);
       if(req.method==='GET'&&taskHandoff){
         if(url.search)throw new AppError('INVALID_FIELDS',400);
@@ -102,6 +108,24 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
         const planningSuggestion=url.pathname.match(/^\/api\/projects\/([a-f0-9-]{36})\/planning-suggestions\/(preview|start|recover|([a-f0-9-]{36})\/(interrupt|save))$/);
         const materialsPost=/^\/api\/projects\/[a-f0-9-]{36}\/materials$/.test(url.pathname);
         const data=await body(req,largeStudioInput?6*256*1024+256*1024:materialsPost?10*(128*1024+512):planningSuggestion?64000:18000);
+        if(qualityRoute){
+          if(url.search)throw new AppError('INVALID_FIELDS',400);
+          const projectId=qualityRoute[1],action=qualityRoute[2];
+          if(action==='preview'){
+            exact(data,['sourceRunId','reviewers','limits']);
+            json(res,200,controller.qualityLoops.preview(projectId,data.sourceRunId as string,data.reviewers as Parameters<typeof controller.qualityLoops.preview>[2],data.limits as Parameters<typeof controller.qualityLoops.preview>[3]));return;
+          }
+          if(action==='start'){
+            exact(data,['requestId','sourceRunId','reviewers','limits','expectedPreviewDigest','confirmed']);
+            json(res,200,controller.qualityLoops.start({...data,projectId} as Parameters<typeof controller.qualityLoops.start>[0]));return;
+          }
+          if(qualityRoute[3]){
+            exact(data,[]);
+            if(controller.qualityLoops.record(qualityRoute[3]).projectId!==projectId)throw new AppError('QUALITY_LOOP_NOT_FOUND',404);
+            json(res,200,await controller.qualityLoops.resume(qualityRoute[3]));return;
+          }
+          throw new AppError('INVALID_FIELDS',400);
+        }
         if(aiPreferencesRoute){
           if(url.search)throw new AppError('INVALID_FIELDS',400);exact(data,['expectedRevision','planning','execution']);
           json(res,200,controller.aiPreferences.update(aiPreferencesRoute[1],data as unknown as Parameters<Controller['aiPreferences']['update']>[1]));return;

@@ -9,6 +9,18 @@ const assistant=(content,extra={})=>emit({type:'assistant',session_id:session,me
 const result=(extra)=>emit({type:'result',subtype:'success',session_id:session,is_error:false,terminal_reason:'completed',num_turns:1,duration_ms:5,total_cost_usd:0,result:'',...extra});
 const quota=status=>emit({type:'rate_limit_event',session_id:session,rate_limit_info:{status,rateLimitType:'five_hour',resetsAt:1793160000,unifiedWindows:{five_hour:{utilization:status==='rejected'?1:0.08,resetsAt:1793160000,status},seven_day:{utilization:0.42,resetsAt:1793437200,status:'allowed'}}}});
 const scenario=prompt.trim().split(/\s+/)[0];
+if(scenario==='quota-success'){init();quota('rejected');result({});exit(0);}
+if(scenario==='nonzero-success'){init();result({});exit(1);}
+if(scenario.startsWith('identity-')){
+  init();
+  const msg=(model,sessionId=session)=>emit({type:'assistant',session_id:sessionId,message:{model,content:[{type:'text',text:'synthetic'}]}});
+  if(scenario!=='identity-missing')msg('claude-observed-1');
+  if(scenario==='identity-changed')msg('claude-observed-2');
+  if(scenario==='identity-mixed')assistant([{type:'text',text:'no model metadata'}]);
+  if(scenario==='identity-foreign')msg('claude-observed-1','99999999-2222-4333-8444-555555555555');
+  if(scenario==='identity-invalid')msg('private model with spaces');
+  result({});exit(0);
+}
 if(scenario==='args'){init();assistant([{type:'text',text:JSON.stringify(argv.slice(2))}]);result({result:'args'});exit(0);}
 if(scenario==='ok'){init();assistant([{type:'tool_use',id:'t1',name:'Read',input:{file_path:'/secret/path/never-store'}}]);emit({type:'user',session_id:session,message:{content:[{type:'tool_result',tool_use_id:'t1',content:'raw tool output never-store'}]}});quota('allowed');assistant([{type:'text',text:'Done. key sk-ant-abcdefghijklmnopqrstuvwxyz0123456789'}]);result({result:'Done.'});exit(0);}
 if(scenario==='auth'){init();assistant([{type:'text',text:'Not logged in · Please run /login'}],{error:'authentication_failed',is_api_error_message:true});result({is_error:true,terminal_reason:'api_error',result:'Not logged in'});exit(1);}

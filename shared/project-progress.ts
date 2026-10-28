@@ -1,3 +1,4 @@
+import type {QualityLoopRecord} from './quality-loop-record.ts';
 import type {Run,ProviderStatus} from './types.ts';
 import {terminal} from './types.ts';
 import type {SavedTask,PlanningVersion} from './parallel.ts';
@@ -25,6 +26,7 @@ export interface ProgressRun {
   verification:ProgressVerification;checks:number;planningVersionId:string|null;lastActivity:string|null;
 }
 export interface ProgressTask {
+  qualityLoops?:QualityLoopRecord[];
   id:string;title:string;requirementLabels:string[];stage:TaskStage;assignee:string|null;planCurrent:boolean;
   latestRunId:string|null;startedAt:string|null;lastObservedAt:string|null;verification:ProgressVerification;
   criteria:{total:number;verified:number};runs:ProgressRun[];runsTotal:number;

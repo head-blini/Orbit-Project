@@ -52,9 +52,9 @@ export function parseClaudeReview(output:string,handoff:HandoffPackage):ClaudeRe
   const verdict=value.verdict;if(verdict!=='approve'&&verdict!=='changes_requested'&&verdict!=='unclear')invalid();
   const respected=value.baseline_respected;if(respected!==true&&respected!==false&&respected!==null)invalid();
   if(!Array.isArray(value.criteria)||!Array.isArray(value.findings)||value.findings.length>50)invalid();
-  const expected=criteriaOf(handoff),criteria=(value.criteria as Record<string,unknown>[]).map(item=>{
+  const expected=criteriaOf(handoff),criterionLimit=expected.reduce((max,criterion)=>Math.max(max,criterion.length),400),criteria=(value.criteria as Record<string,unknown>[]).map(item=>{
     const status=item?.status;if(status!=='met'&&status!=='not_met'&&status!=='unclear')invalid();
-    return {criterion:text(item.criterion,400),status:status as ClaudeReviewResult['criteria'][number]['status'],evidence:clip(text(item.evidence,1000),500)};
+    return {criterion:text(item.criterion,criterionLimit),status:status as ClaudeReviewResult['criteria'][number]['status'],evidence:clip(text(item.evidence,1000),500)};
   });
   // Exactly the approved criteria, each once: the reviewer cannot add, drop or rename them.
   if(criteria.length!==expected.length||new Set(criteria.map(c=>c.criterion)).size!==criteria.length||!criteria.every(c=>expected.includes(c.criterion)))invalid();

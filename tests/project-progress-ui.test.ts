@@ -86,3 +86,12 @@ test('handoff markdown renders as inert text',async()=>{
   const html=renderToStaticMarkup(createElement(ProjectProgressView,{progress,freshness:'live',lastEventAt:null,actions:actions({handoff:{taskId:'t1',markdown:'# 인계\n<script>alert(1)</script>'}})}));
   assert.match(html,/&lt;script&gt;/);assert.doesNotMatch(html,/<script>/);
 });
+
+test('quality loop simple labels and advanced evidence stay separate from check approval',async()=>{
+ const {QualityLoopStatus}=await view();
+ const loop={id:'loop',result:{status:'reviewing',repairs:1,rounds:[{failures:[{criterion:'출처',evidence:'근거 없음'}]}],issue:null},recoveryRequired:false,
+ producer:{providerId:'anthropic',modelId:'unknown',sessionId:'source-session',runId:'source-run'},reviewers:[{providerId:'openai',modelId:'selected-model'}],
+ verification:{status:'unknown'},version:{id:'approved-v1'},baseline:{digest:'baseline-digest'},steps:[{id:'step',kind:'repair',state:'completed',evidence:{providerId:'anthropic',modelId:'actual-model',sessionId:'repair-session',runId:'repair-run',source:'native_observed'}}]} as unknown as import('../shared/quality-loop-record.ts').QualityLoopRecord;
+ const simple=renderToStaticMarkup(createElement(QualityLoopStatus,{loop,advanced:false}));assert.match(simple,/재검증 중/);assert.match(simple,/문제 1개/);assert.match(simple,/unknown/);assert.match(simple,/사용자 승인과 별개/);assert.doesNotMatch(simple,/repair-session|baseline-digest|근거 없음/);
+ const advanced=renderToStaticMarkup(createElement(QualityLoopStatus,{loop,advanced:true}));assert.match(advanced,/repair-session/);assert.match(advanced,/수정자/);assert.match(advanced,/baseline-digest/);assert.match(advanced,/근거 없음/);
+});

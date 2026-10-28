@@ -24,6 +24,13 @@ class FakeRpc extends EventEmitter {
 }
 function setup(){const rpc=new FakeRpc(),flags:boolean[]=[],input={workspacePath:process.cwd(),instructions:'Review only this supplied synthetic diff.',timeoutMs:1000};return {rpc,flags,input,factory:(_path:string,write:boolean)=>{flags.push(write);return rpc;}};}
 
+test('thread configuration is not evidence of the actual review model',async()=>{
+  const f=setup();f.rpc.patch=(method,value)=>method==='thread/start'?{...value,model:'configured-model',modelProvider:'openai'}:value;
+  const result=await runCodexReview(f.input,f.factory);
+  assert.equal(result.execution,'completed');
+  assert.deepEqual(result.identity,{providerId:'openai',modelId:'unknown',sessionId:threadId,executionId:turnId,modelEvidence:'unknown'});
+});
+
 test('fresh readonly protocol orders policy/MCP validation before exactly one inline custom review',async()=>{
   const f=setup(),started:any[]=[];const result=await runCodexReview({...f.input,onStarted:ids=>started.push(ids)},f.factory);
   assert.equal(result.execution,'completed');assert.equal(result.processStopped,true);assert.equal(result.response,'Only the frozen diff was reviewed.');assert.deepEqual(f.flags,[false]);assert.deepEqual(started,[{threadId,turnId}]);

@@ -8,9 +8,32 @@ import {Controller} from '../server/controller.ts';
 import {AppError} from '../server/errors.ts';
 import type {ClaudeEvent} from '../server/runtimes/claude-code.ts';
 import {parseClaudeLine} from '../server/runtimes/claude-code.ts';
+import {ClaudeTaskService} from '../server/claude-task-service.ts';
 import {claudeFixture,planningInput,outcome,session,tick} from './claude-task-fixture.ts';
 
 const error=(message:string,status=409)=>(e:unknown)=>e instanceof AppError&&e.message===message&&e.status===status;
+
+test('quality repair retains approved baseline, persists source, and deduplicates only matching repair intent',async()=>{
+  const f=claudeFixture(),service=new ClaudeTaskService(f.store,f.projects,f.dependencies);
+  try{
+    const {task,version}=f.plan(),source=service.submit(f.project.id,task.id,randomUUID());
+    f.runners[0].finish(outcome('completed',{identity:{providerId:'anthropic',modelId:'observed-model',sessionId:session.sessionId,executionId:null,modelEvidence:'assistant_message'}}));await tick();
+    const request=randomUUID(),repair=service.repair(source.id,request,'Missing citation for the reported total.');
+    assert.equal(repair.planningContentHash,version.contentHash);
+    assert.match(repair.prompt,/Missing citation/);assert.match(repair.prompt,/실패한 항목만 수정/);
+    assert.equal(service.repair(source.id,request,'Missing citation for the reported total.').id,repair.id);
+    assert.throws(()=>service.repair(source.id,request,'Another repair'),error('IDEMPOTENCY_CONFLICT'));
+    assert.equal(f.runners.length,2);
+    const identity=f.store.db.prepare("SELECT data FROM events WHERE run_id=? AND kind='run.identity'").get(source.id)!;
+    assert.equal(JSON.parse(identity.data as string).modelId,'observed-model');
+    const link=f.store.db.prepare("SELECT data FROM events WHERE run_id=? AND kind='run.repair_source'").get(repair.id)!;
+    assert.equal(JSON.parse(link.data as string).sourceRunId,source.id);
+    f.runners[1].finish();await tick();
+    f.studio.mutate(f.project.id,'plans',version.id,'revisions',{requestId:randomUUID(),expectedRevision:1,input:planningInput});
+    assert.throws(()=>service.repair(source.id,randomUUID(),'Retry'),/PLANNING_VERSION_STALE/);
+    assert.equal(f.runners.length,2);
+  }finally{for(const runner of f.runners)runner.finish();await service.close();await f.close();}
+});
 
 test('general task persists the approved Claude prompt before launch and reuses requestId without a second owner',async()=>{
   const f=claudeFixture();try{

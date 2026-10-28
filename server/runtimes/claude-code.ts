@@ -4,6 +4,7 @@ import {buildChildEnv} from '../child-env.ts';
 import {resolveNativeExecutable} from '../native-executable.ts';
 import {safeText} from '../privacy.ts';
 import {AppError} from '../errors.ts';
+import {nativeModelId,type NativeIdentity} from './model-identity.ts';
 
 /**
  * Claude Code runtime adapter over the official `claude -p --output-format stream-json`
@@ -14,6 +15,7 @@ export type ClaudeMode='read'|'write';
 export type ClaudeAuth='subscription'|'api_key'|'unknown';
 export interface ClaudeQuotaWindow {id:string;utilization:number|null;resetsAt:string|null;status:string}
 export type ClaudeEvent=
+  |{kind:'model';sessionId:string;modelId:string|null}
   |{kind:'session';sessionId:string;model:string|null;permissionMode:string|null;auth:ClaudeAuth;tools:string[]}
   |{kind:'message';text:string}
   |{kind:'tool';name:string}
@@ -24,16 +26,17 @@ export interface ClaudeOutcome {
   status:'completed'|'error'|'auth_required'|'quota_exhausted'|'interrupted'|'unknown'|'spawn_failed';
   sessionId:string|null;exit:'observed'|'not_observed';exitCode:number|null;signal:string|null;forced:boolean;
   ignoredLines:number;response:string;
+  identity?:NativeIdentity;
 }
 
 const tools:Record<ClaudeMode,string>={read:'Read,Grep,Glob',write:'Read,Grep,Glob,Edit,Write'};
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_LINE=4*1024*1024;
 
-export function claudeArgs(options:{mode:ClaudeMode;resume?:string;model?:string}):string[]{
+export function claudeArgs(options:{mode:ClaudeMode;textOnly?:boolean;resume?:string;model?:string}):string[]{
   const args=['-p','--output-format','stream-json','--verbose','--input-format','text',
     '--restricted','--strict-mcp-config','--mcp-config','{"mcpServers":{}}','--permission-prompts','none',
-    '--disable-slash-commands','--no-chrome','--tools',tools[options.mode],'--permission-mode',options.mode==='write'?'acceptEdits':'plan'];
+    '--disable-slash-commands','--no-chrome','--tools',options.textOnly?'':tools[options.mode],'--permission-mode',options.mode==='write'?'acceptEdits':'plan'];
   if(options.resume!==undefined){if(!uuid.test(options.resume))throw new AppError('INVALID_SESSION',400);args.push('--resume',options.resume);}
   if(options.model!==undefined){if(!/^[A-Za-z0-9][\w.:\[\]-]{0,99}$/.test(options.model))throw new AppError('INVALID_MODEL',400);args.push('--model',options.model);}
   return args;
@@ -73,6 +76,8 @@ export function parseClaudeLine(line:string):ClaudeEvent[]|null{
     case 'assistant':{
       const content=record(value.message)?.content;if(!Array.isArray(content))return null;
       const events:ClaudeEvent[]=[];
+      const session=text(value.session_id),message=record(value.message);
+      events.push({kind:'model',sessionId:session&&uuid.test(session)?session:'',modelId:nativeModelId(message?.model)});
       for(const item of content){
         const part=record(item);if(!part)continue;
         // Tool inputs and results can carry file contents or secrets; only the tool name is kept.
@@ -98,7 +103,7 @@ type SpawnLike=(command:string,args:readonly string[],options:object)=>ChildProc
 
 /** One Claude Code turn. The owner of a task must not start a second run for it. */
 export class ClaudeCodeRun {
-  private options:{executable:string;cwd:string;mode:ClaudeMode;resume?:string;model?:string;env?:NodeJS.ProcessEnv;spawn?:SpawnLike;killAfterMs?:number};
+  private options:{executable:string;cwd:string;mode:ClaudeMode;textOnly?:boolean;resume?:string;model?:string;env?:NodeJS.ProcessEnv;spawn?:SpawnLike;killAfterMs?:number};
   private child:ChildProcess|null=null;private started=false;private interruptRequested=false;private forced=false;private killTimer:ReturnType<typeof setTimeout>|undefined;
   constructor(options:ClaudeCodeRun['options']){this.options=options;}
   start(prompt:string,onEvent:(event:ClaudeEvent)=>void):Promise<ClaudeOutcome>{
@@ -108,16 +113,21 @@ export class ClaudeCodeRun {
     return new Promise(resolve=>{
       let sessionId:string|null=null,result:Extract<ClaudeEvent,{kind:'result'}>|null=null,error:Extract<ClaudeEvent,{kind:'error'}>['code']|null=null;
       let quotaRejected=false,ignoredLines=0,buffer='',response='',settled=false;
+      let observedModel:string|null=null,identityInvalid=false;
       const finish=(outcome:Omit<ClaudeOutcome,'sessionId'|'ignoredLines'|'response'|'forced'>)=>{
         if(settled)return;settled=true;if(this.killTimer)clearTimeout(this.killTimer);this.child=null;
-        resolve({...outcome,sessionId,ignoredLines,response,forced:this.forced});
+        resolve({...outcome,sessionId,ignoredLines,response,forced:this.forced,identity:{providerId:'anthropic',modelId:identityInvalid?'unknown':observedModel??'unknown',sessionId,executionId:null,modelEvidence:!identityInvalid&&observedModel?'assistant_message':'unknown'}});
       };
       const handle=(line:string)=>{
         if(!line.trim())return;
         const events=line.length>MAX_LINE?null:parseClaudeLine(line);
         if(!events){ignoredLines++;return;}
         for(const event of events){
-          if(event.kind==='session')sessionId=event.sessionId;
+          if(event.kind==='session'){if(sessionId&&sessionId!==event.sessionId)identityInvalid=true;sessionId=event.sessionId;}
+          if(event.kind==='model'){
+            if(!sessionId||event.sessionId!==sessionId||!event.modelId||observedModel&&observedModel!==event.modelId)identityInvalid=true;
+            else observedModel=event.modelId;
+          }
           if(event.kind==='message')response=event.text;
           if(event.kind==='error')error=event.code;
           if(event.kind==='quota'&&event.status==='rejected')quotaRejected=true;
@@ -145,9 +155,9 @@ export class ClaudeCodeRun {
         const base={exit:'observed' as const,exitCode:code,signal:signal??null};
         if(this.interruptRequested)return finish({status:'interrupted',...base});
         if(!result)return finish({status:'unknown',...base});
-        if(!result.isError)return finish({status:'completed',...base});
         if(error==='authentication_failed')return finish({status:'auth_required',...base});
         if(error==='rate_limit'||quotaRejected)return finish({status:'quota_exhausted',...base});
+        if(!result.isError&&code===0)return finish({status:'completed',...base});
         finish({status:'error',...base});
       });
     });

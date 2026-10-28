@@ -3,7 +3,7 @@ import type {RpcPort} from './rpc.ts';
 import {safeText,containsCredential} from './privacy.ts';
 
 export interface NativeReviewInput {workspacePath:string;instructions:string;timeoutMs:number;signal?:AbortSignal;onStarted?:(ids:{threadId:string;turnId:string})=>void}
-export interface NativeReviewResult {execution:'completed'|'failed'|'interrupted'|'timed_out'|'lost';threadId:string|null;turnId:string|null;response:string;issue:string|null;processStopped:boolean}
+export interface NativeReviewResult {execution:'completed'|'failed'|'interrupted'|'timed_out'|'lost';threadId:string|null;turnId:string|null;response:string;issue:string|null;processStopped:boolean;identity?:import('./runtimes/model-identity.ts').NativeIdentity}
 type Failure={execution:Exclude<NativeReviewResult['execution'],'completed'>;issue:string};
 type Fact={turnId:string;kind:'review';id:string;text:string}|{turnId:string;kind:'terminal';status:string;review?:{id:string;text:string}}|{turnId:string;kind:'violation'};
 class ReviewFailure extends Error {readonly issue:string;constructor(issue:string){super(issue);this.issue=issue;}}
@@ -139,5 +139,7 @@ export async function runCodexReview(input:NativeReviewInput,factory:(workspace:
   if(failure){const final=failure as Failure;result.execution=final.execution;result.issue=final.issue;result.response='';}
   else if(result.execution==='completed'&&review)result.response=(review as {text:string}).text;
   else {result.execution='failed';result.issue='REVIEW_RESULT_MISSING';}
+  // thread/start model is configuration; review/start may use a separate review model.
+  result.identity={providerId:'openai',modelId:'unknown',sessionId:result.threadId,executionId:result.turnId,modelEvidence:'unknown'};
   return result;
 }

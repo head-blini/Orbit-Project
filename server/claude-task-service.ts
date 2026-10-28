@@ -28,10 +28,21 @@ export class ClaudeTaskService {
   constructor(store:Store,projects?:Projects,options:ClaudeTaskServiceOptions={}){this.store=store;this.projects=projects;this.options=options;}
   quota():Quota|null{return this.latestQuota?structuredClone(this.latestQuota):null;}
   submit(projectId:string,taskId:string,requestId:string):Run {
+    return this.dispatch(projectId,taskId,requestId);
+  }
+  /** Internal Quality Loop repair path; callers retain the Controller's global execution gates. */
+  repair(sourceRunId:string,requestId:string,prompt:string):Run {
+    const source=this.store.getRun(sourceRunId);
+    if(!source||!source.projectId||!source.taskId||source.execution!=='completed')throw new AppError('QUALITY_SOURCE_INVALID',409);
+    if(typeof prompt!=='string'||!prompt.trim()||prompt.length>32000)throw new AppError('INVALID_REPAIR_INPUT',400);
+    return this.dispatch(source.projectId,source.taskId,requestId,{source,prompt});
+  }
+  private dispatch(projectId:string,taskId:string,requestId:string,repair?:{source:Run;prompt:string}):Run {
     if(typeof requestId!=='string'||!/^[a-zA-Z0-9-]{8,80}$/.test(requestId))throw new AppError('INVALID_REQUEST_ID',400);
+    const repairDigest=repair?createHash('sha256').update(JSON.stringify({sourceRunId:repair.source.id,prompt:repair.prompt})).digest('hex'):null;
     const prior=this.store.findRequest(requestId);
     if(prior){
-      if(prior.run.runtime!=='claude-code'||prior.run.projectId!==projectId||prior.run.taskId!==taskId)throw new AppError('IDEMPOTENCY_CONFLICT',409);
+      if(prior.run.runtime!=='claude-code'||prior.run.projectId!==projectId||prior.run.taskId!==taskId||repairDigest&&prior.digest!==repairDigest)throw new AppError('IDEMPOTENCY_CONFLICT',409);
       return prior.run;
     }
     const runs=this.store.runs().filter(run=>run.taskId===taskId);
@@ -42,21 +53,23 @@ export class ClaudeTaskService {
     if(!this.projects)throw new AppError('PROJECT_CREATION_UNAVAILABLE',409);
     const project=this.projects.generalProject(projectId),studio=new Studio(this.store);
     const brief=studio.execution(projectId,taskId),handoff=new HandoffService(this.store,studio).build(projectId,taskId);
+    if(repair&&(repair.source.planningVersionId!==brief.planningVersionId||repair.source.planningContentHash!==brief.planningContentHash))throw new AppError('QUALITY_BASELINE_CHANGED',409);
     const task=(studio.read(projectId,'tasks') as SavedTask[]).find(task=>task.id===taskId)!;
     // Same input gate as Codex runs (Controller.start), applied to the same raw execution brief:
     // block instead of silently redacting, and audit the denial.
-    const raw=brief.prompt+'\n'+task.title;
+    const raw=brief.prompt+'\n'+task.title+(repair?'\n'+repair.prompt:'');
     const denial=containsCredential(raw)?'CREDENTIAL_LIKE_INPUT':outboundDenial(raw);
     if(denial){this.store.append('guardrail.denied',null,{providerId:'claude-code',code:denial});throw new AppError(denial,400);}
     const prompt=claudeTaskPrompt({title:task.title,goal:handoff.goal,baseline:handoff.baseline,
       acceptanceCriteria:handoff.requirements.flatMap(requirement=>requirement.acceptanceCriteria),
-      constraints:handoff.constraints,nonGoals:handoff.nonGoals,decisions:handoff.decisions,deliverable:`task-${taskId.slice(0,8)}.md`,materials:listMaterials(project.path).map(item=>item.path)});
+      constraints:handoff.constraints,nonGoals:handoff.nonGoals,decisions:handoff.decisions,deliverable:`task-${taskId.slice(0,8)}.md`,materials:listMaterials(project.path).map(item=>item.path)})+(repair?'\n품질 검증에서 실패한 항목만 수정하세요. 기존 통과 항목과 승인 기준은 보존하세요.\n'+repair.prompt:'');
     const executable=(this.options.findExecutable??findClaude)();
     // No await between ownership checks, durable intent and launch.
-    const run=this.store.createRun(requestId,createHash('sha256').update(prompt).digest('hex'),prompt,undefined,
+    const run=this.store.createRun(requestId,repairDigest??createHash('sha256').update(prompt).digest('hex'),prompt,undefined,
       {runtime:'claude-code',projectId,taskId,planningVersionId:brief.planningVersionId,planningContentHash:brief.planningContentHash,requirementLabels:brief.requirementLabels});
     let runner:Runner;
     try{
+      if(repair)this.store.append('run.repair_source',run.id,{sourceRunId:repair.source.id,planningVersionId:brief.planningVersionId,planningContentHash:brief.planningContentHash});
       // Revalidate after synchronous Store observers, immediately before launch.
       this.projects.generalProject(projectId);
       runner=(this.options.runnerFactory??(options=>new ClaudeCodeRun(options)))({executable,cwd:project.path,mode:'write',env:claudeEnv()});
@@ -86,6 +99,7 @@ export class ClaudeTaskService {
     let result:ReturnType<typeof executionForClaudeOutcome>;
     try{
       const outcome:ClaudeOutcome=await runner.start(this.store.getRun(id)!.prompt,event=>this.observe(id,event));
+      if(outcome.identity)this.store.append('run.identity',id,{...outcome.identity,runId:id});
       result=executionForClaudeOutcome(outcome);
     }catch{result={execution:'lost',reason:'EXIT_NOT_OBSERVED'};}
     try{this.store.updateRun(id,{execution:result.execution},'run.'+result.execution,{reason:result.reason});}

@@ -1,6 +1,52 @@
 # Orbit 개발 현황 (F01~F11)
 
-## 재개 요약 (새 세션은 여기부터 · 갱신 2026-10-28 16:55 KST, 담당 Claude Code)
+## 재개 요약 (2026-10-28 · 담당 Codex · Quality Loop 연결)
+
+### 로컬 커밋 직전 검토 (사용자 승인, 2026-10-28)
+
+- 현재 브랜치에서 Quality Loop 관련 27개 파일만 로컬 커밋 대상으로 확정했다. 기존 초기 정책 구현·진행 기록의 내용은 유지한다. `.DS_Store`, `docs/.DS_Store`는 미추적 상태로 보존하고 인증 설정·DB/WAL/SHM·로그·빌드 산출물은 포함하지 않는다.
+- 전체 diff 및 독립 읽기 검토: 커밋 차단 수준의 보안·정확성 결함 발견 없음. 승인 기준/모델 unknown/정지 미확인 격리/중복 실행 방지/Origin·CSRF/외부 전송·과금 경계 유지 확인. 자격증명 패턴 검사의 일치 항목은 차단·마스킹 검사용 합성 문자열 4곳뿐이며 실제 인증정보가 아니다.
+- 커밋 대상 최신 코드로 Node24 전체 테스트 재실행: **1247 tests / 1245 pass / 0 fail / 2 Windows-only skip, exit 0** (`/tmp/orbit-quality-commit-tests.log`). `tsc --noEmit`, `node scripts/build.mjs`, `git diff --check` exit 0. `node tests/quality-loop.browser.mjs` 임시 Chrome 모의 검사 exit 0.
+- 사용자 승인 범위는 로컬 커밋뿐이다. 원격 Push·main 병합·실모델 호출은 수행하지 않는다. Codex 실제 모델 관측 및 실제 CLI 통합의 미검증 제한은 아래와 같이 유지한다.
+
+- 개발 시작 HEAD `bbc2736`, 브랜치 `codex/orbit-mac-handoff-2026-10-26`, worktree는 루트 하나. 기존 미커밋 정책 모듈 3개/STATUS와 `.DS_Store` 2개를 보존했다. 커밋·Push·설치·실모델 호출 없음. 기준 원문은 `ORBIT-VISION.md`, `ORBIT-SCOPE-2026-10-27.md`, `ORBIT-IMPLEMENTATION-PLAN-2026-10-27.md`, `ORBIT-COLLABORATION.md`이며 아래 과거 worktree/차단 기록과 현재 관측을 혼동하지 않는다.
+- **구현:** 기존 Quality Loop 정책을 유지하면서 Controller/native 실행기/SQLite/Event/HTTP/진행판에 연결했다. 코드·Git 없는 텍스트 결과물의 모의 통합을 확인했다. 실제 모델 성공을 검증한 것은 아니다.
+- 승인된 source Run의 task/version/contentHash와 완료 조건을 실행 기준으로 고정한다. 공급자 ID·실제 모델 ID·세션 ID·Orbit 실행 ID·네이티브 실행 ID를 분리하고 요청 모델명은 증거로 사용하지 않는다. 실제 모델 미관측은 unknown, 독립 검증 성공 불가.
+- SQLite `quality_loops`의 회차·문제·수정 요청·step intent/result와 native/controller receipts, `quality_artifact_checks`에 근거를 보존한다. idempotent 요청은 같은 기록을 반환한다. 재시작/시간초과/종료 미확인은 격리하며 GET은 실행하지 않는다. 복구는 원래 실행의 저장된 영수증만 재생하고, 종료 확인됐으나 snapshot을 잃은 수정은 안전한 실패로 끝낸다. 성공으로 추정하거나 자동 재호출하지 않는다.
+- 실패 항목만 수정 지시로 넘긴다. 매 회차 모든 승인 완료 조건을 재검토하고 코드에는 기존 Verification의 승인 명령 전체, 일반 텍스트 결과물에는 기존 파일/형식/입력 수치 대조 검사를 다시 실행한다. 보호 검사 파일 변경은 자동 재승인하지 않는다. AI 의견 일치, 로컬 검사 통과, 사용자 승인은 별개다.
+- 진행판 간편 모드는 품질 검증 중/수정 중/재검증 중/한도·권한·모델 확인 상태와 회차·문제 수를 표시한다. 고급 모드는 기준 hash·모델/세션/실행 ID·회차별 문제·검사 증거를 펼친다. 단계/검사 실패를 기존 작업 완료율에 임의 합산하지 않는다.
+- **검증:** Node24.22.1 전체 `node --test tests/*.test.ts spikes/phase0/*.test.mjs`: 1247개 / 1245 pass / 0 fail / 2 Windows-only skip, exit 0 (`/tmp/orbit-quality-final-tests.log`). 이후 최종 소규모 보완은 영향 검사 60/60 및 27/27 pass, exit 0으로 재검증했다. `tsc --noEmit`, `node scripts/build.mjs`, `git diff --check` exit 0. 임시 Chrome 프로필 모의 화면 간편→고급→증거 펼침→간편 복귀 exit 0. 실제 제품 세션 전체 브라우저 E2E·실모델은 수행하지 않았다.
+- **남은 실제 제한:** Codex source/review의 실제 모델을 현재 native 프로토콜 관측으로 입증하지 못하므로 production 교차 검증은 호출 전 차단된다. 이는 사용자 승인만으로 해소되는 테스트 대기와 다르다. 추후 실제 모델 관측 수단을 입증하기 전 성공 표시 금지. 현재 native 품질 검토는 제한 크기 안의 텍스트 스냅샷 대상이며 바이너리/큰 결과물은 unsupported로 차단한다. 범용 비전/승인 범위는 축소하지 않았다.
+- **다음 행동:** 최종 로컬 변경 검토 후, 실모델 사용은 사용자 별도 승인 시에만 진행. 먼저 실제 모델 ID가 관측되는 Claude 텍스트 작업에서 검증·수정·재검증/중단을 확인한다. Codex는 실제 모델 증거 지원을 먼저 확인해야 한다. 종료 미확인 실행은 저장된 관측 없이 잠금 해제하지 않는다. 로컬 커밋은 이번 사용자 요청으로 승인되었으며 Push는 여전히 별도 승인 대기.
+
+### Quality Loop 단계별 변경·검증 기록
+
+| 단계 | 주요 파일 | 검증·실제 결과 | 미검증/제한 |
+|---|---|---|---|
+| 정책 보강 | `shared/quality-loop.ts`, `server/quality-loop.ts`, `tests/quality-loop.test.ts` | 기존 9개 유지 + unknown/중단 사유/필수 회귀 실패→수정 검사, 12/12 통과 | 호출 횟수는 토큰·비용 상한 아님 |
+| native 증거·수정 경로 | `server/runtimes/model-identity.ts`, `server/runtimes/claude-code.ts`, `server/claude-task-service.ts`, `server/codex-review.ts`, 관련 기존 tests/fixture | 실제 assistant model/session 메타데이터만 관측; 모델 혼재/누락·quota+success·nonzero exit·수정 기준 보존 테스트 통과 | 실제 CLI 호출 0; Claude textOnly 옵션은 공식 CLI 문서 확인, 실동작 미검증 |
+| 영속·복구 | `shared/quality-loop-record.ts`, `server/quality-loop-service.ts`, `tests/quality-loop-service.test.ts` | 13/13 통과: DB 재개·중복 방지·late result·close abort·재진입·관측된 종료와 unknown 구분 | 원실행 종료/결과 증거 없는 경우 격리 유지 |
+| 실행기·기존 검사 통합 | `server/quality-loop-native.ts`, `server/runtimes/claude-review.ts`, `server/controller.ts`, `tests/quality-loop-native.test.ts`, `tests/quality-loop-controller.test.ts` | native 10/10; controller 코드/비코드 통합 2/2; 보호 검사 변경 stale; 600자·다중공백·줄바꿈·24개 원문 조건 전달; snapshot 영수증 유실 안전 실패 복구 | Codex actual model 관측 미지원, 바이너리 snapshot 미지원 |
+| HTTP·진행판 | `server/http.ts`, `server/project-progress.ts`, `shared/project-progress.ts`, `web/project-progress.tsx`, `tests/quality-loop-http.test.ts`, `tests/project-progress-ui.test.ts`, `tests/quality-loop.browser.mjs` | 인증/CSRF·프로젝트 범위·GET 부작용 없음; 실제 Store→진행판 기록 대조; UI 8/8; 임시 Chrome 모드/증거 동작 통과 | 실제 모델을 쓰는 전체 앱 브라우저 E2E 미실행 |
+
+HTTP 경로: `GET /api/projects/:projectId/quality-loops`, `POST .../preview`, `POST .../start`, `POST .../:loopId/resume`. preview body는 `sourceRunId, reviewers[{id,providerId,modelId}], limits{maxRepairs,maxCalls,timeoutMs}`; start는 여기에 `requestId, expectedPreviewDigest, confirmed:true`를 더한다. 모델 증거나 기준은 브라우저가 지정할 수 없다. 모든 POST는 기존 session/Origin/CSRF 정책을 사용한다. resume은 빈 body이며 원래 관측을 조회할 뿐 재호출 권한을 뜻하지 않는다.
+
+검증 과정의 실패도 보존한다. 기본 Node25 대신 설치된 fnm Node24를 사용했고 pnpm은 없었다(npm 프로젝트). 초기 HTTP는 sandbox loopback EPERM, Chrome은 SIGABRT로 실행 전 실패했으나 승인된 sandbox 밖 로컬 테스트로 통과했다. 신규 UI prop 전달 오타로 기존 UI 테스트 4개 실패 후 코드 수정으로 전부 통과했다. 첫 전체 검사는 1239/1237 pass/0 fail/2 skip이었다. 이후 코드 통합 테스트의 3초 deadline이 병렬 부하 약5.5초에서 초과해 1개 실패했고, 기능 테스트 대기를 30초로 조정했다(정책 timeout 단언은 유지). 수정 후 최종 전체 1247/1245 pass/0 fail/2 skip. 독립 리뷰의 완료조건 잘림·종료 writer 영수증 유실 문제는 수정·재검증했다. 최종 추가 검토에서 승인된 600자 조건도 기존 리뷰 파서의 고정 400자 제한 때문에 거절됨을 재현했다. 파서 상한을 승인 원문 최대 길이에 맞추되 원문 exact-match 검증은 유지했고 관련 27개 검사가 통과했다. Claude Run 생성 전 실행파일/입력 거절도 no-dispatch 증거가 있을 때만 실패 종료로 풀도록 보강했으며 영향 검사 60개가 통과했다. 이 마지막 서버 보완 뒤 전체 스위트를 불필요하게 반복하지 않고 관련 검사를 재실행했다.
+
+## 이전 재개 요약 (2026-10-28 · 담당 Codex · Q1 부분 구현)
+
+- 현재 우선 작업은 사용자 요청 **멀티모델 독립 교차 검증과 자동 품질 개선 루프**. 기존 UI1 기록은 아래 보존한다. 기준 원문: `ORBIT-VISION.md`, `ORBIT-SCOPE-2026-10-27.md`, `ORBIT-IMPLEMENTATION-PLAN-2026-10-27.md`, `ORBIT-COLLABORATION.md`.
+- 실제 관측: 브랜치 `codex/orbit-mac-handoff-2026-10-26`, HEAD `bbc2736`. worktree는 현재 루트 하나뿐이며 아래 과거 Mac 기록과 다름. 초기 미추적 `.DS_Store`, `docs/.DS_Store` 보존, 커밋 안 함. 기본 Node 25.8.2 대신 설치된 fnm Node 24.22.1 사용.
+- 구현: `shared/quality-loop.ts` 계약, `server/quality-loop.ts` 내부 정책 모듈, `tests/quality-loop.test.ts`. 승인 기준/결과물 digest 고정, 다른 canonical model 및 새 세션 요구, 평가 기준 전수 확인, 의견별 문제·근거 보존, 실패 전달→수정→전체 기준 회귀, 회차·호출·시간 한도. 검토 회차 종료 전 의견 비공개. 프로세스 중단 미확인은 별도 이유로 반환.
+- **미완료:** 이 모듈은 HTTP/Controller/native 실행기/DB/진행판에 연결되지 않았다. `passed`는 주어진 모의/신뢰 포트의 AI 의견 합의이며 Verification 통과나 사용자 승인 아님. canonical model 식별은 아직 서버 연결부의 전제이며 문자열 입력 자체로 입증되지 않는다. 호출 횟수는 토큰·비용 한도가 아니다.
+- 구조 차이: 기존 Review는 Codex Diff 전용, Verification/Workflow는 승인된 로컬 명령 중심. Claude review 프롬프트·파서는 기존 것을 재사용할 수 있으나 Codex review 결과에 실제 model ID가 없어 독립 모델 증거 확장이 선행되어야 한다. 새 프로세스 실행 엔진은 추가하지 않았다.
+- 검증: Node24 기존 Git 추적 테스트 1205개 / 1203 pass / 0 fail / 2 skip, exit 0 (`/tmp/orbit-baseline-tests.log`). sandbox 첫 실행은 loopback EPERM 실패, 승인받은 sandbox 밖 재실행 결과다. 새 quality-loop 모의 테스트 9/9 exit 0. `npm run typecheck`, `npm run build` exit 0. 병렬 작성 도중 verify 한 번은 아직 없는 계약 파일 때문에 타입 검사 실패했고, 작성 후 재검증했다.
+- UI 검토: `4e52d99` 테스트 diff에서 페이지 14→15는 results 추가, 메뉴 개수는 pages.length와 대조하며 모든 URL·현재 페이지·순서 검증 유지. 이번 브라우저 실검증은 하지 않았다. 기존 UI의 미연결 표시는 유지한다.
+- 실제 모델 호출 0회. 민감정보 없는 일회용 샘플을 기존 구독으로 전송하는 승인 질문은 답변 대기. 미확인 과거 Codex 크레딧 상태는 재확인하지 않았으며 현재 차단으로 단정하지 않는다.
+- 다음 순서: (1) 기존 native runner의 실제 모델·새 세션 증거 및 신뢰 Registry 매핑 (2) 기존 승인/개인정보/작업 잠금 아래 Controller 연결, SQLite 이벤트·중복 방지·중단 복구 (3) 결과물 스냅샷과 기준 hash 검증 및 수정 모델 연결 (4) 진행판 모델별 결과·회차·대기 사유 표시 (5) 승인된 실제 코드/비코드 샘플 실패→수정→독립 재검증. 사용자 데이터, MCP 격리, 기존 CheckRecord 검증을 약화하지 않는다.
+
+## 이전 재개 요약 (2026-10-28 16:55 KST, 담당 Claude Code)
+
 
 **기준 문서(원문을 직접 읽을 것, 이 요약은 기준이 아님)**
 - 최상위 비전: `docs/ORBIT-VISION.md` (상태: 사용자 확정, 기준일 2026-10-28). 원문 §1: “Orbit은 누구나 자연어로 목표를 입력하면 다양한 AI 모델·에이전트·Skills·MCP·외부 도구를 활용해 기획, 실행, 협업, 검증, 결과물 생성까지 수행하고, 프로젝트 방향성과 진행 상태를 일관되게 관리하는 범용 AI 작업 자동화 플랫폼이다.”

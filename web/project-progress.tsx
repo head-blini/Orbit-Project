@@ -1,3 +1,5 @@
+import type {QualityLoopRecord} from '../shared/quality-loop-record.ts';
+import {getUiMode,subscribeUiMode} from './ui-mode.ts';
 import {useEffect,useRef,useState} from 'react';
 import type {ConnectionFreshness,ProgressTask,ProjectProgress,TaskStage,ProgressVerification} from '../shared/project-progress.ts';
 import type {HandoffPackage} from '../shared/handoff.ts';
@@ -40,11 +42,12 @@ function TaskButtons({task,actions}:{task:ProgressTask;actions:TaskActions}){
   </div>;
 }
 
-function TaskRow({task,actions}:{task:ProgressTask;actions?:TaskActions}){
+function TaskRow({task,actions,advanced}:{task:ProgressTask;actions?:TaskActions;advanced:boolean}){
   return <details className="progress-task">
     <summary>
       <span className="progress-task-title">{task.title}</span>
       <span className={'progress-stage tone-'+stageTone[task.stage]}>{stageLabels[task.stage]}</span>
+      {task.qualityLoops?.[0]&&<span className="progress-stage">{qualityLabel(task.qualityLoops[0])}</span>}
       <span className="progress-meta">담당 {runtime(task.assignee)} · 마지막 관측 {task.lastObservedAt?time(task.lastObservedAt):'없음'}</span>
     </summary>
     <dl className="progress-facts">
@@ -55,6 +58,7 @@ function TaskRow({task,actions}:{task:ProgressTask;actions?:TaskActions}){
       {task.requirementLabels.length>0&&<div><dt>요구사항</dt><dd>{task.requirementLabels.join(', ')}</dd></div>}
     </dl>
     {nextActions[task.stage]&&<p className="progress-next">{nextActions[task.stage]}</p>}
+    {task.qualityLoops?.map(loop=><QualityLoopStatus key={loop.id} loop={loop} advanced={advanced}/>)}
     {actions&&<TaskButtons task={task} actions={actions}/>}
     {task.runs.length>0?<table className="progress-runs"><caption>실행 기록 {task.runsTotal}개{task.runsTotal>task.runs.length?` 중 최근 ${task.runs.length}개`:''}</caption>
       <thead><tr><th>실행</th><th>담당</th><th>실행 상태</th><th>최근 도구</th><th>검증</th><th>마지막 관측</th></tr></thead>
@@ -67,6 +71,8 @@ function TaskRow({task,actions}:{task:ProgressTask;actions?:TaskActions}){
 export function ProjectProgressView({progress,freshness,lastEventAt,actions,compact}:{progress:ProjectProgress;freshness:ConnectionFreshness;lastEventAt:string|null;actions?:TaskActions;
   /** The project screen shows its own summary; compact keeps only the task list. */compact?:boolean}){
   const {totals,criteria}=progress;
+  const [mode,setMode]=useState(getUiMode);
+  useEffect(()=>subscribeUiMode(()=>setMode(getUiMode())),[]);
   return <div className="project-progress">
     {!compact&&<section className="surface progress-summary" aria-label="프로젝트 진행 요약">
       <div className="section-heading"><div>
@@ -86,7 +92,7 @@ export function ProjectProgressView({progress,freshness,lastEventAt,actions,comp
     </section>}
     <section className="surface" aria-label="작업별 진행">
       {!compact&&<div className="section-heading"><div><h2>작업</h2><p>작업을 펼치면 실행 기록과 검증 결과를 볼 수 있습니다.</p></div></div>}
-      {progress.tasks.length?progress.tasks.map(task=><TaskRow key={task.id} task={task} actions={actions}/>):<p className="progress-empty">승인된 기획에서 만든 작업이 아직 없습니다.</p>}
+      {progress.tasks.length?progress.tasks.map(task=><TaskRow key={task.id} task={task} actions={actions} advanced={mode==='advanced'}/>):<p className="progress-empty">승인된 기획에서 만든 작업이 아직 없습니다.</p>}
     </section>
   </div>;
 }
@@ -161,4 +167,28 @@ export function ProjectProgressPanel({projectId,projectKind,online,lastSeq,lastE
     {projectKind==='code'&&!compact&&<p className="progress-note">코드 프로젝트 작업은 시작하기·에이전트 센터에서 검증 기준을 확인한 뒤 실행합니다.</p>}
     {progress?<ProjectProgressView progress={progress} freshness={freshness} lastEventAt={lastEventAt} actions={actions} compact={compact}/>:!error&&<section className="surface"><p>진행 기록을 불러오는 중입니다.</p></section>}
   </>;
+}
+
+export function qualityLabel(loop:QualityLoopRecord){const state=loop.result.status,issue=loop.result.issue??'';return loop.recoveryRequired?'실행 확인 필요':/QUOTA|RATE_LIMIT/.test(issue)?'사용량 한도 대기':/PERMISSION|APPROVAL_DENIED/.test(issue)?'권한 확인 필요':/MODEL.*UNKNOWN|MODEL.*UNSUPPORTED|MODEL_MISMATCH/.test(issue)?'모델 확인 필요':state==='reviewing'?(loop.result.repairs?'재검증 중':'품질 검증 중'):state==='repairing'?'수정 중':state==='passed'?'AI 검토 일치':state==='limit_reached'?'품질 검증 한도 도달':state==='failed'?'품질 검증 실패':'품질 검증 대기';}
+export function QualityLoopStatus({loop,advanced}:{loop:QualityLoopRecord;advanced:boolean}){
+  const label=qualityLabel(loop);
+  const issues=loop.result.rounds.at(-1)?.failures??[];
+  const repair=loop.steps.filter(step=>step.kind==='repair').at(-1)?.evidence;
+  const identity=(e:QualityLoopRecord['producer'])=>`${e.providerId} / ${e.modelId??'unknown'}`;
+  return <section aria-label="품질 검증" className="progress-quality">
+    <p role="status"><strong>{label}</strong> · {loop.result.rounds.length}회차 · 문제 {issues.length}개</p>
+    <p>실행자 {identity(loop.producer)} · 검증자 {loop.reviewers.map(r=>`${r.providerId} / ${r.modelId} (선택)`).join(', ')}{repair?` · 수정자 ${identity(repair)}`:''}</p>
+    {loop.result.issue&&<p role="alert">{loop.result.issue}</p>}
+    <p>필수 검사: {loop.verification.status==='passed'?'통과':loop.verification.status==='failed'?'실패':'미확인'} · 사용자 승인과 별개입니다.</p>
+    {advanced&&<details><summary>품질 검증 상세 증거</summary>
+      <p>기준 {loop.version.id} · {loop.baseline.digest}</p>
+      <p>실행 세션 {loop.producer.sessionId??'unknown'} · Orbit 실행 ID {loop.producer.runId??'unknown'} · 네이티브 실행 ID {loop.producer.executionId??'unknown'}</p>
+      <ul>{issues.map((f,i)=><li key={i}>{f.criterion??'발견 문제'}: {f.evidence}</li>)}</ul>
+      {loop.steps.map(step=><div key={step.id}><strong>{step.kind==='repair'?'수정자':step.kind==='review'?'검증자':'필수 검사'} · {step.state}</strong>
+        {step.evidence&&<p>{identity(step.evidence)} · 세션 {step.evidence.sessionId??'unknown'} · Orbit 실행 {step.evidence.runId??'unknown'} · 네이티브 실행 {step.evidence.executionId??'unknown'} · 근거 {step.evidence.source}</p>}
+        {step.issue&&<p>{step.issue}</p>}
+      </div>)}
+      <pre>{JSON.stringify({rounds:loop.result.rounds,verification:loop.verification},null,2)}</pre>
+    </details>}
+  </section>;
 }

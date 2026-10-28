@@ -35,12 +35,18 @@ import {staticAppPreviewCapability} from './app-preview-policy.ts';
 import {listDeliverables,previewDeliverable} from './deliverables.ts';
 import {addMaterials,listMaterials} from './materials.ts';
 import {ClaudeTaskService,type ClaudeTaskServiceOptions} from './claude-task-service.ts';
+import {QualityLoopService} from './quality-loop-service.ts';
+import {createQualityNativePorts,qualityRunEvidence,qualityVerifyGeneral,type QualityNativeOptions} from './quality-loop-native.ts';
+import type {QualityServicePorts,QualityStepContext,QualityVerificationResult} from '../shared/quality-loop-record.ts';
 export { AppError } from './errors.ts';
 export class Controller {
   store:Store;workspace:string;private factory:(workspace:string,write:boolean)=>RpcPort;private rpc:RpcPort|null=null;
   private projects?:Projects;private workspaceId?:string;private switching=false;
   private provider:ProviderStatus='disconnected';private issue:string|null=null;private connecting:Promise<void>|null=null;
   private generation=0;private output=new Map<string,string>();private deadline:NodeJS.Timeout|null=null;private launchValidated=false;
+  readonly qualityLoops:QualityLoopService;
+  private qualityScope=false;
+  private qualityPorts:QualityServicePorts;
   readonly verification:VerificationService;
   readonly sourceGraphs:SourceGraphService;
   readonly modelHub:ModelHubService;
@@ -58,8 +64,11 @@ export class Controller {
   private claudeTasks:ClaudeTaskService;
   private readonly ownerIncarnation=randomUUID();
   private soloRecoveryRequired(){return this.soloLost||this.store.runs().some(run=>run.runtime!=='claude-code'&&run.execution==='lost');}
-  assertExecutionAvailable(){if(this.soloRecoveryRequired())throw new AppError('SOLO_RECOVERY_REQUIRED',409);}
-  constructor(store:Store,workspace:string,factory:(workspace:string,write:boolean)=>RpcPort,projects?:Projects,verificationConfig:VerificationConfiguration[]=[],modelHubConfig:readonly ModelHubConfiguration[]=[],claudeOptions:ClaudeTaskServiceOptions={},claudePlanningOptions:ClaudePlanningOptions={}){
+  private qualityBusy(){return !this.qualityScope&&!!this.qualityLoops&&(this.qualityLoops.active||this.qualityLoops.records().some(record=>record.recoveryRequired));}
+  private qualityAvailable(){if(!this.qualityScope)this.qualityLoops?.ensureAvailable();}
+  private ownQualityStep<T>(work:()=>T):T{const before=this.qualityScope;this.qualityScope=true;try{return work();}finally{this.qualityScope=before;}}
+  assertExecutionAvailable(){this.qualityAvailable();if(this.soloRecoveryRequired())throw new AppError('SOLO_RECOVERY_REQUIRED',409);}
+  constructor(store:Store,workspace:string,factory:(workspace:string,write:boolean)=>RpcPort,projects?:Projects,verificationConfig:VerificationConfiguration[]=[],modelHubConfig:readonly ModelHubConfiguration[]=[],claudeOptions:ClaudeTaskServiceOptions={},claudePlanningOptions:ClaudePlanningOptions={},qualityOptions:Pick<QualityNativeOptions,'findExecutable'|'claudeFactory'|'codexReview'>={}){
     this.store=store;this.workspace=workspace;this.factory=factory;this.projects=projects;
     this.claudeTasks=new ClaudeTaskService(store,projects,claudeOptions);
     this.aiPreferences=new ProjectAiPreferencesService(store);
@@ -69,12 +78,16 @@ export class Controller {
     this.modelHub=new ModelHubService(store,modelHubConfig,undefined,undefined,()=>this.assertExecutionAvailable());
     this.verificationSetup=new VerificationSetupService(store,projects,verificationConfig);
     const commandResolver=(path:string)=>this.verificationSetup.commands(path);
-    this.verification=new VerificationService(store,projects,commandResolver,()=>this.soloRecoveryRequired()||!!this.extensionPending||!!this.active()||!!this.connecting||this.switching||this.modelHub.active||!!this.workflows?.active||!!this.reviews?.active||!!this.planningSuggestions?.active);
+    this.verification=new VerificationService(store,projects,commandResolver,()=>this.qualityBusy()||this.soloRecoveryRequired()||!!this.extensionPending||!!this.active()||!!this.connecting||this.switching||this.modelHub.active||!!this.workflows?.active||!!this.reviews?.active||!!this.planningSuggestions?.active);
     this.sourceGraphs=new SourceGraphService(store,projects);
-    this.merges=new MergeService(store,projects,this.verification,()=>this.soloRecoveryRequired()||!!this.extensionPending||!!this.active()||!!this.connecting||this.switching||this.modelHub.active||!!this.workflows?.active||!!this.reviews?.active||!!this.planningSuggestions?.active);
-    this.workflows=new WorkflowService(store,projects,commandResolver,()=>this.soloRecoveryRequired()||!!this.extensionPending||!!this.active()||!!this.connecting||this.switching||this.modelHub.active||this.verification.active||this.merges.active||!!this.reviews?.active||!!this.planningSuggestions?.active,id=>{this.merges.ensureAvailable(id);this.verification.ensureAvailable(id);this.planningSuggestions.ensureAvailable(id);this.reviews.ensureAvailable(id);});
-    this.reviews=new ReviewService(store,projects,factory,()=>this.soloRecoveryRequired()||!!this.extensionPending||!!this.active()||!!this.connecting||this.switching||this.modelHub.active||this.verification.active||this.merges.active||this.workflows.active||!!this.planningSuggestions?.active,id=>{this.planningSuggestions.ensureAvailable(id);this.merges.ensureAvailable(id);this.verification.ensureAvailable(id);this.workflows.ensureAvailable(id);});
-    this.planningSuggestions=new PlanningAgentService(store,projects,factory,projectId=>this.soloRecoveryRequired()||store.runs().some(run=>run.runtime==='claude-code'&&(!terminal(run.execution)||run.execution==='lost'&&run.projectId===projectId))||!!this.extensionPending||!!this.active()||!!this.connecting||this.switching||this.modelHub.active||this.verification.active||this.merges.active||this.workflows.active||this.reviews.active,id=>{this.merges.ensureAvailable(id);this.verification.ensureAvailable(id);this.workflows.ensureAvailable(id);this.reviews.ensureAvailable(id);},undefined,claudePlanningOptions);
+    this.merges=new MergeService(store,projects,this.verification,()=>this.qualityBusy()||this.soloRecoveryRequired()||!!this.extensionPending||!!this.active()||!!this.connecting||this.switching||this.modelHub.active||!!this.workflows?.active||!!this.reviews?.active||!!this.planningSuggestions?.active);
+    this.workflows=new WorkflowService(store,projects,commandResolver,()=>this.qualityBusy()||this.soloRecoveryRequired()||!!this.extensionPending||!!this.active()||!!this.connecting||this.switching||this.modelHub.active||this.verification.active||this.merges.active||!!this.reviews?.active||!!this.planningSuggestions?.active,id=>{this.merges.ensureAvailable(id);this.verification.ensureAvailable(id);this.planningSuggestions.ensureAvailable(id);this.reviews.ensureAvailable(id);});
+    this.reviews=new ReviewService(store,projects,factory,()=>this.qualityBusy()||this.soloRecoveryRequired()||!!this.extensionPending||!!this.active()||!!this.connecting||this.switching||this.modelHub.active||this.verification.active||this.merges.active||this.workflows.active||!!this.planningSuggestions?.active,id=>{this.planningSuggestions.ensureAvailable(id);this.merges.ensureAvailable(id);this.verification.ensureAvailable(id);this.workflows.ensureAvailable(id);});
+    this.planningSuggestions=new PlanningAgentService(store,projects,factory,projectId=>this.qualityBusy()||this.soloRecoveryRequired()||store.runs().some(run=>run.runtime==='claude-code'&&(!terminal(run.execution)||run.execution==='lost'&&run.projectId===projectId))||!!this.extensionPending||!!this.active()||!!this.connecting||this.switching||this.modelHub.active||this.verification.active||this.merges.active||this.workflows.active||this.reviews.active,id=>{this.merges.ensureAvailable(id);this.verification.ensureAvailable(id);this.workflows.ensureAvailable(id);this.reviews.ensureAvailable(id);},undefined,claudePlanningOptions);
+    const unavailable=()=>{throw new AppError('QUALITY_PROJECT_REQUIRED',409);};
+    this.qualityPorts=projects?createQualityNativePorts({store,projects,factory,...qualityOptions,guard:run=>this.guardQuality(run),repair:async(request,context)=>{try{const result=await this.repairQuality(request,context);this.saveQualityReceipt(context,{result,evidence:result.evidence});return result;}catch(error){if(context.sourceRun.runtime==='claude-code'&&!store.findRequest(context.stepId)){const failureIssue=error instanceof Error&&/^[A-Z][A-Z0-9_]{1,100}$/.test(error.message)?error.message:'QUALITY_REPAIR_NOT_STARTED';this.saveQualityReceipt(context,{failureIssue,processStopped:true});}throw error;}},verify:async context=>{const result=await this.verifyQuality(context);this.saveQualityReceipt(context,{result,evidence:null});return result;},recover:(step,context)=>this.recoverQuality(step,context)}):{guard:unavailable,snapshot:unavailable,review:unavailable,repair:unavailable,verify:unavailable};
+    store.db.exec('CREATE TABLE IF NOT EXISTS quality_controller_receipts(id TEXT PRIMARY KEY,body TEXT NOT NULL)');
+    this.qualityLoops=new QualityLoopService(store,this.qualityPorts);
   }
   snapshot():Snapshot{return {soloRecoveryRequired:this.soloRecoveryRequired(),provider:this.provider,issue:this.issue,threadId:this.thread(),workspace:basename(this.workspace),readOnly:!this.workspaceId,runs:this.store.runs().filter(r=>r.workspaceId===this.workspaceId),lastSeq:this.store.lastSeq(),connections:providerConnections,externalApiEnabled:this.modelHub.externalEnabled,modelHubConfigured:this.modelHub.configured,modelHubBusy:this.modelHub.active,extensionBusy:!!this.extensionPending,verificationBusy:this.verification.active,mergeBusy:this.merges.active,workflowBusy:this.workflows.active,reviewBusy:this.reviews.active,planningBusy:this.planningSuggestions.active,...(this.projects?{projectCreationAvailable:this.projects.creationAvailable,selectedWorkspaceId:this.workspaceId??null,projects:this.projects.list(),workspaces:this.projects.workspaces()}:{})};}
   private thread(){return this.store.getThread(this.workspaceId);}
@@ -142,7 +155,7 @@ export class Controller {
   extensionSnapshot():ExtensionInventory {
     return structuredClone(this.provider==='ready'&&this.extensionCache?.workspaceId===(this.workspaceId??null)?this.extensionCache:unknownExtensions(this.workspaceId??null));
   }
-  private extensionIdle(){if(this.extensionPending)throw new AppError('EXTENSION_QUERY_ACTIVE',409);}
+  private extensionIdle(){this.qualityAvailable();if(this.extensionPending)throw new AppError('EXTENSION_QUERY_ACTIVE',409);}
   private clearExtensions(){
     const pending=this.extensionPending;this.extensionCache=null;this.knownMcpNames=null;this.extensionPending=null;
     if(pending)this.store.append('extensions.updated',null,{workspaceId:this.workspaceId??null,busy:false});
@@ -298,6 +311,98 @@ export class Controller {
     return this.verification.acceptance.preview(projectId,workspaceId,taskId);
   }
   claudeQuota(){return this.claudeTasks.quota();}
+  private saveQualityReceipt(context:QualityStepContext,value:NonNullable<Awaited<ReturnType<NonNullable<QualityServicePorts['recover']>>>>){
+    this.store.db.prepare('INSERT INTO quality_controller_receipts VALUES(?,?)').run(context.stepId,JSON.stringify({loopId:context.loopId,sourceRunId:context.sourceRun.id,baselineDigest:context.version.contentHash,artifactDigest:context.artifact.digest,value}));
+  }
+  private async recoverQuality(step:Parameters<NonNullable<QualityServicePorts['recover']>>[0],context:QualityStepContext){
+    const row=this.store.db.prepare('SELECT body FROM quality_controller_receipts WHERE id=?').get(step.id);
+    if(row){
+      const saved=JSON.parse(String(row.body));
+      if(saved.loopId!==context.loopId||saved.sourceRunId!==context.sourceRun.id||saved.baselineDigest!==context.version.contentHash||saved.artifactDigest!==context.artifact.digest)throw new AppError('QUALITY_RECEIPT_MISMATCH',409);
+      return saved.value;
+    }
+    if(step.kind==='repair'){
+      const prior=this.store.findRequest(step.id)?.run;
+      if(!prior||!['completed','failed','interrupted'].includes(prior.execution))return null;
+      const source=context.sourceRun;
+      const linked=this.store.db.prepare("SELECT data FROM events WHERE run_id=? AND kind='run.repair_source' ORDER BY seq DESC LIMIT 1").get(prior.id);
+      if(prior.taskId!==source.taskId||prior.projectId!==source.projectId||prior.workspaceId!==source.workspaceId||prior.planningVersionId!==source.planningVersionId||prior.planningContentHash!==source.planningContentHash||!linked||JSON.parse(String(linked.data)).sourceRunId!==source.id)throw new AppError('QUALITY_RECEIPT_MISMATCH',409);
+      if(prior.runtime!=='claude-code'){
+        const native=this.store.soloOperation(prior.id);
+        if(native.record?.execution!==prior.execution||native.record.nativeTurnId!==prior.turnId||!native.connection||native.connection.journalState!=='closed')return null;
+      }
+      return {failureIssue:prior.execution==='completed'?'QUALITY_ARTIFACT_SNAPSHOT_MISSING':'QUALITY_REPAIR_FAILED',processStopped:true as const};
+    }
+    // An unreceipted completed writer has no durable artifact snapshot; never infer it from today's files.
+    return null;
+  }
+  private guardQuality(run:Run){
+    this.ownQualityStep(()=>this.idle());
+    if(this.store.runs().some(item=>item.runtime==='claude-code'&&(!terminal(item.execution)||item.execution==='lost')))throw new AppError('SOLO_RECOVERY_REQUIRED',409);
+    if(run.workspaceId&&run.workspaceId!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);
+  }
+  private waitQualityRun(id:string,signal:AbortSignal):Promise<Run>{
+    return new Promise((resolve,reject)=>{
+      let timer:NodeJS.Timeout|undefined,settled=false;
+      const cleanup=()=>{settled=true;this.store.removeListener('event',observe);signal.removeEventListener('abort',abort);if(timer)clearTimeout(timer);};
+      const observe=()=>{const run=this.store.getRun(id);if(run&&terminal(run.execution)){cleanup();resolve(run);}};
+      const abort=()=>{
+        if(settled||timer)return;
+        void this.interrupt(id).catch(()=>{});
+        timer=setTimeout(()=>{cleanup();reject(new AppError('QUALITY_PROCESS_STOP_UNCONFIRMED',409));},6000);
+      };
+      this.store.on('event',observe);signal.addEventListener('abort',abort,{once:true});observe();if(signal.aborted)abort();
+    });
+  }
+  private async repairQuality(request:Parameters<QualityServicePorts['repair']>[0],context:QualityStepContext){
+    this.guardQuality(context.sourceRun);
+    const current=this.qualityPorts.snapshot(context.sourceRun);
+    if(current.artifact.digest!==request.artifact.digest)throw new AppError('QUALITY_ARTIFACT_CHANGED',409);
+    if(request.signal.aborted)throw new AppError('QUALITY_PROCESS_STOP_UNCONFIRMED',409);
+    const prompt=JSON.stringify({baseline:request.baseline,failures:request.failures});
+    let run:Run;
+    if(context.sourceRun.runtime==='claude-code'){
+      run=this.ownQualityStep(()=>this.claudeTasks.repair(context.sourceRun.id,context.stepId,prompt));
+    }else{
+      const source=context.sourceRun,projectId=context.task.projectId,workspaceId=source.workspaceId!;
+      const brief=new Studio(this.store).execution(projectId,context.task.id);
+      if(brief.planningVersionId!==source.planningVersionId||brief.planningContentHash!==source.planningContentHash)throw new AppError('QUALITY_BASELINE_CHANGED',409);
+      const acceptance=this.verification.acceptance.status(workspaceId,source.id);
+      if(acceptance.state!=='current'||!acceptance.baseline)throw new AppError('ACCEPTANCE_BASELINE_CHANGED',409);
+      // Native review-model attribution is unknown today; never spend another call under an unproven repair identity.
+      if(qualityRunEvidence(this.store,source).source!=='native_observed')throw new AppError('QUALITY_REPAIR_MODEL_UNKNOWN',409);
+      const rpc=this.rpc;this.rpc=null;++this.generation;if(rpc)await rpc.close();this.telemetry.disconnect();this.status('disconnected');
+      this.store.setThread('',workspaceId);
+      await this.ownQualityStep(()=>this.connect());
+      if(request.signal.aborted)throw new AppError('QUALITY_PROCESS_STOP_UNCONFIRMED',409);
+      const repairPrompt=brief.prompt+'\n실패 항목만 수정하고 승인 기준과 통과 항목을 보존하세요.\n'+prompt;
+      run=await this.ownQualityStep(()=>this.start({requestId:context.stepId,workspaceId,prompt:repairPrompt},{taskId:source.taskId,planningVersionId:source.planningVersionId,planningContentHash:source.planningContentHash,requirementLabels:source.requirementLabels},acceptance.baseline!));
+      this.store.append('run.repair_source',run.id,{sourceRunId:source.id});
+    }
+    const completed=await this.waitQualityRun(run.id,request.signal);
+    if(completed.execution!=='completed')throw new AppError(completed.execution==='lost'?'QUALITY_PROCESS_STOP_UNCONFIRMED':'QUALITY_REPAIR_FAILED',409);
+    return {artifact:this.qualityPorts.snapshot(completed).artifact,evidence:qualityRunEvidence(this.store,completed)};
+  }
+  private async verifyQuality(context:QualityStepContext):Promise<QualityVerificationResult>{
+    this.guardQuality(context.sourceRun);
+    if(!context.sourceRun.workspaceId)return qualityVerifyGeneral(this.store,this.projects!,context);
+    const workspaceId=context.sourceRun.workspaceId,runId=context.sourceRun.id;
+    const initial=this.verification.view(workspaceId,runId),checkIds:string[]=[];
+    if(!initial.commands.length)return {status:'unknown',checkIds,issue:'VERIFICATION_COMMAND_NOT_FOUND'};
+    for(const command of initial.commands){
+      if(context.signal.aborted)throw new AppError('QUALITY_PROCESS_STOP_UNCONFIRMED',409);
+      const view=this.verification.view(workspaceId,runId);
+      if(!view.sourceDigest||view.sourceDigest!==context.artifact.digest)throw new AppError('QUALITY_ARTIFACT_CHANGED',409);
+      const check=this.ownQualityStep(()=>this.verification.start({requestId:context.stepId+'-'+command.id,runId,workspaceId,commandId:command.id,expectedSourceDigest:view.sourceDigest!,expectedConfigDigest:command.configDigest}));
+      const abort=()=>this.verification.interrupt(workspaceId,check.id);
+      context.signal.addEventListener('abort',abort,{once:true});
+      try{await this.verification.settle();}finally{context.signal.removeEventListener('abort',abort);}
+      checkIds.push(check.id);
+    }
+    const view=this.verification.view(workspaceId,runId),passed=checkIds.every(id=>view.checks.some(check=>check.id===id&&check.execution==='completed'&&check.verdict==='passed'&&check.finishedDigest===context.artifact.digest));
+    const failures=view.checks.filter(check=>checkIds.includes(check.id)&&check.verdict!=='passed').map(check=>({reviewerId:'verification',criterion:null,status:'not_met' as const,evidence:`${check.commandId}: ${check.verdict} (${check.id})`}));
+    return {status:passed?'passed':'failed',checkIds,issue:passed?null:'QUALITY_REGRESSION_FAILED',failures};
+  }
   /** Read-only view of a general project's server-owned folder. */
   deliverables(projectId:string){
     if(!this.projects)throw new AppError('PROJECT_CREATION_UNAVAILABLE',409);
@@ -307,6 +412,7 @@ export class Controller {
   /** User materials of a general project (inputs/). Adding never overwrites. */
   materials(projectId:string){if(!this.projects)throw new AppError('PROJECT_CREATION_UNAVAILABLE',409);return listMaterials(this.projects.generalProject(projectId).path);}
   addMaterials(projectId:string,input:unknown){
+    this.qualityAvailable();
     if(!this.projects)throw new AppError('PROJECT_CREATION_UNAVAILABLE',409);
     // AI runtimes read this folder; do not change it under an active run of this project.
     if(this.store.runs().some(run=>run.projectId===projectId&&!terminal(run.execution)))throw new AppError('RUN_ACTIVE',409);
@@ -315,6 +421,7 @@ export class Controller {
   }
   deliverablePreview(projectId:string,path:string){if(!this.projects)throw new AppError('PROJECT_CREATION_UNAVAILABLE',409);return previewDeliverable(this.projects.generalProject(projectId).path,path);}
   async submitTask(projectId:string,taskId:string,input:{requestId:string;workspaceId?:string;expectedAcceptanceDigest?:string}):Promise<Run>{
+    this.qualityAvailable();
     if(this.store.projects().some(project=>project.id===projectId&&project.kind==='general')&&!Object.hasOwn(input,'workspaceId')){
       if(Object.keys(input).length!==1||!Object.hasOwn(input,'requestId'))throw new AppError('INVALID_FIELDS',400);
       this.planningSuggestions.ensureAvailable(projectId);
@@ -427,5 +534,5 @@ export class Controller {
     // Closing the connection is best effort, never evidence permitting a new dispatch.
     try{if(rpc)await rpc.close();}catch{/* The generation remains fenced and recovery stays required. */}
   }
-  async close(){await this.claudeTasks.close();await this.planningSuggestions.close();await this.reviews.close();await this.workflows.close();await this.modelHub.close();await this.verification.close();this.loseActive();this.telemetry.disconnect();const rpc=this.rpc;this.rpc=null;++this.generation;if(rpc)await rpc.close();this.provider='disconnected';this.launchValidated=false;this.clearExtensions();}
+  async close(){await this.qualityLoops.close();await this.claudeTasks.close();await this.planningSuggestions.close();await this.reviews.close();await this.workflows.close();await this.modelHub.close();await this.verification.close();this.loseActive();this.telemetry.disconnect();const rpc=this.rpc;this.rpc=null;++this.generation;if(rpc)await rpc.close();this.provider='disconnected';this.launchValidated=false;this.clearExtensions();}
 }

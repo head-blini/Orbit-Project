@@ -30,6 +30,9 @@ test('arguments isolate tools, MCP, settings and permission prompts for each mod
   assert.throws(()=>claudeArgs({mode:'read',resume:'--dangerously-skip-permissions'}),/INVALID_SESSION/);
   assert.ok(!read.includes('--model'));assert.equal(claudeArgs({mode:'read',model:'sonnet'}).at(-1),'sonnet');
   assert.throws(()=>claudeArgs({mode:'read',model:'-x'}),/INVALID_MODEL/);
+  const textOnly=claudeArgs({mode:'read',textOnly:true});
+  assert.equal(textOnly[textOnly.indexOf('--tools')+1],'');
+  assert.equal(textOnly[textOnly.indexOf('--mcp-config')+1],'{"mcpServers":{}}');
 });
 
 test('child environment never forwards API keys or tokens, so subscription auth is never switched to API billing',()=>{
@@ -45,7 +48,7 @@ test('findClaude resolves only a native executable on an absolute PATH entry',()
 test('stream events are projected without tool inputs, tool outputs or credentials',async()=>{
   const {outcome,events}=await run('ok');
   assert.equal(outcome.status,'completed');assert.equal(outcome.sessionId,'11111111-2222-4333-8444-555555555555');assert.equal(outcome.exit,'observed');
-  assert.deepEqual(events.map(e=>e.kind),['session','tool','quota','message','result']);
+  assert.deepEqual(events.map(e=>e.kind),['session','model','tool','quota','model','message','result']);
   const serialized=JSON.stringify(events)+JSON.stringify(outcome);
   assert.doesNotMatch(serialized,/never-store|secret\/path|sk-ant-abcdef/);
   assert.equal(events.find(e=>e.kind==='tool')!.kind==='tool'&&(events.find(e=>e.kind==='tool') as {name:string}).name,'Read');
@@ -65,6 +68,8 @@ test('a result with is_error is never success: login and quota failures are clas
   const auth=await run('auth');assert.equal(auth.outcome.status,'auth_required');
   const quota=await run('quota');assert.equal(quota.outcome.status,'quota_exhausted');
   assert.ok(quota.events.some(e=>e.kind==='quota'&&e.status==='rejected'));
+  assert.equal((await run('quota-success')).outcome.status,'quota_exhausted');
+  assert.equal((await run('nonzero-success')).outcome.status,'error');
 });
 
 test('a process that exits without a result event is unknown, not completed',async()=>{
@@ -96,4 +101,14 @@ test('an interrupt that is ignored stays unconfirmed until the kill deadline and
 test('a run cannot be started twice',async()=>{
   const r=new ClaudeCodeRun({executable:'/fake/claude',cwd:process.cwd(),mode:'read',spawn:fakeSpawn,env:{PATH:process.env.PATH}});
   const first=r.start('ok',()=>{});await assert.rejects(r.start('ok',()=>{}),/RUN_ALREADY_STARTED/);await first;
+});
+
+test('model evidence comes from matching native response metadata, never init or requested model',async()=>{
+  const {outcome}=await run('identity-observed',{model:'requested-alias'});
+  assert.deepEqual(outcome.identity,{providerId:'anthropic',modelId:'claude-observed-1',sessionId:outcome.sessionId,executionId:null,modelEvidence:'assistant_message'});
+  for(const scenario of ['missing','mixed','changed','foreign','invalid']){
+    const {outcome}=await run('identity-'+scenario,{model:'requested-alias'});
+    assert.equal(outcome.identity?.modelId,'unknown',scenario);
+    assert.equal(outcome.identity?.modelEvidence,'unknown',scenario);
+  }
 });

@@ -1,3 +1,4 @@
+import type {QualityLoopRecord} from '../shared/quality-loop-record.ts';
 import type {Store} from './store.ts';
 import type {Studio} from './studio.ts';
 import type {PlanningVersion,SavedTask} from '../shared/parallel.ts';
@@ -19,7 +20,12 @@ export class ProjectProgressService {
     // Code-project runs belong to a project workspace; general-project runs carry projectId directly.
     const runs=this.store.runs().filter(run=>run.workspaceId?workspaces.has(run.workspaceId):(run as typeof run&{projectId?:unknown}).projectId===projectId);
     const checks=this.checks().filter(check=>check.projectId===projectId&&workspaces.has(check.workspaceId));
-    return buildProjectProgress({projectId,tasks,runs,checks,plans,currentPlanIds,signals,activity:this.activity(new Set(runs.map(run=>run.id)))});
+    const progress=buildProjectProgress({projectId,tasks,runs,checks,plans,currentPlanIds,signals,activity:this.activity(new Set(runs.map(run=>run.id)))});
+    if(this.store.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='quality_loops'").get()){
+      const records=this.store.db.prepare('SELECT body FROM quality_loops WHERE project_id=? ORDER BY rowid DESC').all(projectId).map(row=>JSON.parse(String(row.body)) as QualityLoopRecord);
+      for(const task of progress.tasks)task.qualityLoops=records.filter(record=>record.taskId===task.id).slice(0,20);
+    }
+    return progress;
   }
   /** Latest event time per run plus the most recent tool name; other event payloads are never read out. */
   private activity(ids:ReadonlySet<string>){
