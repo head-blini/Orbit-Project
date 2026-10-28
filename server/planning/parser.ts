@@ -37,10 +37,11 @@ function normalizeJsonDocument(value: unknown, source: PlanningSource): Planning
   if (source !== 'manual' && source !== 'import') return fail('source', 'INVALID_SOURCE');
   if (!object(value)) return fail('document', 'INVALID_DOCUMENT');
   if (value.schema_version !== '1.0') return fail('schema_version', 'UNSUPPORTED_SCHEMA');
-  if (!exactKeys(value, ['schema_version', 'title', 'goal', 'requirements', 'constraints', 'open_questions', 'decisions', 'source'])) return fail('document', 'UNKNOWN_FIELD');
+  if (!exactKeys(value, ['schema_version', 'title', 'goal', 'requirements', 'constraints', 'open_questions', 'decisions', 'source', 'non_goals'])) return fail('document', 'UNKNOWN_FIELD');
   if (typeof value.title !== 'string' || typeof value.goal !== 'string') return fail('document', 'INVALID_TEXT_FIELDS');
   if (!Array.isArray(value.requirements)) return fail('requirements', 'INVALID_REQUIREMENTS');
   if (!strings(value.constraints) || !strings(value.open_questions)) return fail('document', 'INVALID_LIST');
+  if (value.non_goals !== undefined && !strings(value.non_goals)) return fail('non_goals', 'INVALID_LIST');
   const decisions:PlanningDecision[]=[];
   if (value.decisions !== undefined) {
     if (!Array.isArray(value.decisions) || value.decisions.length > 100) return fail('decisions', 'INVALID_DECISIONS');
@@ -62,6 +63,9 @@ function normalizeJsonDocument(value: unknown, source: PlanningSource): Planning
     constraints: value.constraints.map(text => text.trim()), openQuestions: value.open_questions.map(text => text.trim()), source };
   if (decisions.length) draft.decisions=decisions;
   if (provenance) draft.provenance=provenance;
+  const nonGoals=(value.non_goals as string[]|undefined)?.map(text=>text.trim()).filter(Boolean);
+  // Do not add even an empty key: historical content hashes bind exact JSON bytes.
+  if (nonGoals?.length) draft.nonGoals=nonGoals;
   return finish(draft);
 }
 
@@ -103,6 +107,8 @@ function normalizeProvenance(value:unknown):PlanningProvenance|undefined|false {
 }
 
 function finish(draft: PlanningDraft): PlanningParseResult {
+  // Markdown section order must not change the canonical optional key order.
+  if (draft.nonGoals?.length) { const nonGoals=draft.nonGoals;delete draft.nonGoals;draft.nonGoals=nonGoals; }
   const labels = new Set<string>();
   for (const [index, requirement] of draft.requirements.entries()) {
     if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(requirement.label)) return fail(`requirements.${index}.label`, 'INVALID_LABEL');
@@ -115,7 +121,8 @@ function finish(draft: PlanningDraft): PlanningParseResult {
 function parseMarkdown(text: string, source: PlanningSource): PlanningParseResult {
   const draft: PlanningDraft = { schemaVersion: '1.0', title: '', goal: '', requirements: [], constraints: [], openQuestions: [], source };
   const names: Record<string, string> = { goal: 'goal', '목표': 'goal', requirements: 'requirements', '요구사항': 'requirements', constraints: 'constraints', '제약': 'constraints',
-    'open questions': 'openQuestions', '질문': 'openQuestions', decisions:'decisions', '결정사항':'decisions', '결정 사항':'decisions', '결정':'decisions' };
+    'open questions': 'openQuestions', '질문': 'openQuestions', decisions:'decisions', '결정사항':'decisions', '결정 사항':'decisions', '결정':'decisions',
+    'non-goals':'nonGoals', 'non goals':'nonGoals', '하지 않을 것':'nonGoals' };
   let section = '', titleSeen = false, criteria = false;
   let requirement: PlanningDraft['requirements'][number] | undefined;
   let decision:PlanningDecision|undefined,decisionField:'decision'|'rationale'|undefined;
@@ -159,6 +166,7 @@ function parseMarkdown(text: string, source: PlanningSource): PlanningParseResul
       const bullet = /^[-*]\s+(.+)$/.exec(line);
       if (!bullet) return fail(field, 'EXPECTED_LIST_ITEM');
       if (section === 'constraints') draft.constraints.push(bullet[1]);
+      else if (section === 'nonGoals') (draft.nonGoals??=[]).push(bullet[1]);
       else if (section === 'openQuestions') draft.openQuestions.push(bullet[1]);
       else if (section === 'requirements' && requirement && criteria) requirement.acceptanceCriteria.push(bullet[1]);
       else return fail(field, 'UNEXPECTED_CONTENT');
@@ -191,6 +199,7 @@ function planningDocument(draft: PlanningDraft) {
   return { schema_version: '1.0', title: draft.title, goal: draft.goal,
     requirements: draft.requirements.map(requirement => ({ id: requirement.label, description: requirement.description, acceptance_criteria: requirement.acceptanceCriteria })),
     constraints: draft.constraints, open_questions: draft.openQuestions, decisions: draft.decisions??[],
+    ...(draft.nonGoals?.length?{non_goals:draft.nonGoals}:{}),
     source: provenance?{kind:provenance.kind,provider_id:provenance.providerId,external_url:provenance.externalUrl,
       ...(provenance.author!==undefined?{author:provenance.author}:{}),...(provenance.references!==undefined?{references:provenance.references}:{})}:
       { kind: draft.source === 'manual' ? 'in_app_manual' : 'file', provider_id: null, external_url: null } };

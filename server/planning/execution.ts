@@ -4,7 +4,7 @@ import type { PlanningVersion, SavedTask } from '../../shared/parallel.ts';
 import { AppError } from '../errors.ts';
 import { approvalIssues, normalizeStoredPlanningDraft } from './parser.ts';
 
-export interface ExecutionBrief {prompt:string;planningVersionId:string;requirementLabels:string[]}
+export interface ExecutionBrief {prompt:string;planningVersionId:string;planningContentHash:string;requirementLabels:string[]}
 export const MAX_EXECUTION_PROMPT_CHARS=4000;
 const validId=(value:unknown):value is string=>typeof value==='string'&&/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value);
 
@@ -39,7 +39,8 @@ export function buildExecutionBrief(task:SavedTask,version:PlanningVersion):Exec
   const prompt='Implement the saved task below within the selected isolated workspace. Follow every plan constraint. Report verification honestly; an agent response is not a passed check.\n'+JSON.stringify({
     taskId:task.id,planningVersionId:version.id,contentHash:version.contentHash,title:version.draft.title,
     goal:version.draft.goal,requirements,constraints:version.draft.constraints,decisions:version.draft.decisions??[],
+    ...(version.draft.nonGoals?.length?{nonGoals:version.draft.nonGoals}:{}),
   },null,2);
   if(prompt.length>MAX_EXECUTION_PROMPT_CHARS)throw new AppError('EXECUTION_BRIEF_TOO_LARGE',422);
-  return {prompt,planningVersionId:version.id,requirementLabels:[...task.requirementLabels]};
+  return {prompt,planningVersionId:version.id,planningContentHash:version.contentHash,requirementLabels:[...task.requirementLabels]};
 }

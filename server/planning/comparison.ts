@@ -8,7 +8,7 @@ import { normalizeStoredPlanningDraft } from './parser.ts';
 
 const validId=(value:unknown):value is string=>typeof value==='string'&&/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value);
 
-function validateVersion(version:PlanningVersion):void {
+export function validatePlanningVersion(version:PlanningVersion):void {
   if(!version||!validId(version.id)||!validId(version.projectId)||!Number.isSafeInteger(version.revision)||version.revision<1
     ||!['draft','approved','superseded'].includes(version.state))throw new AppError('PLANNING_VERSION_INVALID',409);
   try{
@@ -27,7 +27,7 @@ const identity=({id,revision,contentHash,state}:PlanningVersion):PlanningVersion
  * A comparison never grants execution authority or alters a saved task.
  */
 export function comparePlanningVersions(base:PlanningVersion,target:PlanningVersion,tasks:SavedTask[]):PlanningComparisonData {
-  validateVersion(base);validateVersion(target);
+  validatePlanningVersion(base);validatePlanningVersion(target);
   if(base.projectId!==target.projectId||!validId(base.lineageId)||!validId(target.lineageId)||base.lineageId!==target.lineageId
     ||base.id===target.id||base.revision>=target.revision)throw new AppError('PLANNING_COMPARISON_SCOPE_INVALID',409);
 
@@ -35,6 +35,8 @@ export function comparePlanningVersions(base:PlanningVersion,target:PlanningVers
   for(const field of ['title','goal','constraints','openQuestions','source'] as const){
     if(!isDeepStrictEqual(base.draft[field],target.draft[field]))fields.push({field,before:base.draft[field],after:target.draft[field]});
   }
+  const beforeNonGoals=base.draft.nonGoals??[],afterNonGoals=target.draft.nonGoals??[];
+  const nonGoalsChange=isDeepStrictEqual(beforeNonGoals,afterNonGoals)?undefined:{before:beforeNonGoals,after:afterNonGoals};
   // Render structured metadata as escaped text; attribution is never an action.
   for(const field of ['decisions','provenance'] as const){
     const before=base.draft[field]??null,after=target.draft[field]??null;
@@ -57,7 +59,7 @@ export function comparePlanningVersions(base:PlanningVersion,target:PlanningVers
 
   const changedLabels=new Set(requirements.filter(requirement=>requirement.status==='changed').map(requirement=>requirement.label));
   const removedLabels=new Set(requirements.filter(requirement=>requirement.status==='removed').map(requirement=>requirement.label));
-  const contextChanged=fields.some(change=>change.field==='goal'||change.field==='constraints'||change.field==='openQuestions'||change.field==='decisions');
+  const contextChanged=nonGoalsChange!==undefined||fields.some(change=>change.field==='goal'||change.field==='constraints'||change.field==='openQuestions'||change.field==='decisions');
   const affectedTasks:PlanningTaskImpact[]=[];
   for(const task of tasks){
     if(task.projectId!==base.projectId||task.planningVersionId!==base.id)continue;
@@ -67,5 +69,5 @@ export function comparePlanningVersions(base:PlanningVersion,target:PlanningVers
     if(contextChanged)reasons.push('plan_context_changed');
     if(reasons.length)affectedTasks.push({taskId:task.id,planningVersionId:task.planningVersionId,requirementLabels:task.requirementLabels,reasons});
   }
-  return structuredClone({projectId:base.projectId,base:identity(base),target:identity(target),fields,requirements,affectedTasks});
+  return structuredClone({projectId:base.projectId,base:identity(base),target:identity(target),fields,requirements,affectedTasks,...(nonGoalsChange?{nonGoalsChange}:{})});
 }

@@ -17,6 +17,7 @@ export interface PlanningTaskImpact {
 export interface PlanningComparisonData {
   projectId:string;base:PlanningVersionIdentity;target:PlanningVersionIdentity;
   fields:PlanningFieldChange[];requirements:PlanningRequirementChange[];affectedTasks:PlanningTaskImpact[];
+  nonGoalsChange?:{before:string[];after:string[]};
 }
 export interface PlanningComparison extends PlanningComparisonData {
   targetCurrent:boolean;canReplan:boolean;previewDigest:string;

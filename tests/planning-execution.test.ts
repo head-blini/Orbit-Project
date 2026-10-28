@@ -19,6 +19,7 @@ function fixture(): {task:SavedTask; version:PlanningVersion} {
 test('execution brief preserves the selected requirement, acceptance criteria, goal and every plan constraint',()=>{
   const {task,version}=fixture();const before=structuredClone({task,version});
   const brief=buildExecutionBrief(task,version);
+  assert.equal(brief.planningContentHash,version.contentHash);
   for(const text of ['상품을 검색한다','검색 결과를 표시한다','검색어와 일치한 상품만 표시된다','공개 API를 유지한다','네트워크를 사용하지 않는다'])assert.ok(brief.prompt.includes(text),text);
   assert.equal(brief.prompt.includes('이름순으로 정렬된다'),false);
   assert.equal(brief.planningVersionId,'plan-1');assert.deepEqual(brief.requirementLabels,['REQ-01']);
@@ -62,11 +63,13 @@ test('an approved plan with unresolved questions cannot be executed',()=>{
 
 test('approved decisions remain in the execution brief while user attribution is excluded',()=>{
   const {task,version}=fixture();Object.assign(version.draft,{decisions:[{topic:'storage',decision:'Use SQLite',rationale:'local-first'}]});
+  version.draft.nonGoals=['No paid services'];
   version.contentHash=createHash('sha256').update(JSON.stringify(version.draft)).digest('hex');
   version.draft.provenance={kind:'external_web',providerId:'synthetic-provider',externalUrl:'https://example.invalid/private-attribution',author:'Attribution-only author'};
   version.contentHash=createHash('sha256').update(JSON.stringify(version.draft)).digest('hex');
   const brief=buildExecutionBrief(task,version);
   assert.match(brief.prompt,/Use SQLite/);assert.match(brief.prompt,/local-first/);
+  assert.match(brief.prompt,/No paid services/);
   assert.doesNotMatch(brief.prompt,/synthetic-provider|private-attribution|Attribution-only author/);
   version.draft.decisions![0].decision='Altered after approval';
   assert.throws(()=>buildExecutionBrief(task,version),/^Error: PLANNING_VERSION_INVALID$/);

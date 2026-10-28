@@ -10,6 +10,7 @@ export interface PlanningDraft {
   requirements:{label:string;description:string;acceptanceCriteria:string[]}[];
   constraints:string[]; openQuestions:string[]; source:PlanningSource;
   decisions?:PlanningDecision[]; provenance?:PlanningProvenance;
+  nonGoals?:string[];
 }
 export type PlanningParseResult = {ok:true;draft:PlanningDraft} | {ok:false;issues:{field:string;code:string}[]};
 export interface PlanningVersion {
