@@ -51,7 +51,7 @@ test('dedicated Studio pages render only their editor, preserve safe preview and
       const nav=renderToStaticMarkup(createElement(Navigation,{page:page.id,open:false,onNavigate:()=>{},onClose:()=>{}}));
       assert.equal((nav.match(/aria-current="page"/g)??[]).length,1);
       assert.match(nav,new RegExp(`href="#/${page.id}"[^>]*aria-current="page"`));
-      assert.equal((nav.match(/class="nav-item /g)??[]).length,13);
+      assert.equal((nav.match(/class="nav-item /g)??[]).length,14);
       assert.ok(nav.indexOf('title="Automation"')<nav.indexOf('aria-label="관리 메뉴"'));
       assert.ok(nav.indexOf('aria-label="관리 메뉴"')<nav.indexOf('title="Model Providers"'));
     }

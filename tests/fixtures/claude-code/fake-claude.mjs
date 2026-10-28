@@ -15,5 +15,5 @@ if(scenario==='auth'){init();assistant([{type:'text',text:'Not logged in · Plea
 if(scenario==='quota'){init();quota('rejected');assistant([{type:'text',text:'limit reached'}],{error:'rate_limit',is_api_error_message:true});result({is_error:true,terminal_reason:'api_error',result:'limit'});exit(1);}
 if(scenario==='noresult'){init();assistant([{type:'text',text:'partial'}]);exit(0);}
 if(scenario==='garbage'){stdout.write('not json\n');init();stdout.write('{"type":"unknown_future_event","x":1}\n');result({result:'fine'});exit(0);}
-if(scenario==='hang'){init();assistant([{type:'text',text:'working'}]);process.on('SIGINT',()=>{exit(130);});setInterval(()=>{},1000);}
-if(scenario==='ignore-sigint'){init();process.on('SIGINT',()=>{});setInterval(()=>{},1000);}
+if(scenario==='hang'){process.on('SIGINT',()=>{exit(130);});init();assistant([{type:'text',text:'working'}]);setInterval(()=>{},1000);}
+if(scenario==='ignore-sigint'){process.on('SIGINT',()=>{});init();setInterval(()=>{},1000);}

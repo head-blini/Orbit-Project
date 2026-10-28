@@ -14,6 +14,8 @@ import {controlPlaneStatus} from './control-plane.ts';
 import {GoalService} from './goal-service.ts';
 import {AppPreviewHost} from './app-preview.ts';
 import {assertGitProject} from './projects.ts';
+import {ProjectProgressService} from './project-progress.ts';
+import {quotaSignal} from '../shared/project-progress.ts';
 
 function json(res:ServerResponse,status:number,value:unknown){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(value));}
 async function body(req:IncomingMessage,limit=18000):Promise<Record<string,unknown>>{
@@ -25,6 +27,7 @@ async function body(req:IncomingMessage,limit=18000):Promise<Record<string,unkno
 export function createHttpServer(controller:Controller,assets:string,options:{nativeProbe?:ReturnType<typeof createNativeProbeService>}={}){
   const studio=new Studio(controller.store);
   const goals=new GoalService(controller.store);
+  const progress=new ProjectProgressService(controller.store,studio);
   const planningHandoff=new PlanningHandoffService(controller.store,(workspaceId,runId)=>controller.verification.view(workspaceId,runId),id=>controller.workspaceDiff(id));
   const nativeProbe=options.nativeProbe??createNativeProbeService();
   const sessions=new Map<string,{csrf:string;expires:number}>();
@@ -266,6 +269,13 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
         }
         const match=url.pathname.match(/^\/api\/runs\/([a-f0-9-]{36})\/interrupt$/);
         if(match){if(Object.keys(data).length)throw new AppError('INVALID_FIELDS',400);await controller.interrupt(match[1]);json(res,200,controller.snapshot());return;}
+      }
+      const progressRoute=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/progress$/);
+      if(req.method==='GET'&&progressRoute){
+        // Read-only: signals come from the current snapshot and cached usage; nothing is refreshed or started.
+        if(url.search)throw new AppError('INVALID_FIELDS',400);
+        const state=controller.snapshot();
+        json(res,200,progress.read(progressRoute[1],{provider:state.provider,recoveryRequired:!!state.soloRecoveryRequired,quota:quotaSignal(controller.usageSnapshot())}));return;
       }
       if(req.method==='GET'&&goalRoute){
         if(url.search)throw new AppError('INVALID_FIELDS',400);
