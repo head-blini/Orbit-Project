@@ -42,7 +42,7 @@ HEAD `d39679e`: `npm ci` → `npm run typecheck` exit 0, `npm run build` exit 0,
 ## 발견한 문제
 
 - 재빌드 후 브라우저가 이전 `app.js`를 계속 사용해 새 화면이 보이지 않았다(쿼리 문자열로 우회). 정적 자산 캐시 헤더/파일명 해시 검토 필요.
-- 기본 병렬 `npm test`에서 무거운 HTTP 통합 테스트가 간헐적으로 `fetch failed / ECONNRESET`(merge-http, verification-setup-http). 동시 4에서는 재현 안 됨. 원인 미확정.
+- 전체 스위트에서 무거운 HTTP 통합 테스트(merge-http, verification-setup-http)가 실행마다 0~2건 `fetch failed / ECONNRESET`으로 실패한다(기본 병렬과 동시 4 모두). 단독 실행은 항상 통과하고, 두 파일만 12회 병렬로 돌린 부하 재현 시도에서는 0회였다. 가설: 테스트와 서버가 같은 프로세스이며 동기 Git 작업이 이벤트 루프를 막는 동안 서버 keep-alive 만료(기본 5초)와 클라이언트 연결 재사용이 겹친다. **미확정·미수정**. 테스트를 우회 수정하지 않았다. 다음: 실패 시 소켓 재사용 여부 로깅, `keepAliveTimeout` 조정 효과를 전체 스위트 조건에서 비교.
 
 - Codex sandbox(`workspace-write`)에서는 loopback listen이 막혀 HTTP 테스트를 실행하지 못한다. Codex 작업은 항상 sandbox 밖(Node 24)에서 Claude가 전체 재검증한 뒤 통합한다. Codex sandbox는 Node 26으로 실행됐다.
 - 상단 표시줄의 "연결 안 됨"은 Codex 연결 상태만 뜻한다. Claude 실행 중에도 그대로라 혼동될 수 있다(실행기별 상태 표시 필요).
