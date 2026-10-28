@@ -1,3 +1,4 @@
+import {QualityProgressCollector,type QualityProgressReaders} from './quality-progress.ts';
 import {readCapabilityExecution} from './capability-execution.ts';
 import type {CapabilityRouteDecision} from '../shared/capability-routing.ts';
 import type {QualityLoopRecord} from '../shared/quality-loop-record.ts';
@@ -10,8 +11,8 @@ import {AppError} from './errors.ts';
 
 /** Read-only collector for the project progress board. It only reads recorded state. */
 export class ProjectProgressService {
-  private store:Store;private studio:Studio;
-  constructor(store:Store,studio:Studio){this.store=store;this.studio=studio;}
+  private store:Store;private studio:Studio;private qualityReaders:QualityProgressReaders;
+  constructor(store:Store,studio:Studio,qualityReaders:QualityProgressReaders={}){this.store=store;this.studio=studio;this.qualityReaders=qualityReaders;}
   read(projectId:string,signals:ProgressSignals):ProjectProgress{
     if(!this.store.projects().some(project=>project.id===projectId))throw new AppError('PROJECT_NOT_FOUND',404);
     const plans=this.studio.read(projectId,'plans') as PlanningVersion[],tasks=this.studio.read(projectId,'tasks') as SavedTask[];
@@ -40,6 +41,13 @@ export class ProjectProgressService {
       });
     }
     for(const task of progress.tasks)for(const run of task.runs)run.modelAttribution=this.store.getCodexModelAttribution(run.id);
+    const quality=new QualityProgressCollector(this.store,this.qualityReaders);
+    for(const task of progress.tasks){
+      const saved=tasks.find(t=>t.id===task.id)!;
+      const plan=plans.find(p=>p.id===saved.planningVersionId);
+      for(const run of task.runs)run.quality=quality.read(projectId,saved,runs.find(r=>r.id===run.id),plan,task.planCurrent);
+      task.quality=task.runs.find(r=>r.id===task.latestRunId)?.quality??quality.read(projectId,saved,undefined,plan,task.planCurrent);
+    }
     return progress;
   }
   /** Latest event time per run plus the most recent tool name; other event payloads are never read out. */

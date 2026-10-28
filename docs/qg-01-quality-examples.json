@@ -1,0 +1,199 @@
+{
+  "fixtureOnly": true,
+  "formatOnly": {
+    "tasks": [
+      {
+        "id": "task-1",
+        "latestRunId": "run-1",
+        "quality": {
+          "execution": {
+            "status": "completed",
+            "evidenceIds": [],
+            "blockers": [
+              "EXECUTION_PROVENANCE_UNKNOWN",
+              "EXECUTION_OBSERVATION_UNAVAILABLE"
+            ],
+            "nextAction": null,
+            "evidenceSource": "unknown"
+          },
+          "format": {
+            "status": "passed",
+            "evidenceIds": [
+              "format-check-1"
+            ],
+            "blockers": [],
+            "nextAction": null
+          },
+          "codeVerification": {
+            "status": "not_run",
+            "evidenceIds": [],
+            "blockers": [],
+            "nextAction": "verify_code"
+          },
+          "semantic": {
+            "status": "not_run",
+            "evidenceIds": [],
+            "blockers": [
+              "QUALITY_EVIDENCE_MISSING"
+            ],
+            "nextAction": "run_quality_review"
+          },
+          "independentReview": {
+            "status": "not_run",
+            "evidenceIds": [],
+            "blockers": [
+              "QUALITY_EVIDENCE_MISSING"
+            ],
+            "nextAction": "run_independent_review"
+          },
+          "repair": {
+            "status": "not_run",
+            "evidenceIds": [],
+            "blockers": [],
+            "nextAction": null
+          },
+          "revalidation": {
+            "status": "not_run",
+            "evidenceIds": [],
+            "blockers": [],
+            "nextAction": null
+          },
+          "userApproval": {
+            "status": "not_run",
+            "evidenceIds": [],
+            "blockers": [
+              "QUALITY_APPROVAL_MISSING"
+            ],
+            "nextAction": "request_user_approval"
+          },
+          "evidence": [
+            {
+              "id": "format-check-1",
+              "kind": "artifact_check",
+              "evidenceSource": "local",
+              "freshness": "current",
+              "recordedStatus": "passed",
+              "blockers": [],
+              "binding": {
+                "projectId": "project-1",
+                "taskId": "task-1",
+                "runId": "run-1",
+                "planningVersionId": "plan-1",
+                "planningContentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "acceptanceDigest": null,
+                "artifactId": "project-1",
+                "artifactDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+              },
+              "files": [
+                {
+                  "path": "report.md",
+                  "digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "changedArtifact": {
+    "tasks": [
+      {
+        "id": "task-1",
+        "latestRunId": "run-1",
+        "quality": {
+          "execution": {
+            "status": "completed",
+            "evidenceIds": [],
+            "blockers": [
+              "EXECUTION_PROVENANCE_UNKNOWN",
+              "EXECUTION_OBSERVATION_UNAVAILABLE"
+            ],
+            "nextAction": null,
+            "evidenceSource": "unknown"
+          },
+          "format": {
+            "status": "stale",
+            "evidenceIds": [
+              "format-check-1"
+            ],
+            "blockers": [
+              "QUALITY_ARTIFACT_CHANGED"
+            ],
+            "nextAction": "verify_artifacts"
+          },
+          "codeVerification": {
+            "status": "not_run",
+            "evidenceIds": [],
+            "blockers": [],
+            "nextAction": "verify_code"
+          },
+          "semantic": {
+            "status": "not_run",
+            "evidenceIds": [],
+            "blockers": [
+              "QUALITY_EVIDENCE_MISSING"
+            ],
+            "nextAction": "run_quality_review"
+          },
+          "independentReview": {
+            "status": "not_run",
+            "evidenceIds": [],
+            "blockers": [
+              "QUALITY_EVIDENCE_MISSING"
+            ],
+            "nextAction": "run_independent_review"
+          },
+          "repair": {
+            "status": "not_run",
+            "evidenceIds": [],
+            "blockers": [],
+            "nextAction": null
+          },
+          "revalidation": {
+            "status": "not_run",
+            "evidenceIds": [],
+            "blockers": [],
+            "nextAction": null
+          },
+          "userApproval": {
+            "status": "not_run",
+            "evidenceIds": [],
+            "blockers": [
+              "QUALITY_APPROVAL_MISSING"
+            ],
+            "nextAction": "request_user_approval"
+          },
+          "evidence": [
+            {
+              "id": "format-check-1",
+              "kind": "artifact_check",
+              "evidenceSource": "local",
+              "freshness": "stale",
+              "recordedStatus": "passed",
+              "blockers": [
+                "QUALITY_ARTIFACT_CHANGED"
+              ],
+              "binding": {
+                "projectId": "project-1",
+                "taskId": "task-1",
+                "runId": "run-1",
+                "planningVersionId": "plan-1",
+                "planningContentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "acceptanceDigest": null,
+                "artifactId": "project-1",
+                "artifactDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+              },
+              "files": [
+                {
+                  "path": "report.md",
+                  "digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  }
+}
