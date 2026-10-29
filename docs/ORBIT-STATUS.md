@@ -1,3 +1,10 @@
+# 우선순위 변경 — ChatGPT 웹 연동 보류 (2026-10-29 · Claude Code 오케스트레이터)
+
+- 사용자 결정: ChatGPT 웹 연동(F04 웹 부분·A06)은 1차 실사용에서 **deferred**(삭제 아님). 1차 완료 기준은 A06 제외, 전체 제품 완료 기준은 A06 포함. [결정 문서](ORBIT-DECISION-2026-10-29-GPT-DEFERRED.md).
+- GPT-G1/G2/G3 브랜치 보존·통합 큐 제외. dev 동작 변화 없음.
+- 진행: Claude Code+Codex 중심 Parallel-First — CQG 완성, 실제 병렬 E2E, 첫 실사용 흐름, Registry, Usage, Skills/MCP/Plugins, Harness Evolution. 정책 유지: Adaptive Model Routing, CQG, 단일 통합 큐 자동 적용, 권한·보안. Push·main 병합·배포·신규 유료 API 금지.
+- 운영 상태·Worker pool: `.local/orchestrator/BACKLOG-DAG.md` (gitignored).
+
 # USAGE 재개 상태 (2026-10-29 · Claude Code 오케스트레이터)
 
 - HEAD `25ca69b`. 설계 [ORBIT-USAGE-D1](ORBIT-USAGE-D1.md) `b5eb9c3`(보수적 기본값). U1 계약·정규화 `0b6fe1e`(Codex), U2 관측·저장 `66476f8`(Codex), U3 HTTP·진행 신호 `764e88f`, U4 화면 `25ca69b`(Claude).
