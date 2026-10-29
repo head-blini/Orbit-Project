@@ -15,6 +15,7 @@ for(const source of ['native','mock','unknown'] as const)test(`real controller l
     assert.deepEqual(enabled.config.mcp_servers,{fixture:{enabled:true},other:{enabled:false}});
     assert.equal(enabled.sandbox,'workspace-write');assert.equal(enabled.config.sandbox_workspace_write.network_access,false);assert.equal(enabled.approvalPolicy,'on-request');
     const run=f.store.runs()[0],rows=readRecordedToolInvocations(f.store,run);
+    assert.equal(run.projectId,f.selection.projectId);assert.equal(run.taskId,f.selection.taskId);assert.equal(run.runtime,'codex');
     assert.equal(rows.length,1);assert.equal(toolInvocationVerified(rows[0],rows[0].grant),source==='native');
     assert.equal(f.rpc.closed,true);
     assert.ok(!JSON.stringify(f.store.eventsAfter(0)).includes('never stored'));

@@ -12,8 +12,7 @@
  * fail WORKER_INPUTS_CHANGED (CQG-6B-CTL); general candidate semantic evidence is required
  * (GENERAL-ACCEPT-B); refreshed execution approval is required after PLAN_CHANGED;
  * code material/download APIs require GENERAL_PROJECT_REQUIRED;
- * code runs lack projectId required by the integration source reader, so even the
- * native-shaped identity fixture cannot auto-apply (INTEGRATION_COMPLETION_EVIDENCE_REQUIRED).
+ * code candidates reach CQG but source artifactDigest binding still mismatches.
  * General integrated versions have no producing run/task, so P6 omits their references.
  * No-upload general continuations are separate scenarios, not a passed material journey.
  * Local command categories are a synthetic host policy, not production lint/build/E2E proof.
@@ -142,7 +141,7 @@ for(const nativeFixture of [false,true])test(`P8 code: real local checks and dev
   const f=await productFixture('code',nativeFixture);try{
     const protectedHead=trustedGit(f.project.path,['rev-parse','main']).toString().trim(),devBefore=trustedGit(f.project.path,['rev-parse','dev']).toString().trim();
     const flow=await planAndSubmit(f,1),running=await views(f,flow),space=running.workers.spaces[0];
-    assert.equal(running.workers.reservations.length,1);assert.equal(f.codex.reduce((n,r)=>n+r.starts,0),1,JSON.stringify(running.workers));
+    assert.equal(running.workers.reservations.length,1);assert.equal(f.codex.reduce((n,r)=>n+r.starts,0),1,JSON.stringify({workers:running.workers,dispatchErrors:f.dispatchErrors}));
     writeFileSync(join(space.path,'result.txt'),'Evidence: 42\n');
     let checkId='',checkError:unknown;
     // Start the ordinary trusted Controller verification on terminal observation, before
@@ -168,10 +167,30 @@ for(const nativeFixture of [false,true])test(`P8 code: real local checks and dev
     t.diagnostic('code observed reasons: '+JSON.stringify({queue:item.reason,completion:task.completion!.reasonCodes}));
     assert.equal(task.completion!.verifiedDone,nativeFixture);
     if(!nativeFixture)for(const code of ['CQG_AI_NATIVE_REQUIRED','CQG_EXECUTION_NOT_OBSERVED_COMPLETE','CQG_MODEL_OBSERVATION_REQUIRED','EXECUTION_MOCK'])assert.ok(task.completion!.reasonCodes.includes(code),code);
-    // Current Controller.readIntegrationSource requires run.projectId, while the code
-    // submitTask path stores ownership through workspaceId only. Do not retrofit that record.
-    assert.equal(f.store.getRun(task.latestRunId!)!.projectId,undefined);
-    assert.equal(item.status,'refused');assert.equal(item.reason,'INTEGRATION_COMPLETION_EVIDENCE_REQUIRED');
+    const run=f.store.getRun(task.latestRunId!)!;
+    assert.equal(run.projectId,f.project.id);assert.equal(run.taskId,flow.tasks[0].id);assert.equal(run.runtime,'codex');
+    if(nativeFixture)await t.test('code integration source finds the dispatch run and refuses other project/task/workspace ownership',()=>{
+      const read=()=>Reflect.get(f.controller,'readIntegrationSource').call(f.controller,item);
+      const before=f.store.db.prepare('SELECT total_changes() AS n').get()!.n;
+      assert.equal(read()?.binding.runId,run.id);
+      assert.equal(read()?.verifiedDone,true);
+      assert.equal(f.store.db.prepare('SELECT total_changes() AS n').get()!.n,before);
+      for(const patch of [{projectId:randomUUID()},{taskId:randomUUID()},{workspaceId:randomUUID()}]){
+        f.store.db.prepare('UPDATE runs SET body=? WHERE id=?').run(JSON.stringify({...run,...patch}),run.id);
+        assert.equal(read(),null);
+      }
+      f.store.db.prepare('UPDATE runs SET body=? WHERE id=?').run(JSON.stringify(run),run.id);
+      assert.equal(read()?.binding.runId,run.id);
+    });
+    assert.equal(item.status,'refused');
+    assert.equal(item.completion.verifiedDone,false);
+    assert.ok(item.completion.reasonCodes.includes('CQG_SOURCE_BINDING_MISMATCH:artifactDigest'));
+    assert.notEqual(item.manifest.sourceDigest,task.completion!.binding.artifactDigest);
+    if(nativeFixture)assert.equal(item.reason,'INTEGRATION_COMPLETION_REFUSED:CQG_SOURCE_BINDING_MISMATCH:artifactDigest');
+    else{
+      assert.match(item.reason,/^INTEGRATION_COMPLETION_REFUSED:/);
+      for(const code of ['CQG_SOURCE_NOT_VERIFIED_DONE','CQG_AI_NATIVE_REQUIRED','CQG_EXECUTION_NOT_OBSERVED_COMPLETE','CQG_MODEL_OBSERVATION_REQUIRED','EXECUTION_MOCK'])assert.ok(item.completion.reasonCodes.includes(code),code);
+    }
     assert.equal(trustedGit(f.project.path,['rev-parse','dev']).toString().trim(),devBefore);
     assert.equal(existsSync(join(f.project.path,'result.txt')),false);
     const goal=(await f.get(f.base+'/goals'))[0];assert.equal(goal.verifiedDone,nativeFixture);assert.deepEqual(goal.taskCompletions[0].completion,task.completion);

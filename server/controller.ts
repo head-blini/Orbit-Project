@@ -826,7 +826,7 @@ export class Controller {
       const head=brief.prompt+'\n실패 항목만 수정하고 승인 기준과 통과 항목을 보존하세요.\n',repairPrompt=head+prompt;
       // Same structure-aware identifier exemption as the Claude repair path; the bytes sent stay repairPrompt.
       const piiText=briefPiiInspectionText(head)+repairPiiInspectionText(prompt);
-      run=await this.ownQualityStep(()=>this.start({requestId:context.stepId,workspaceId,prompt:repairPrompt},{taskId:source.taskId,planningVersionId:source.planningVersionId,planningContentHash:source.planningContentHash,requirementLabels:source.requirementLabels},acceptance.baseline!,undefined,undefined,piiText));
+      run=await this.ownQualityStep(()=>this.start({requestId:context.stepId,workspaceId,prompt:repairPrompt},{projectId,taskId:brief.taskId,runtime:'codex',planningVersionId:source.planningVersionId,planningContentHash:source.planningContentHash,requirementLabels:source.requirementLabels},acceptance.baseline!,undefined,undefined,piiText));
       this.store.append('run.repair_source',run.id,{sourceRunId:source.id});
     }
     const completed=await this.waitQualityRun(run.id,request.signal);
@@ -926,7 +926,7 @@ export class Controller {
     const {prompt,...task}=new Studio(this.store).execution(projectId,taskId);
     const acceptance=this.taskVerificationPreview(projectId,taskId,workspace.id);
     if(acceptance?.digest!==input.expectedAcceptanceDigest)throw new AppError('ACCEPTANCE_PREVIEW_STALE',409);
-    return this.start({...input,prompt},task,acceptance??undefined,worker);
+    return this.start({...input,prompt},{...task,projectId,runtime:'codex'},acceptance??undefined,worker);
   }
   async submit(input:{requestId:string;prompt:string;workspaceId?:string|null}):Promise<Run>{return this.start(input);}
   private async start(input:{requestId:string;prompt:string;workspaceId?:string|null},task?:Pick<Run,'taskId'|'planningVersionId'|'planningContentHash'|'requirementLabels'|'projectId'|'runtime'>,acceptance?:TaskVerificationPreview,worker?:WorkerDispatchContext,tool?:{request:Readonly<ToolLaunchRequest>;serverName:string},piiText?:string):Promise<Run>{

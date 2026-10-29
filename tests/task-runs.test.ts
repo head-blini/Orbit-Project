@@ -66,6 +66,8 @@ test('stale_approval_rejected and task Run binds the approved hash before native
     };
     const requestId=randomUUID(),run=await f.controller.submitTask(f.project.id,task.id,{requestId,workspaceId:f.workspace.id});
     runId=run.id;hash=plan.contentHash;assert.equal(run.planningContentHash,hash);
+    assert.equal(run.projectId,f.project.id);assert.equal(run.taskId,task.id);assert.equal(run.runtime,'codex');
+    assert.equal(f.rpc.calls.find(c=>c.method==='turn/start')!.params.input[0].text,studio.execution(f.project.id,task.id).prompt);
     assert.equal((f.store.eventsAfter(0).find(e=>e.kind==='run.created')!.data.run as typeof run).planningContentHash,hash);
     f.store.updateRun(run.id,{execution:'completed'},'test.completed');
     const next=studio.mutate(f.project.id,'plans',plan.id,'revisions',{requestId:randomUUID(),expectedRevision:1,input}) as PlanningVersion;
@@ -78,12 +80,48 @@ test('stale_approval_rejected and task Run binds the approved hash before native
     const old=f.store.createRun(randomUUID(),'fixture','Old task run',f.workspace.id,{taskId:task.id,planningVersionId:plan.id,requirementLabels:task.requirementLabels});
     f.store.updateRun(old.id,{execution:'completed'},'test.completed');
     legacyBody=JSON.stringify(f.store.getRun(old.id));
+    assert.equal(old.projectId,undefined);assert.equal(old.runtime,undefined);
+    assert.deepEqual(await f.controller.submitTask(f.project.id,task.id,{requestId:old.requestId,workspaceId:f.workspace.id}),f.store.getRun(old.id));
+    await assert.rejects(f.controller.submitTask(f.project.id,task.id,{requestId:old.requestId,workspaceId:f.workspace.id,expectedAcceptanceDigest:'different'}),/IDEMPOTENCY_CONFLICT/);
+    await assert.rejects(f.controller.submitTask(f.project.id,'different-task',{requestId:old.requestId,workspaceId:f.workspace.id}),/IDEMPOTENCY_CONFLICT/);
+    assert.equal(f.rpc.calls.filter(c=>c.method==='turn/start').length,1);
   }finally{await f.controller.close();f.store.close();}
   const reopened=new Store(f.db);try{
     assert.equal(reopened.getRun(runId)?.planningContentHash,hash);
     assert.equal(Object.hasOwn(reopened.runs().at(-1)!,'planningContentHash'),false);
     assert.equal(JSON.stringify(reopened.runs().at(-1)),legacyBody);
   }finally{reopened.close();}
+});
+
+test('Codex quality repair binds project/task/runtime even when its legacy source lacks projectId',async()=>{
+  const f=await executionFixture(true),studio=new Studio(f.store);
+  try{
+    const draft=studio.mutate(f.project.id,'plans',undefined,undefined,{requestId:randomUUID(),input}) as PlanningVersion;
+    const version=studio.mutate(f.project.id,'plans',draft.id,'approve',{expectedRevision:1}) as PlanningVersion;
+    const [task]=studio.mutate(f.project.id,'plans',version.id,'task-drafts',{}) as SavedTask[];
+    const brief=studio.execution(f.project.id,task.id),acceptance=f.controller.taskVerificationPreview(f.project.id,task.id,f.workspace.id)!;
+    const {prompt,...binding}=brief;
+    const old=f.store.createRun(randomUUID(),'fixture',prompt,f.workspace.id,binding,undefined,acceptance);
+    const source=f.store.updateRun(old.id,{execution:'completed'},'run.completed');
+    // Legacy native-shaped identity fixture, not a live model observation.
+    f.store.append('run.identity',source.id,{providerId:'openai',modelId:'fixture-model',sessionId:'source-session',executionId:'source-turn',modelEvidence:'assistant_message'});
+    writeFileSync(join(f.workspace.path,'source.ts'),'export const original = false;\n');
+    const ports=Reflect.get(f.controller,'qualityPorts'),artifact=ports.snapshot(source).artifact;
+    const stepId=randomUUID(),signal=new AbortController().signal,baseline={id:version.id,digest:version.contentHash,criteria:task.acceptanceCriteria},failures:unknown[]=[];
+    const request=f.rpc.request.bind(f.rpc);
+    f.rpc.request=async(method,params)=>{
+      const response=await request(method,params);
+      if(method==='turn/start')setImmediate(()=>f.rpc.emit('notification',{method:'turn/completed',params:{threadId:f.rpc.thread,turn:{id:'task-turn',status:'completed'}}}));
+      return response;
+    };
+    await Reflect.get(f.controller,'repairQuality').call(f.controller,{baseline,failures,artifact,signal},{loopId:randomUUID(),stepId,signal,sourceRun:source,version,task,artifact});
+    const repair=f.store.findRequest(stepId)!.run;
+    assert.equal(repair.projectId,f.project.id);assert.equal(repair.taskId,task.id);assert.equal(repair.runtime,'codex');
+    assert.equal(repair.acceptanceDigest,acceptance.digest);
+    assert.equal(repair.execution,'completed');
+    assert.equal(f.rpc.calls.find(c=>c.method==='turn/start')!.params.input[0].text,prompt+'\n실패 항목만 수정하고 승인 기준과 통과 항목을 보존하세요.\n'+JSON.stringify({baseline,failures}));
+    assert.equal(f.store.getRun(source.id)!.projectId,undefined);
+  }finally{await f.controller.close();f.store.close();}
 });
 
 test('approved task executes its authoritative brief once and preserves the link across uncertain response and restart',async()=>{
