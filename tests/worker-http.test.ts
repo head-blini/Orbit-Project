@@ -242,7 +242,7 @@ test('F02-REG: replacing a material as a new version makes an approved batch sta
   f.controller.initializeWorkers(f.execution);const batch=f.controller.createWorkerBatch(f.project.id,f.inputBatch);
   const items=f.controller.replaceMaterial(f.project.id,{name:'evidence.txt',text:'revised evidence',expectedSha256:item.sha256});
   assert.equal(items[0].previousVersions,1);
-  assert.equal(String(f.controller.store.db.prepare('SELECT text FROM material_versions').get()!.text),'original evidence');
+  assert.equal(Buffer.from(f.controller.store.db.prepare('SELECT bytes FROM material_versions').get()!.bytes as Uint8Array).toString('utf8'),'original evidence');
   const view=await f.controller.submitWorkerBatch(f.project.id,batch.id,{requestId:randomUUID()});
   assert.equal(f.runners.length,0);assert.ok(view.reasons.length&&view.reasons.every(r=>r.code==='WORKER_INPUTS_CHANGED'));
  }finally{await f.close();}
