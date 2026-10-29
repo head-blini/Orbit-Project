@@ -3,7 +3,7 @@ import { resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Store } from './store.ts';
 import { createWorkspace, assertWorkspace } from './workspace.ts';
-import { Controller } from './controller.ts';
+import { Controller,readWorkerConfiguration } from './controller.ts';
 import { codexFactory } from './codex.ts';
 import { createHttpServer } from './http.ts';
 import { acquireInstance } from './instance.ts';
@@ -26,9 +26,10 @@ const projects=new Projects(store,join(dataDir,'workspaces'),allowed,join(dataDi
 const verificationConfig=readVerificationConfiguration(process.env.ORBIT_VERIFICATION_COMMANDS);
 const modelHubConfig=readModelHubConfiguration(process.env.ORBIT_MODEL_HUB);
 const controller=new Controller(store,workspace,(path,write)=>codexFactory(path,write)(),projects,verificationConfig,modelHubConfig);
-const server=createHttpServer(controller,resolve('dist'));
+const workers=readWorkerConfiguration(process.env.ORBIT_INTEGRATION_BRANCH,process.env.ORBIT_INTEGRATION_PROJECTS);
+const server=createHttpServer(controller,resolve('dist'),{workers});
 let stopping=false;
-async function stop(){if(stopping)return;stopping=true;server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));await controller.close();store.close();release();}
-server.on('error',()=>{console.error('Local server could not bind. Check AICC_PORT and whether another instance is running.');void controller.close().finally(()=>{store.close();release();process.exitCode=1;});});
+async function stop(){if(stopping)return;stopping=true;server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));await controller.stopWorkers();await controller.close();store.close();release();}
+server.on('error',()=>{console.error('Local server could not bind. Check AICC_PORT and whether another instance is running.');void controller.stopWorkers().then(()=>controller.close()).finally(()=>{store.close();release();process.exitCode=1;});});
 process.on('SIGINT',()=>{void stop();});process.on('SIGTERM',()=>{void stop();});
 server.listen(port,'127.0.0.1',()=>console.log(`Orbit: http://127.0.0.1:${port} (local worktree sessions)`));

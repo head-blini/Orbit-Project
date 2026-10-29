@@ -1,7 +1,16 @@
-import {assertWorkerOwnership,type WorkerDispatchContext} from './worker-scheduler.ts';
+import {lstatSync,readdirSync} from 'node:fs';
+import {fingerprintWorkspace} from './workspace-fingerprint.ts';
+import type {CapabilityExecutionService} from './capability-execution.ts';
+import type {CapabilityExecutionRecord} from '../shared/capability-execution.ts';
+import {ParallelWorkerService} from './parallel-workers.ts';
+import {WorkerSpaces,generalAttemptPath,resolveWorkerPath,type WorkerSpace} from './worker-spaces.ts';
+import {IntegrationQueue} from './integration-queue.ts';
+import {TaskGraphService} from './task-graph.ts';
+import {WORKER_LIMITS,type ApprovedExecutionBatch,type WorkerResourceClaim} from '../shared/parallel-workers.ts';
+import {WorkerScheduler,approvedWorkerBase,assertWorkerOwnership,type WorkerDispatchContext} from './worker-scheduler.ts';
 import { createHash,randomUUID } from 'node:crypto';
 import {NativeLaunchNotStarted} from './native-launch-error.ts';
-import { basename } from 'node:path';
+import { basename,join,isAbsolute } from 'node:path';
 import type { Snapshot, ProviderStatus, Run, Execution } from '../shared/types.ts';
 import { terminal } from '../shared/types.ts';
 import { Store } from './store.ts';
@@ -11,7 +20,7 @@ import type { RpcPort } from './rpc.ts';
 import { AppError } from './errors.ts';
 import { Projects,assertGitProject } from './projects.ts';
 import { evaluateLaunch,outboundDenial,providerConnections } from './providers/policy.ts';
-import { Studio } from './studio.ts';
+import { Studio,exact } from './studio.ts';
 import type { SavedTask } from '../shared/parallel.ts';
 import { VerificationService,type VerificationConfiguration } from './verification-service.ts';
 import {VerificationSetupService} from './verification-setup.ts';
@@ -46,6 +55,24 @@ import {createNativeProbeService} from './capability-probe.ts';
 import {createClaudeAuthenticationService} from './native-readiness.ts';
 import {compatibleRuntimeVersion} from './capability-runtime-adapters.ts';
 import type {NativeReadinessReport} from '../shared/native-readiness.ts';
+export interface WorkerConfiguration {targetBranch?:string;projects?:{projectPath:string;defaultBranch:string;requiredChecks:string[]}[]}
+/** Server-owned project policy, deliberately separate from HTTP approval bodies. */
+export function readWorkerConfiguration(targetBranch:string|undefined,rawProjects:string|undefined):WorkerConfiguration {
+  try{
+    const branch=(v:unknown):v is string=>typeof v==='string'&&v.length<=200&&/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(v)&&!v.includes('..')&&!v.includes('//')&&!v.endsWith('/')&&!v.endsWith('.lock')&&!v.startsWith('refs/');
+    if(targetBranch!==undefined&&!branch(targetBranch))throw new Error();
+    if(rawProjects!==undefined&&rawProjects.length>64000)throw new Error();
+    const values:unknown=JSON.parse(rawProjects??'[]');if(!Array.isArray(values)||values.length>100)throw new Error();
+    const projects=values.map(value=>{
+      if(!value||typeof value!=='object'||Array.isArray(value))throw new Error();exact(value,['projectPath','defaultBranch','requiredChecks']);
+      if(typeof value.projectPath!=='string'||!isAbsolute(value.projectPath)||/[\x00-\x1f]/.test(value.projectPath)||!branch(value.defaultBranch)||!Array.isArray(value.requiredChecks)||!value.requiredChecks.length||!value.requiredChecks.every((id:unknown)=>typeof id==='string'&&/^[A-Za-z0-9_-]{1,100}$/.test(id))||new Set(value.requiredChecks).size!==value.requiredChecks.length)throw new Error();
+      return {projectPath:value.projectPath as string,defaultBranch:value.defaultBranch,requiredChecks:value.requiredChecks as string[]};
+    });
+    if(new Set(projects.map(p=>p.projectPath)).size!==projects.length)throw new Error();return {targetBranch,projects};
+  }catch{throw new AppError('INVALID_WORKER_CONFIGURATION',503);}
+}
+interface StoredWorkerBatch {batch:ApprovedExecutionBatch;executions:{executionId:string;expectedPlanDigest:string}[];claims:{executionId:string;claims:WorkerResourceClaim[]}[]}
+interface WorkerSubmitResult {state:'intent'|'recorded';reasons:{taskId:string|null;code:string}[]}
 export interface ControllerRegistryOptions {
   nativeProbe?:ReturnType<typeof createNativeProbeService>;
   claudeAuthentication?:ReturnType<typeof createClaudeAuthenticationService>;
@@ -54,6 +81,13 @@ export interface ControllerRegistryOptions {
 }
 export { AppError } from './errors.ts';
 export class Controller {
+  private workerScheduler?:WorkerScheduler;
+  private integrationQueue?:IntegrationQueue;
+  private workerExecution?:CapabilityExecutionService;
+  private workerConfiguration:WorkerConfiguration={};
+  private workerRecovery=new Set<string>();
+  private workerProcessing:Promise<void>|null=null;private workerAgain=false;
+  private workerScheduled=false;private workersStopped=false;private workerIssue:string|null=null;
   store:Store;workspace:string;private factory:(workspace:string,write:boolean)=>RpcPort;private rpc:RpcPort|null=null;
   private projects?:Projects;private workspaceId?:string;private switching=false;
   private provider:ProviderStatus='disconnected';private issue:string|null=null;private connecting:Promise<void>|null=null;
@@ -109,7 +143,7 @@ export class Controller {
     this.modelHub=new ModelHubService(store,modelHubConfig,undefined,undefined,()=>this.assertExecutionAvailable(),()=>registryHubConfigurations(this.modelRegistry),registryOptions.transports);
     this.verificationSetup=new VerificationSetupService(store,projects,verificationConfig);
     const commandResolver=(path:string)=>this.verificationSetup.commands(path);
-    this.verification=new VerificationService(store,projects,commandResolver,()=>this.qualityBusy()||this.soloRecoveryRequired()||!!this.extensionPending||!!this.active()||!!this.connecting||this.switching||this.modelHub.active||!!this.workflows?.active||!!this.reviews?.active||!!this.planningSuggestions?.active);
+    this.verification=new VerificationService(store,projects,commandResolver,()=>this.workerIntegrationBusy());
     this.sourceGraphs=new SourceGraphService(store,projects);
     this.merges=new MergeService(store,projects,this.verification,()=>this.qualityBusy()||this.soloRecoveryRequired()||!!this.extensionPending||!!this.active()||!!this.connecting||this.switching||this.modelHub.active||!!this.workflows?.active||!!this.reviews?.active||!!this.planningSuggestions?.active);
     this.workflows=new WorkflowService(store,projects,commandResolver,()=>this.qualityBusy()||this.soloRecoveryRequired()||!!this.extensionPending||!!this.active()||!!this.connecting||this.switching||this.modelHub.active||this.verification.active||this.merges.active||!!this.reviews?.active||!!this.planningSuggestions?.active,id=>{this.merges.ensureAvailable(id);this.verification.ensureAvailable(id);this.planningSuggestions.ensureAvailable(id);this.reviews.ensureAvailable(id);});
@@ -119,6 +153,184 @@ export class Controller {
     this.qualityPorts=projects?createQualityNativePorts({store,projects,factory,...qualityOptions,guard:run=>this.guardQuality(run),repair:async(request,context)=>{try{const result=await this.repairQuality(request,context);this.saveQualityReceipt(context,{result,evidence:result.evidence});return result;}catch(error){if(context.sourceRun.runtime==='claude-code'&&!store.findRequest(context.stepId)){const failureIssue=error instanceof Error&&/^[A-Z][A-Z0-9_]{1,100}$/.test(error.message)?error.message:'QUALITY_REPAIR_NOT_STARTED';this.saveQualityReceipt(context,{failureIssue,processStopped:true});}throw error;}},verify:async context=>{const result=await this.verifyQuality(context);this.saveQualityReceipt(context,{result,evidence:null});return result;},recover:(step,context)=>this.recoverQuality(step,context)}):{guard:unavailable,snapshot:unavailable,review:unavailable,repair:unavailable,verify:unavailable};
     store.db.exec('CREATE TABLE IF NOT EXISTS quality_controller_receipts(id TEXT PRIMARY KEY,body TEXT NOT NULL)');
     this.qualityLoops=new QualityLoopService(store,this.qualityPorts);
+  }
+  initializeWorkers(execution:CapabilityExecutionService,configuration:WorkerConfiguration={}){
+    if(this.workerScheduler)return;
+    if(!this.projects)return;
+    this.workerConfiguration=readWorkerConfiguration(configuration.targetBranch,JSON.stringify(configuration.projects??[]));this.workerExecution=execution;
+    const workers=new ParallelWorkerService(this.store),spaces=new WorkerSpaces(this.store,this.projects,workers);
+    this.integrationQueue=new IntegrationQueue(this.store,this.projects,workers,spaces,this.verification,this.merges,projectId=>{
+      const config=this.workerProjectConfiguration(projectId);
+      const held=workers.list().find(r=>r.batch.projectId===projectId&&r.state==='terminal_confirmed');
+      if(!held)throw new AppError('INTEGRATION_BASELINE_CHANGED',409);
+      const graph=new TaskGraphService(this.store).view(projectId,held.batch.planningVersionId,{verifiedDoneIds:[],blocked:[]},held.batch.graphRevision);
+      if(graph.stale||new TaskGraphService(this.store).read(projectId,held.batch.planningVersionId).revision!==held.batch.graphRevision)throw new AppError('INTEGRATION_BASELINE_CHANGED',409);
+      return {approvedBaseline:held.batch.planningHash,defaultBranch:config?.defaultBranch??'',requiredChecks:config?.requiredChecks??[]};
+    });
+    this.store.db.exec('CREATE TABLE IF NOT EXISTS worker_integration_refusals(reservation_id TEXT PRIMARY KEY,project_id TEXT NOT NULL,reason TEXT NOT NULL);');
+    for(const row of this.store.db.prepare('SELECT reservation_id FROM worker_integration_refusals').all()){
+      const reservation=workers.read(String(row.reservation_id));
+      try{workers.release(reservation);}catch{this.workerRecovery.add(reservation.reservationId);}
+    }
+    // Recovery precedes Scheduler ownership transfer. A stopped server does not prove its child commands stopped.
+    for(const item of this.integrationQueue.list()){
+      const finished=item.status==='applied'||item.status==='refused';
+      try{this.integrationQueue.reconcile(item.id,finished);}catch{this.workerRecovery.add(item.fence.reservationId);}
+      if(!finished)this.workerRecovery.add(item.fence.reservationId);
+    }
+    this.workerScheduler=new WorkerScheduler(this.store,this.projects,execution,runtime=>{
+      const entries=this.subscriptionUsage.snapshot().filter(e=>e.observation.runtimeId===runtime);
+      return entries.some(e=>e.observation.providerStatus==='rejected'||e.observation.buckets?.some(b=>[b.primary,b.secondary].some(w=>w?.providerStatus==='rejected'||w?.remainingPercent===0)))?'exhausted':'unknown';
+    });
+    for(const r of this.workerScheduler.list())if(r.state!=='released')this.workerRecovery.add(r.reservationId);
+    this.store.db.exec(`CREATE TABLE IF NOT EXISTS worker_http_batches(id TEXT PRIMARY KEY,request_id TEXT UNIQUE NOT NULL,input_digest TEXT NOT NULL,body TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS worker_http_submissions(request_id TEXT PRIMARY KEY,batch_id TEXT NOT NULL,body TEXT NOT NULL);`);
+    this.store.on('event',this.workerEvent);
+  }
+  async stopWorkers(){this.store.off('event',this.workerEvent);this.workersStopped=true;await this.workerProcessing?.catch(()=>{});}
+  private workerEvent=(event:{kind:string})=>{
+    if(this.workersStopped||this.workerScheduled||!(/^(?:workflow|verification|merge)\./.test(event.kind)||['run.completed','run.failed','run.interrupted','run.lost','worker.terminal_confirmed','provider.status','workspace.selected','extensions.updated','review.updated','planning_suggestion.updated','quality.updated','model.request_updated'].includes(event.kind)))return;
+    this.workerScheduled=true;
+    setImmediate(()=>{this.workerScheduled=false;if(!this.workersStopped)void this.processWorkers().catch(()=>{this.workerIssue='WORKER_INTEGRATION_UNCERTAIN';});});
+  };
+  private workerIntegrationBusy(){return this.qualityBusy()||this.soloRecoveryRequired()||!!this.extensionPending||!!this.active()||!!this.connecting||this.switching||this.modelHub.active||!!this.workflows?.active||!!this.reviews?.active||!!this.planningSuggestions?.active;}
+  private processWorkers():Promise<void>{
+    if(this.workersStopped)return Promise.resolve();
+    this.workerAgain=true;if(this.workerProcessing)return this.workerProcessing;
+    this.workerProcessing=(async()=>{
+      do{this.workerAgain=false;await this.processWorkerPass();}while(this.workerAgain&&!this.workersStopped);
+    })().finally(()=>{this.workerProcessing=null;});return this.workerProcessing;
+  }
+  private async processWorkerPass(){
+    const scheduler=this.workerScheduler,queue=this.integrationQueue;if(!scheduler||!queue)return;
+    scheduler.reconcile();
+    for(const reservation of scheduler.list()){
+      if(reservation.state!=='terminal_confirmed'||this.workerRecovery.has(reservation.reservationId)||queue.list().some(i=>i.fence.reservationId===reservation.reservationId))continue;
+      try{queue.enqueue({requestId:reservation.reservationId,fence:{reservationId:reservation.reservationId,ownerIncarnation:reservation.ownerIncarnation,fencingGeneration:reservation.fencingGeneration},targetBranch:this.store.projects().find(p=>p.id===reservation.batch.projectId)?.kind==='code'?(this.workerConfiguration.targetBranch??null):null});}
+      catch(error){
+        if(error instanceof AppError&&error.message==='INTEGRATION_BASELINE_CHANGED'){
+          // Record definitive refusal before release; startup can retry release without dispatch or apply.
+          this.store.db.prepare('INSERT OR IGNORE INTO worker_integration_refusals VALUES(?,?,?)').run(reservation.reservationId,reservation.batch.projectId,error.message);
+          scheduler.release(reservation.reservationId);
+        }else this.workerIssue='WORKER_INTEGRATION_ENQUEUE_BLOCKED';
+      }
+    }
+    // Never drain a queue containing an unresolved pre-restart item, even when a new worker finishes.
+    if(!this.workerIntegrationBusy()&&this.workerConfiguration.targetBranch&&!this.workerRecovery.size&&queue.list().filter(i=>i.status==='queued').every(i=>!this.workerIntegrationReason(i.projectId)))await queue.drain();
+  }
+  private workerProjectConfiguration(projectId:string){
+    const project=this.store.projects().find(p=>p.id===projectId);if(!project)throw new AppError('PROJECT_NOT_FOUND',404);
+    return this.workerConfiguration.projects?.find(p=>p.projectPath===project.path);
+  }
+  private workerIntegrationReason(projectId:string):string|null {
+    const config=this.workerProjectConfiguration(projectId),branch=this.workerConfiguration.targetBranch;
+    if(!branch)return 'INTEGRATION_DISABLED';
+    if(['main','master',config?.defaultBranch].includes(branch))return 'INTEGRATION_TARGET_PROTECTED';
+    if(!config?.defaultBranch)return 'INTEGRATION_PROJECT_CONFIGURATION_REQUIRED';
+    return null;
+  }
+  workerIntegrationQueue(projectId:string){
+    const reason=this.workerIntegrationReason(projectId);
+    const refusals=this.workerScheduler?this.store.db.prepare('SELECT reservation_id,reason FROM worker_integration_refusals WHERE project_id=?').all(projectId).map(row=>({reservationId:String(row.reservation_id),reason:String(row.reason),status:'refused' as const,released:this.workerScheduler!.read(String(row.reservation_id)).state==='released'})):[];
+    return {enabled:!reason,reason,refusals,items:(this.integrationQueue?.list()??[]).filter(i=>i.projectId===projectId).map(i=>this.workerRecovery.has(i.fence.reservationId)?{...i,status:'blocked' as const,reason:'INTEGRATION_RESTART_RECOVERY_REQUIRED'}:i)};
+  }
+  private storedWorkerBatch(projectId:string,id:string):StoredWorkerBatch {
+    if(!this.workerScheduler)throw new AppError('WORKERS_UNAVAILABLE',503);
+    const row=this.store.db.prepare('SELECT body FROM worker_http_batches WHERE id=?').get(id);
+    if(!row)throw new AppError('WORKER_BATCH_NOT_FOUND',404);
+    const record=JSON.parse(String(row.body)) as StoredWorkerBatch;
+    if(record.batch.projectId!==projectId)throw new AppError('WORKER_BATCH_NOT_FOUND',404);return record;
+  }
+  createWorkerBatch(projectId:string,input:Record<string,unknown>){
+    if(!this.workerExecution||!this.workerScheduler)throw new AppError('WORKERS_UNAVAILABLE',503);
+    exact(input,['requestId','planningVersionId','graphRevision','planningHash','confirmed','executions']);
+    const validId=(v:unknown):v is string=>typeof v==='string'&&/^[A-Za-z0-9_-]{8,80}$/.test(v);
+    if(!validId(input.requestId)||!validId(input.planningVersionId)||!Number.isSafeInteger(input.graphRevision)||Number(input.graphRevision)<1||typeof input.planningHash!=='string'||!/^[a-f0-9]{64}$/.test(input.planningHash)||!Array.isArray(input.executions)||!input.executions.length||input.executions.length>1000)throw new AppError('INVALID_FIELDS',400);
+    if(input.confirmed!==true)throw new AppError('WORKER_APPROVAL_REQUIRED',409);
+    const executions=input.executions.map(value=>{
+      if(!value||typeof value!=='object'||Array.isArray(value))throw new AppError('INVALID_FIELDS',400);
+      exact(value,['executionId','expectedPlanDigest']);
+      if(!validId(value.executionId)||typeof value.expectedPlanDigest!=='string'||!/^[a-f0-9]{64}$/.test(value.expectedPlanDigest))throw new AppError('INVALID_FIELDS',400);
+      return {executionId:value.executionId,expectedPlanDigest:value.expectedPlanDigest as string};
+    });
+    const integrationReason=this.workerIntegrationReason(projectId);
+    if(integrationReason&&integrationReason!=='INTEGRATION_DISABLED')throw new AppError(integrationReason,409);
+    const digest=createHash('sha256').update(JSON.stringify({projectId,planningVersionId:input.planningVersionId,graphRevision:input.graphRevision,planningHash:input.planningHash,executions})).digest('hex');
+    const prior=this.store.db.prepare('SELECT id,input_digest FROM worker_http_batches WHERE request_id=?').get(input.requestId);
+    if(prior){if(prior.input_digest!==digest)throw new AppError('IDEMPOTENCY_CONFLICT',409);return this.workerBatch(projectId,String(prior.id));}
+    const graphs=new TaskGraphService(this.store),graph=graphs.read(projectId,input.planningVersionId);
+    if(graph.revision!==input.graphRevision||graph.contentHash!==input.planningHash||graphs.view(projectId,input.planningVersionId,{verifiedDoneIds:[],blocked:[]}).stale)throw new AppError('WORKER_BASELINE_CHANGED',409);
+    const plans=executions.map(e=>{
+      const plan=this.workerExecution!.record(projectId,e.executionId);
+      if(plan.status!=='awaiting_approval'||plan.planDigest!==e.expectedPlanDigest)throw new AppError('WORKER_APPROVAL_REQUIRED',409);
+      this.workerExecution!.assertWorkerPlan(projectId,plan.id,{confirmed:true,expectedPlanDigest:e.expectedPlanDigest});
+      if(plan.baseline.planningVersionId!==graph.planningVersionId||plan.baseline.planningContentHash!==graph.contentHash||!graph.nodes.some(n=>n.taskId===plan.taskId))throw new AppError('WORKER_BASELINE_CHANGED',409);
+      if(!Object.hasOwn(WORKER_LIMITS.perRuntime,plan.runtimeId))throw new AppError('WORKER_RUNTIME_UNSUPPORTED',409);return plan;
+    });
+    if(new Set(plans.map(p=>p.taskId)).size!==plans.length)throw new AppError('INVALID_FIELDS',400);
+    const contracts=new Map<string,string>();for(const c of [...graph.nodes,...graph.edges].flatMap(n=>n.contracts??[])){
+      if(contracts.has(c.id)&&contracts.get(c.id)!==c.digest)throw new AppError('WORKER_CONTRACT_CHANGED',409);contracts.set(c.id,c.digest);
+    }
+    const batch:ApprovedExecutionBatch={id:randomUUID(),projectId,planningVersionId:graph.planningVersionId,graphRevision:graph.revision,planningHash:graph.contentHash,taskIds:plans.map(p=>p.taskId),contractDigests:[...contracts].map(([id,digest])=>({id,digest})),inputArtifactHashes:this.workerInputHashes(projectId),runtimeChoices:plans.map(p=>({taskId:p.taskId,runtimeId:p.runtimeId})),parallelLimit:WORKER_LIMITS.total};
+    const claims=plans.map(plan=>({executionId:plan.id,claims:this.workerClaims(batch,plan)}));
+    this.store.db.prepare('INSERT INTO worker_http_batches VALUES(?,?,?,?)').run(batch.id,input.requestId,digest,JSON.stringify({batch,executions,claims} satisfies StoredWorkerBatch));
+    return this.workerBatch(projectId,batch.id);
+  }
+  private workerInputHashes(projectId:string,root?:string):ApprovedExecutionBatch['inputArtifactHashes'] {
+    const project=this.store.projects().find(p=>p.id===projectId)!;if(project.kind==='code')return [];
+    const path=root??project.path,files:{path:string;mode:string}[]=[];let count=0;
+    const walk=(logical:string)=>{
+      if(++count>2000)throw new AppError('WORKER_INPUTS_UNAVAILABLE',409);
+      resolveWorkerPath(path,logical);
+      const stat=lstatSync(join(path,logical),{throwIfNoEntry:false});if(!stat)return;
+      if(stat.isDirectory())for(const name of readdirSync(join(path,logical)).sort())walk(logical+'/'+name);
+      else files.push({path:logical,mode:stat.mode&0o111?'100755':'100644'});
+    };
+    walk('inputs');return [{id:'inputs',hash:fingerprintWorkspace(path,'0'.repeat(40),files)}];
+  }
+  private assertWorkerInputs(batch:ApprovedExecutionBatch,root?:string){
+    if(JSON.stringify(this.workerInputHashes(batch.projectId,root))!==JSON.stringify(batch.inputArtifactHashes))throw new AppError('WORKER_INPUTS_CHANGED',409);
+  }
+  private workerClaims(batch:ApprovedExecutionBatch,plan:CapabilityExecutionRecord):WorkerResourceClaim[]{
+    const project=this.store.projects().find(p=>p.id===batch.projectId)!;
+    const graph=new TaskGraphService(this.store).read(batch.projectId,batch.planningVersionId,batch.graphRevision);
+    const scopes=[graph.nodes.find(n=>n.taskId===plan.taskId)?.impactScope,...graph.edges.filter(e=>e.taskId===plan.taskId).map(e=>e.impactScope)].filter(s=>!!s);
+    if(scopes.some(s=>s.resources.length))throw new AppError('WORKER_RESOURCE_ADAPTER_REQUIRED',409);
+    if(project.kind==='general')return [{kind:'isolated_folder',host:'local',path:resolveWorkerPath(project.path,join(generalAttemptPath(project.path,plan.id),'output'),true)}];
+    const base=approvedWorkerBase(this.store,this.projects!,batch,plan)!;
+    const workspace=this.store.workspaces().find(w=>w.id===plan.workspaceId)!;
+    const files=[...new Set(scopes.flatMap(s=>s.files))];if(!files.length)throw new AppError('WORKER_IMPACT_SCOPE_REQUIRED',409);
+    return files.map(path=>({kind:'repository_file',repositoryId:base.repositoryId,path:resolveWorkerPath(workspace.path,path),mode:'write'}));
+  }
+  workerBatch(projectId:string,id:string){
+    const {batch}=this.storedWorkerBatch(projectId,id),reservations=this.workerScheduler!.list().filter(r=>r.batch.id===id);
+    const spaces=this.store.db.prepare('SELECT body FROM worker_spaces').all().map(r=>JSON.parse(String(r.body)) as WorkerSpace).filter(s=>reservations.some(r=>r.reservationId===s.reservationId));
+    const submissions=this.store.db.prepare('SELECT body FROM worker_http_submissions WHERE batch_id=?').all(id).map(r=>JSON.parse(String(r.body)) as WorkerSubmitResult);
+    const reasons=submissions.flatMap(s=>s.reasons);
+    if(submissions.some(s=>s.state==='intent'))reasons.push({taskId:null,code:'WORKER_SUBMISSION_RECOVERY_REQUIRED'});
+    for(const r of reservations)if(this.workerRecovery.has(r.reservationId)||r.state==='lost_unknown')reasons.push({taskId:r.attempt.taskId,code:'WORKER_RESTART_RECOVERY_REQUIRED'});
+    if(this.workerIssue)reasons.push({taskId:null,code:this.workerIssue});
+    const integration=this.workerIntegrationQueue(projectId);
+    integration.items=integration.items.filter(i=>reservations.some(r=>r.reservationId===i.fence.reservationId));
+    integration.refusals=integration.refusals.filter(i=>reservations.some(r=>r.reservationId===i.reservationId));
+    return {id:batch.id,batch,limits:WORKER_LIMITS,attempts:reservations.map(r=>r.attempt),reservations,spaces,integration,reasons};
+  }
+  async submitWorkerBatch(projectId:string,id:string,input:Record<string,unknown>){
+    exact(input,['requestId']);if(typeof input.requestId!=='string'||!/^[A-Za-z0-9_-]{8,80}$/.test(input.requestId))throw new AppError('INVALID_FIELDS',400);
+    const record=this.storedWorkerBatch(projectId,id),prior=this.store.db.prepare('SELECT batch_id,body FROM worker_http_submissions WHERE request_id=?').get(input.requestId);
+    if(prior){if(prior.batch_id!==id)throw new AppError('IDEMPOTENCY_CONFLICT',409);return this.workerBatch(projectId,id);}
+    const result:WorkerSubmitResult={state:'intent',reasons:[]};
+    // HTTP intent is durable before admission; a replay never continues a partially submitted batch.
+    this.store.db.prepare('INSERT INTO worker_http_submissions VALUES(?,?,?)').run(input.requestId,id,JSON.stringify(result));
+    for(const e of record.executions){
+      const taskId=this.workerExecution!.record(projectId,e.executionId).taskId;
+      try{
+        this.assertWorkerInputs(record.batch);
+        await this.workerScheduler!.submit({batch:record.batch,executionId:e.executionId,approval:{confirmed:true,expectedPlanDigest:e.expectedPlanDigest},claims:record.claims.find(c=>c.executionId===e.executionId)!.claims,verifiedDoneIds:[]});
+      }catch(error){result.reasons.push({taskId,code:error instanceof AppError?error.message:'WORKER_SUBMISSION_UNCERTAIN'});}
+    }
+    result.state='recorded';this.store.db.prepare('UPDATE worker_http_submissions SET body=? WHERE request_id=?').run(JSON.stringify(result),input.requestId);
+    await this.processWorkers();return this.workerBatch(projectId,id);
   }
   registryNativeReadiness():NativeReadinessReport {
     const installation=this.nativeProbe.get(),connection=this.provider;
@@ -508,6 +720,11 @@ export class Controller {
     await this.connect();worker.beforeDispatch();
   }
   async submitTask(projectId:string,taskId:string,input:{requestId:string;workspaceId?:string;expectedAcceptanceDigest?:string},worker?:WorkerDispatchContext):Promise<Run>{
+    if(worker&&this.workerScheduler){
+      const reservation=this.workerScheduler.read(worker.fence.reservationId);
+      const row=this.store.db.prepare('SELECT id FROM worker_http_batches WHERE id=?').get(reservation.batch.id);
+      if(row){const original=worker;worker={...original,beforeDispatch:()=>{original.beforeDispatch();this.assertWorkerInputs(reservation.batch);this.assertWorkerInputs(reservation.batch,original.space.path);}};}
+    }
     this.qualityAvailable();assertWorkerOwnership(this.store,projectId,taskId,worker);
     if(this.store.projects().some(project=>project.id===projectId&&project.kind==='general')&&!Object.hasOwn(input,'workspaceId')){
       if(Object.keys(input).length!==1||!Object.hasOwn(input,'requestId'))throw new AppError('INVALID_FIELDS',400);
