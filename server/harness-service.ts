@@ -5,6 +5,7 @@ import {FailureCaseStore,type FailureCaseReader} from './failure-cases.ts';
 import {HarnessStore,type HarnessPromotionGrant,type HarnessRollback} from './harness-store.ts';
 import {HarnessEvaluation,type HarnessEvaluationPorts,type HarnessEvaluationRunner,type HarnessEvaluationRequest,type HarnessPromotionApproval} from './harness-evaluation.ts';
 import {HarnessEffects} from './harness-effects.ts';
+import {HarnessSuiteStore,type HarnessSuiteProgressReader,type HarnessSuiteRegistration,type HarnessSuiteRemoval} from './harness-suite.ts';
 import {generateHarnessCandidates} from './harness-candidates.ts';
 import {classifyHarnessCandidate} from './harness-policy.ts';
 import type {HarnessEvidence,HarnessProjectView,HarnessTarget} from '../shared/harness.ts';
@@ -15,7 +16,7 @@ import type {HarnessEvidence,HarnessProjectView,HarnessTarget} from '../shared/h
 export interface HarnessServiceOptions {
   /** Injected only by tests/hosts; server/main.ts injects none (live evaluation needs separate user approval). */
   runner?:HarnessEvaluationRunner;
-  /** Server-owned normal/protected suites. Default empty: evaluation stays HARNESS_EVAL_SUITE_INCOMPLETE. */
+  /** Overrides the server-owned normal/protected suites (tests only). Default: the HE-SUITE store of user-registered passed runs. */
   suite?:HarnessEvaluationPorts['suite'];
 }
 export interface HarnessUserProposal {requestId:string;target:HarnessTarget;line:string;evidence:HarnessEvidence|null;confirmed:true}
@@ -23,7 +24,7 @@ export interface HarnessUserProposal {requestId:string;target:HarnessTarget;line
 export class HarnessService {
   private store:Store;private index:FailureIndex;private runner:HarnessEvaluationRunner|null;
   readonly versions:HarnessStore;private evaluation:HarnessEvaluation;private effects:HarnessEffects;
-  private caseStore:FailureCaseStore|null=null;private caseReader:FailureCaseReader;
+  private caseStore:FailureCaseStore|null=null;private caseReader:FailureCaseReader;readonly suite:HarnessSuiteStore;
   constructor(store:Store,options:HarnessServiceOptions={}){
     this.store=store;this.index=new FailureIndex(store);this.runner=options.runner??null;
     // Reads never create failure_cases (FE-4): without the table every case is simply absent.
@@ -32,10 +33,11 @@ export class HarnessService {
       listCases:familyId=>this.casesExist()?(this.caseStore??=new FailureCaseStore(store)).listCases(familyId):[],
     };
     const unavailable:HarnessEvaluationRunner={mode:'fake',runCase:()=>Promise.reject(new AppError('HARNESS_EVAL_RUNNER_UNAVAILABLE',409))};
+    this.suite=new HarnessSuiteStore(store);
     let evaluation:HarnessEvaluation|null=null;
     this.versions=new HarnessStore(store,{cases,promotions:{getApprovedPromotion:requestId=>evaluation?.getApprovedPromotion(requestId)??null}});
     evaluation=this.evaluation=new HarnessEvaluation(store,{harness:this.versions,cases,runner:options.runner??unavailable,
-      suite:options.suite??{normalCases:()=>[],protectedCases:()=>[]}});
+      suite:options.suite??this.suite.port()});
     this.effects=new HarnessEffects(store,{harness:this.versions,evaluation,failures:this.index});
   }
   private casesExist(){return !!this.store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='failure_cases'").get();}
@@ -45,7 +47,7 @@ export class HarnessService {
   view(projectId:string):HarnessProjectView{
     this.project(projectId);
     const effects=this.effects.view(projectId);
-    return {projectId,runnerMode:this.runner?.mode??null,targets:effects.targets.map(t=>{
+    return {projectId,runnerMode:this.runner?.mode??null,suite:this.suite.view(projectId),targets:effects.targets.map(t=>{
       let stored:ReturnType<HarnessStore['listVersions']>=[];
       try{stored=t.state==='ok'?this.versions.listVersions(projectId,t.target):[];}catch{/* the effects view already reports the error */}
       const byId=new Map(stored.map(s=>[s.version.versionId,s]));
@@ -85,6 +87,10 @@ export class HarnessService {
       candidate:{class:'execution_guidance',target:input.target,lines:[...parent.lines,input.line],origin:'user',evidence:input.evidence}});
     return {versionId:record.version.versionId,revision:record.version.revision,digest:record.version.digest};
   }
+
+  /** HE-D1 default 6: explicit user registration of a passed run as a normal (or protected) suite case. */
+  registerSuiteCase(projectId:string,input:HarnessSuiteRegistration,readProgress:HarnessSuiteProgressReader){this.project(projectId);return this.suite.register(projectId,input,readProgress);}
+  removeSuiteCase(projectId:string,input:HarnessSuiteRemoval){this.project(projectId);return this.suite.remove(projectId,input);}
 
   async evaluate(projectId:string,input:Omit<HarnessEvaluationRequest,'projectId'>){
     this.project(projectId);

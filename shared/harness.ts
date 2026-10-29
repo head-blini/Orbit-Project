@@ -77,4 +77,13 @@ export interface HarnessTargetView {
   history: Array<{sequence: number; kind: 'promotion' | 'rollback'; versionId: string; fromVersionId: string; requestId: string; createdAt: string}>;
   versions: HarnessVersionView[];
 }
-export interface HarnessProjectView {projectId: string; runnerMode: 'fake' | 'live' | null; targets: HarnessTargetView[]}
+/** HE-SUITE: one user-registered passed run. Digest manifest and provenance only; never run content. */
+export interface HarnessSuiteCaseRecord {
+  caseId: string; projectId: string; target: HarnessTarget; protected: boolean; runId: string; taskId: string;
+  completionBindingDigest: string; policyDigest: string; artifactDigest: string | null; digest: string; requestId: string; registeredAt: string;
+}
+export interface HarnessSuiteView {
+  state: 'ok' | 'error'; error: string | null; cases: HarnessSuiteCaseRecord[];
+  targets: Array<{target: HarnessTarget; normal: number; protected: number; digest: string}>;
+}
+export interface HarnessProjectView {projectId: string; runnerMode: 'fake' | 'live' | null; targets: HarnessTargetView[]; suite?: HarnessSuiteView}

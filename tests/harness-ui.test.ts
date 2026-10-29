@@ -64,3 +64,18 @@ test('rollback is offered only to previously active ancestors or v0, and recurre
   assert.match(html,/추가 지침 v1 사용 중/);assert.match(html,/되돌리는 것을 검토해 보세요. 자동으로 되돌리지 않습니다/);
   assert.equal(html.split('기본 지침으로 되돌리기').length-1,1);assert.ok(!html.includes('v1(으)로 되돌리기'));
 });
+
+test('suite: simple mode shows plain-language counts only; advanced mode lists manifests with register/remove controls',async()=>{
+  const {HarnessBody}=await load();
+  const suiteCase={caseId:'case-1',projectId:'p',target:'claude_task' as const,protected:true,runId:'run-1',taskId:'task-1',completionBindingDigest:'b'.repeat(64),
+    policyDigest:'c'.repeat(64),artifactDigest:null,digest:'d'.repeat(64),requestId:'r',registeredAt:'2026-10-30T00:00:00.000Z'};
+  const withSuite:HarnessProjectView={...view([]),suite:{state:'ok',error:null,cases:[suiteCase],targets:[
+    {target:'claude_task',normal:0,protected:1,digest:'e'.repeat(64)},{target:'repair',normal:0,protected:0,digest:'f'.repeat(64)}]}};
+  const simple=renderToStaticMarkup(createElement(HarnessBody,{view:withSuite,advanced:false,actions:{...actions,registerSuite:()=>{},removeSuite:()=>{}}}));
+  assert.match(simple,/정상 작업 0개 · 보호 작업 1개/);assert.match(simple,/둘 다 1개 이상 있어야 평가할 수 있습니다/);
+  assert.ok(!simple.includes('<button')&&!simple.includes('run-1')&&!simple.includes('<form'));
+  const advanced=renderToStaticMarkup(createElement(HarnessBody,{view:withSuite,advanced:true,actions:{...actions,registerSuite:()=>{},removeSuite:()=>{}}}));
+  assert.match(advanced,/<code>run-1<\/code>/);assert.ok(button(advanced,'평가 기준에서 빼기'));assert.match(advanced,/통과 작업 등록/);
+  const broken=renderToStaticMarkup(createElement(HarnessBody,{view:{...withSuite,suite:{state:'error',error:'HARNESS_INTEGRITY',cases:[],targets:[]}},advanced:false}));
+  assert.match(broken,/읽을 수 없습니다/);assert.ok(!broken.includes('HARNESS_'));
+});
