@@ -16,3 +16,11 @@ export interface HandoffPackage {
   allowedTools:[];
   markdown:string;
 }
+
+/** Append-only delivery record. Digests and ids only: package text is never stored. */
+export interface HandoffHistoryEntry {
+  seq:number;at:string;runId:string;requestId:string;projectId:string;taskId:string;
+  destination:'claude-code'|'codex';packageDigest:string;planningVersionId:string;planningContentHash:string;
+  /** acknowledged only when the executor itself reported start for this run; never from a client claim. */
+  receipt:'delivered'|'acknowledged';runExecution:Run['execution']|null;
+}

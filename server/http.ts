@@ -23,6 +23,7 @@ import { buildCapabilityRegistry } from './capabilities.ts';
 import { createNativeProbeService } from './capability-probe.ts';
 import { PlanningHandoffService } from './planning-handoff-service.ts';
 import { HandoffService } from './handoff-service.ts';
+import { handoffHistory } from './handoff-history.ts';
 import {controlPlaneStatus} from './control-plane.ts';
 import {GoalService} from './goal-service.ts';
 import {TaskGraphService} from './task-graph.ts';
@@ -129,6 +130,12 @@ export function createHttpServer(controller:Controller,assets:string,options:{wo
         if(url.search)throw new AppError('INVALID_FIELDS',400);
         if(!controller.store.projects().some(p=>p.id===qualityRoute[1]))throw new AppError('PROJECT_NOT_FOUND',404);
         json(res,200,{records:controller.qualityLoops.records(qualityRoute[1])});return;
+      }
+      const handoffLog=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/tasks\/([a-f0-9-]{36})\/handoff-history$/);
+      if(req.method==='GET'&&handoffLog){
+        if(url.search)throw new AppError('INVALID_FIELDS',400);
+        if(!(studio.read(handoffLog[1],'tasks') as {id:string}[]).some(task=>task.id===handoffLog[2]))throw new AppError('TASK_NOT_FOUND',404);
+        json(res,200,{entries:handoffHistory(controller.store,handoffLog[1],handoffLog[2])});return;
       }
       const taskHandoff=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/tasks\/([a-f0-9-]{36})\/handoff$/);
       if(req.method==='GET'&&taskHandoff){
