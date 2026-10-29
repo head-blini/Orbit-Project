@@ -68,6 +68,8 @@ test('consumed grant verifies only its invocation and approval, never permission
   const r={...rec(m,'native',g),invocationId:'i1',approvedDigest:'approved',bindingDigest:'approved',nativeObserved:true,callCompleted:true};
   const check=(grantValue:ToolGrant,record:ToolInvocationRecord=r)=>aggregate([sec('mcp',[m])],[grantValue],[record]).states[0];
   assert.equal(check(g).verified,1);assert.equal(check(g).permitted,null);
+  assert.equal(check({...g,grantId:'other'}).verified,0);
+  for(const state of [undefined,'active'] as const)assert.equal(check({...g,state,consumedBy:undefined}).verified,0);
   for(const state of ['active','revoked','expired'] as const)assert.equal(check({...g,state}).verified,0);
   assert.equal(check({...g,consumedBy:{...g.consumedBy,invocationId:'other'}}).verified,0);
   assert.equal(check({...g,consumedBy:{...g.consumedBy,approvalDigest:'other'}}).verified,0);
