@@ -1,5 +1,5 @@
 import {createHash} from 'node:crypto';
-import type {TaskAcceptanceStatus,TaskVerificationPreview} from '../shared/acceptance.ts';
+import type {GeneralAcceptanceBaseline,TaskAcceptanceStatus,TaskVerificationPreview} from '../shared/acceptance.ts';
 import type {PlanningVersion,SavedTask} from '../shared/parallel.ts';
 import type {VerificationCommandPreview} from '../shared/verification.ts';
 import type {Store} from './store.ts';
@@ -63,6 +63,20 @@ function baseline(value:unknown):TaskVerificationPreview{
   if(required.size!==files.length||files.some(path=>!required.has(path))||JSON.stringify([...files].sort(compare))!==JSON.stringify(files))throw new Error();
   const result=value as unknown as TaskVerificationPreview;if(acceptanceDigest(result)!==result.digest)throw new Error();return result;
 }
+const generalScope='승인된 계획 버전의 Task 인수조건 원문만 고정합니다. 산출물·입력 파일·검사 결과를 포함하지 않으며, 동일성은 인수조건 충족의 증명이 아닙니다.';
+function criteriaFor(plan:PlanningVersion,task:SavedTask){
+  return plan.draft.requirements.filter(requirement=>task.requirementLabels.includes(requirement.label)).map(({label,description,acceptanceCriteria})=>({label,description,acceptanceCriteria:[...acceptanceCriteria]})).sort((a,b)=>compare(a.label,b.label));
+}
+/** General task baseline. Studio.execution enforces approval, open questions, task/plan match and head freshness; any failure throws (fail closed). */
+export function generalAcceptance(store:Store,projectId:string,taskId:string):GeneralAcceptanceBaseline{
+  if(store.projects().find(value=>value.id===projectId)?.kind!=='general')throw new AppError('GENERAL_PROJECT_REQUIRED',409);
+  const studio=new Studio(store);studio.execution(projectId,taskId);
+  const task=(studio.read(projectId,'tasks') as SavedTask[]).find(value=>value.id===taskId)!;
+  const plan=(studio.read(projectId,'plans') as PlanningVersion[]).find(value=>value.id===task.planningVersionId)!;
+  const view={kind:'general' as const,projectId,taskId,planningVersionId:plan.id,planHash:plan.contentHash,criteria:criteriaFor(plan,task),scope:generalScope};
+  // Domain tag keeps a general digest from ever colliding with a code acceptanceDigest().
+  return {...view,digest:createHash('sha256').update(JSON.stringify({domain:'orbit.acceptance.general.v1',...view})).digest('hex')};
+}
 const unknown=():TaskAcceptanceStatus=>({state:'unavailable',baseline:null,issue:'ACCEPTANCE_BASELINE_UNAVAILABLE'});
 
 /** Reads authoritative records and hardened snapshots; never writes a baseline or dispatches work. */
@@ -95,7 +109,7 @@ export class AcceptanceService {
     });
     assertWorkspaceManifest(files.map(({path,mode})=>({path,mode})));
     const view={projectId,workspaceId,taskId,planningVersionId:plan.id,planHash:plan.contentHash,baseSha:workspace.baseSha,
-      criteria:plan.draft.requirements.filter(requirement=>task.requirementLabels.includes(requirement.label)).map(({label,description,acceptanceCriteria})=>({label,description,acceptanceCriteria:[...acceptanceCriteria]})).sort((a,b)=>compare(a.label,b.label)),
+      criteria:criteriaFor(plan,task),
       commands:selected,files,scope};
     return baseline({...view,digest:acceptanceDigest(view)});
   }

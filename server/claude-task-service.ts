@@ -8,6 +8,7 @@ import type {SavedTask} from '../shared/parallel.ts';
 import type {Store} from './store.ts';
 import type {Projects} from './projects.ts';
 import {Studio} from './studio.ts';
+import {generalAcceptance} from './acceptance.ts';
 import {HandoffService} from './handoff-service.ts';
 import {AppError} from './errors.ts';
 import {containsCredential} from './privacy.ts';
@@ -67,6 +68,8 @@ export class ClaudeTaskService {
     const brief=studio.execution(projectId,taskId),handoff=new HandoffService(this.store,studio).build(projectId,taskId);
     if(repair&&(repair.source.planningVersionId!==brief.planningVersionId||repair.source.planningContentHash!==brief.planningContentHash))throw new AppError('QUALITY_BASELINE_CHANGED',409);
     const task=(studio.read(projectId,'tasks') as SavedTask[]).find(task=>task.id===taskId)!;
+    const acceptance=generalAcceptance(this.store,projectId,taskId);
+    const acceptanceSame=()=>{try{return generalAcceptance(this.store,projectId,taskId).digest===acceptance.digest;}catch{return false;}};
     // Same input gate as Codex runs (Controller.start), applied to the same raw execution brief:
     // block instead of silently redacting, and audit the denial.
     const raw=brief.prompt+'\n'+task.title+(repair?'\n'+repair.prompt:'');
@@ -79,7 +82,7 @@ export class ClaudeTaskService {
     // No await between ownership checks, durable intent and launch.
     worker?.beforeDispatch();
     const run=this.store.createRun(requestId,repairDigest??createHash('sha256').update(prompt).digest('hex'),prompt,undefined,
-      {runtime:'claude-code',projectId,taskId,planningVersionId:brief.planningVersionId,planningContentHash:brief.planningContentHash,requirementLabels:brief.requirementLabels});
+      {runtime:'claude-code',projectId,taskId,planningVersionId:brief.planningVersionId,planningContentHash:brief.planningContentHash,requirementLabels:brief.requirementLabels},undefined,acceptance);
     let runner:Runner;
     try{
       if(worker)this.store.append('run.worker_space',run.id,{reservationId:worker.fence.reservationId,path:worker.space.path});
@@ -90,7 +93,7 @@ export class ClaudeTaskService {
       runner=(this.options.runnerFactory??(options=>new ClaudeCodeRun(options)))({executable,cwd:worker?.space.path??project.path,mode:'write',env:claudeEnv(),beforeDispatch:()=>{
         this.projects!.generalProject(projectId);
         worker?.beforeDispatch();
-        if(this.closing||new ProjectAiPreferencesService(this.store).read(projectId).execution!=='claude-code'||JSON.stringify(studio.execution(projectId,taskId))!==JSON.stringify(brief))throw new AppError('LAUNCH_CONTEXT_CHANGED',409);
+        if(this.closing||new ProjectAiPreferencesService(this.store).read(projectId).execution!=='claude-code'||JSON.stringify(studio.execution(projectId,taskId))!==JSON.stringify(brief)||!acceptanceSame())throw new AppError('LAUNCH_CONTEXT_CHANGED',409);
       }});
     }catch{
       return this.store.updateRun(run.id,{execution:'failed'},'run.failed',{reason:'RUNTIME_NOT_STARTED'});
