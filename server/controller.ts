@@ -30,7 +30,9 @@ import type { RpcPort } from './rpc.ts';
 import { AppError } from './errors.ts';
 import { Projects,assertGitProject } from './projects.ts';
 import { evaluateLaunch,outboundDenial,providerConnections } from './providers/policy.ts';
-import {briefPiiInspectionText} from './planning/execution.ts';
+import {HarnessStore} from './harness-store.ts';
+import {harnessV0} from './harness-policy.ts';
+import {briefPiiInspectionText,activeCodexHarness,type CodexHarnessContext} from './planning/execution.ts';
 import {repairPiiInspectionText} from './repair-pii.ts';
 import { Studio,exact } from './studio.ts';
 import { HandoffService } from './handoff-service.ts';
@@ -205,19 +207,19 @@ export class Controller {
   private toolLaunchContext(selection:Readonly<ToolInvocationSelection>):string {
     if(!this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);
     const acceptance=this.taskVerificationPreview(selection.projectId,selection.taskId,this.workspaceId);
-    return createHash('sha256').update(JSON.stringify([this.workspaceId,acceptance?.digest??null])).digest('hex');
+    return createHash('sha256').update(JSON.stringify([this.workspaceId,acceptance?.digest??null,activeCodexHarness(new HarnessStore(this.store),selection.projectId)])).digest('hex');
   }
   private async launchTool(request:Readonly<ToolLaunchRequest>):Promise<ToolLaunchResult> {
     if(!toolGrantable(request.runtimeId,request.kind))throw new AppError('TOOL_NOT_GRANTABLE',403);
     const meta=this.toolMeta(request),serverName=this.knownMcpNames?.find(name=>createHash('sha256').update(JSON.stringify(['mcp',name])).digest('hex')===request.itemId);
     if(!meta||itemDigest(meta)!==request.itemDigest||!serverName||!this.workspaceId)throw new AppError('ROUTE_CHANGED',409);
-    const task=new Studio(this.store).execution(request.projectId,request.taskId);
+    const task=new Studio(this.store).codexExecution(request.projectId,request.taskId);
     if(task.planningContentHash!==request.planningContentHash||this.toolLaunchContext(request)!==request.launchContext)throw new AppError('ROUTE_CHANGED',409);
     assertWorkerOwnership(this.store,request.projectId,request.taskId);
     if(this.aiPreferences.read(request.projectId).execution!=='codex')throw new AppError('RUNTIME_NOT_SUPPORTED',409);
     const acceptance=this.taskVerificationPreview(request.projectId,request.taskId,this.workspaceId);
-    const {prompt,...binding}=task;
-    const run=await this.start({requestId:request.invocationId,prompt,workspaceId:this.workspaceId},{...binding,projectId:request.projectId,runtime:'codex'},acceptance??undefined,undefined,{request,serverName});
+    const {prompt,harness,...binding}=task;
+    const run=await this.start({requestId:request.invocationId,prompt,workspaceId:this.workspaceId},{...binding,projectId:request.projectId,runtime:'codex'},acceptance??undefined,undefined,{request,serverName},undefined,harness);
     const finished=await new Promise<Run>(resolve=>{
       const check=()=>{const current=this.store.getRun(run.id)!;if(terminal(current.execution)){this.store.off('event',check);resolve(current);}};
       this.store.on('event',check);check();
@@ -818,7 +820,8 @@ export class Controller {
       run=this.ownQualityStep(()=>this.claudeTasks.repair(context.sourceRun.id,context.stepId,prompt));
     }else{
       const source=context.sourceRun,projectId=context.task.projectId,workspaceId=source.workspaceId!;
-      const brief=new Studio(this.store).execution(projectId,context.task.id);
+      const suffix='\n실패 항목만 수정하고 승인 기준과 통과 항목을 보존하세요.\n'+prompt;
+      const brief=new Studio(this.store).codexExecution(projectId,context.task.id,suffix);
       if(brief.planningVersionId!==source.planningVersionId||brief.planningContentHash!==source.planningContentHash)throw new AppError('QUALITY_BASELINE_CHANGED',409);
       const acceptance=this.verification.acceptance.status(workspaceId,source.id);
       if(acceptance.state!=='current'||!acceptance.baseline)throw new AppError('ACCEPTANCE_BASELINE_CHANGED',409);
@@ -828,10 +831,10 @@ export class Controller {
       this.store.setThread('',workspaceId);
       await this.ownQualityStep(()=>this.connect());
       if(request.signal.aborted)throw new AppError('QUALITY_PROCESS_STOP_UNCONFIRMED',409);
-      const head=brief.prompt+'\n실패 항목만 수정하고 승인 기준과 통과 항목을 보존하세요.\n',repairPrompt=head+prompt;
+      const repairPrompt=brief.prompt,head=repairPrompt.slice(0,-prompt.length);
       // Same structure-aware identifier exemption as the Claude repair path; the bytes sent stay repairPrompt.
       const piiText=briefPiiInspectionText(head)+repairPiiInspectionText(prompt);
-      run=await this.ownQualityStep(()=>this.start({requestId:context.stepId,workspaceId,prompt:repairPrompt},{projectId,taskId:brief.taskId,runtime:'codex',planningVersionId:source.planningVersionId,planningContentHash:source.planningContentHash,requirementLabels:source.requirementLabels},acceptance.baseline!,undefined,undefined,piiText));
+      run=await this.ownQualityStep(()=>this.start({requestId:context.stepId,workspaceId,prompt:repairPrompt},{projectId,taskId:brief.taskId,runtime:'codex',planningVersionId:source.planningVersionId,planningContentHash:source.planningContentHash,requirementLabels:source.requirementLabels},acceptance.baseline!,undefined,undefined,piiText,brief.harness));
       this.store.append('run.repair_source',run.id,{sourceRunId:source.id});
     }
     const completed=await this.waitQualityRun(run.id,request.signal);
@@ -938,12 +941,12 @@ export class Controller {
     if(!workspace||workspace.id!==this.workspaceId||workspace.projectId!==projectId)throw new AppError('WORKSPACE_MISMATCH');
     const prior=this.store.findRequest(input.requestId);
     if(prior){if(prior.run.taskId!==taskId||prior.run.workspaceId!==workspace.id||prior.run.acceptanceDigest!==input.expectedAcceptanceDigest)throw new AppError('IDEMPOTENCY_CONFLICT');return prior.run;}
-    const {prompt,...task}=new Studio(this.store).execution(projectId,taskId);
+    const {prompt,harness,...task}=new Studio(this.store).codexExecution(projectId,taskId);
     const acceptance=this.taskVerificationPreview(projectId,taskId,workspace.id);
     if(acceptance?.digest!==input.expectedAcceptanceDigest)throw new AppError('ACCEPTANCE_PREVIEW_STALE',409);
     // Handoff context for the delivery record only; an unbuildable package never blocks or alters the launch.
     let pkg:ReturnType<HandoffService['build']>|null=null;try{pkg=new HandoffService(this.store,new Studio(this.store)).build(projectId,taskId);}catch{/* no record */}
-    try{return await this.start({...input,prompt},{...task,projectId,runtime:'codex'},acceptance??undefined,worker);}
+    try{return await this.start({...input,prompt},{...task,projectId,runtime:'codex'},acceptance??undefined,worker,undefined,undefined,harness);}
     finally{
       // Also covers SUBMIT_UNCERTAIN: the run exists durably. Refused launches create no run, so nothing is recorded.
       const created=this.store.findRequest(input.requestId)?.run;
@@ -951,7 +954,7 @@ export class Controller {
     }
   }
   async submit(input:{requestId:string;prompt:string;workspaceId?:string|null}):Promise<Run>{return this.start(input);}
-  private async start(input:{requestId:string;prompt:string;workspaceId?:string|null},task?:Pick<Run,'taskId'|'planningVersionId'|'planningContentHash'|'requirementLabels'|'projectId'|'runtime'>,acceptance?:TaskVerificationPreview,worker?:WorkerDispatchContext,tool?:{request:Readonly<ToolLaunchRequest>;serverName:string},piiText?:string):Promise<Run>{
+  private async start(input:{requestId:string;prompt:string;workspaceId?:string|null},task?:Pick<Run,'taskId'|'planningVersionId'|'planningContentHash'|'requirementLabels'|'projectId'|'runtime'>,acceptance?:TaskVerificationPreview,worker?:WorkerDispatchContext,tool?:{request:Readonly<ToolLaunchRequest>;serverName:string},piiText?:string,harness?:CodexHarnessContext):Promise<Run>{
     assertGitProject(this.store,input?.workspaceId);assertGitProject(this.store,this.workspaceId);
     if(typeof input?.requestId!=='string'||!/^[a-zA-Z0-9-]{8,80}$/.test(input.requestId)||typeof input.prompt!=='string'||!input.prompt.trim()||input.prompt.length>4000)throw new AppError('INVALID_PROMPT',400);
     if(containsCredential(input.prompt))throw new AppError('CREDENTIAL_LIKE_INPUT',400);
@@ -969,19 +972,29 @@ export class Controller {
       policyValidated:this.launchValidated,mcpIsolated:this.launchValidated});
     if(!launch.allowed)throw new AppError(launch.code);
     const sessionId=this.thread();if(!sessionId)throw new AppError('NOT_CONNECTED');
+    const harnessSame=()=>{
+      if(!harness)return;
+      try{if(task?.projectId&&JSON.stringify(activeCodexHarness(new HarnessStore(this.store),task.projectId))===JSON.stringify(harness.selected))return;}catch{/* fail closed */}
+      throw new AppError('LAUNCH_CONTEXT_CHANGED',409);
+    };
+    harnessSame();
     const run=this.store.createRun(input.requestId,digest,safeText(input.prompt),this.workspaceId,task,{runtimeId:'codex',ownerIncarnation:this.ownerIncarnation,generation:this.generation,nativeSessionId:sessionId},acceptance);const rpc=this.rpc;
     this.telemetry.begin(run.id);
     this.modelTracker.begin(run.id,{selectedModelId:null,requestedModelId:null});
     this.output.clear();this.deadline=setTimeout(()=>{void this.failTransport('RUN_TIMEOUT');},120000);
     try{
+      const {target,versionId,revision,digest:harnessDigest}=harness?.applied??harnessV0('codex_brief');
+      this.store.append('harness.applied',run.id,{target,versionId,revision,digest:harnessDigest,...(harness?.reason?{reason:harness.reason}:{})});
       this.store.append('run.runtime_source',run.id,{source:rpc.evidenceSource==='native'?'native':rpc.evidenceSource==='mock'?'mock':'unknown',interface:'codex.app_server'});
       if(tool){
         await this.enableTool(rpc,run,tool);
+        harnessSame();
         if(this.rpc!==rpc||this.toolRun?.runId!==run.id||terminal(this.store.getRun(run.id)!.execution)
           ||new Studio(this.store).execution(tool.request.projectId,tool.request.taskId).planningContentHash!==tool.request.planningContentHash
           ||this.toolLaunchContext(tool.request)!==tool.request.launchContext)throw new AppError('ROUTE_CHANGED',409);
       }
       worker?.beforeDispatch();
+      harnessSame();
       const result=await rpc.request('turn/start',{threadId:this.thread(),cwd:this.workspace,input:[{type:'text',text:input.prompt}],sandboxPolicy:this.sandbox(),approvalPolicy:this.approvalPolicy(),approvalsReviewer:'user'});
       if(typeof result.turn?.id!=='string')throw new Error('INVALID_TURN');
       this.telemetry.acknowledge(run.id,result.turn.id);
@@ -993,7 +1006,14 @@ export class Controller {
         this.modelTracker.finish(run.id,accepted.execution==='completed'?'completed':accepted.execution==='interrupted'?'interrupted':accepted.execution==='failed'?'failed':'lost');
       }
       return this.store.getRun(run.id)!;
-    }catch{
+    }catch(error){
+      if(error instanceof AppError&&error.message==='LAUNCH_CONTEXT_CHANGED'){
+        clearTimeout(this.deadline);
+        this.store.append('run.launch_refused',run.id,{code:'LAUNCH_CONTEXT_CHANGED'});
+        this.store.updateRun(run.id,{execution:'failed'},'run.failed');
+        this.telemetry.finish(run.id,false);this.modelTracker.finish(run.id,'failed');
+        throw error;
+      }
       const current=this.store.getRun(run.id)!;
       if(terminal(current.execution)&&current.execution!=='lost')return current;
       if(this.rpc===rpc&&this.active()?.id===run.id)await this.failTransport('SUBMIT_UNCERTAIN');
