@@ -1,3 +1,5 @@
+import {ProjectProgressService,type CompletionReaders} from './project-progress.ts';
+import type {IntegrationCompletionReader} from './integration-queue.ts';
 import {lstatSync,readdirSync} from 'node:fs';
 import {fingerprintWorkspace} from './workspace-fingerprint.ts';
 import type {CapabilityExecutionService} from './capability-execution.ts';
@@ -78,9 +80,13 @@ export interface ControllerRegistryOptions {
   claudeAuthentication?:ReturnType<typeof createClaudeAuthenticationService>;
   configuredCredentialRefs?:readonly string[];
   transports?:ModelHubTransports;
+  completion?:CompletionReaders;
+  candidateCompletion?:IntegrationCompletionReader;
 }
 export { AppError } from './errors.ts';
 export class Controller {
+  private candidateCompletion:IntegrationCompletionReader;
+  private completionPolicy?:CompletionReaders['policy'];
   private workerScheduler?:WorkerScheduler;
   private integrationQueue?:IntegrationQueue;
   private workerExecution?:CapabilityExecutionService;
@@ -92,6 +98,7 @@ export class Controller {
   private projects?:Projects;private workspaceId?:string;private switching=false;
   private provider:ProviderStatus='disconnected';private issue:string|null=null;private connecting:Promise<void>|null=null;
   private generation=0;private output=new Map<string,string>();private deadline:NodeJS.Timeout|null=null;private launchValidated=false;
+  readonly progress:ProjectProgressService;
   readonly qualityLoops:QualityLoopService;
   private qualityScope=false;
   private qualityPorts:QualityServicePorts;
@@ -122,6 +129,7 @@ export class Controller {
   private ownQualityStep<T>(work:()=>T):T{const before=this.qualityScope;this.qualityScope=true;try{return work();}finally{this.qualityScope=before;}}
   assertExecutionAvailable(){this.qualityAvailable();if(this.soloRecoveryRequired())throw new AppError('SOLO_RECOVERY_REQUIRED',409);}
   constructor(store:Store,workspace:string,factory:(workspace:string,write:boolean)=>RpcPort,projects?:Projects,verificationConfig:VerificationConfiguration[]=[],modelHubConfig:readonly ModelHubConfiguration[]=[],claudeOptions:ClaudeTaskServiceOptions={},claudePlanningOptions:ClaudePlanningOptions={},qualityOptions:Pick<QualityNativeOptions,'findExecutable'|'claudeFactory'|'codexReview'>={},registryOptions:ControllerRegistryOptions={}){
+    this.candidateCompletion=registryOptions.candidateCompletion??(()=>null);this.completionPolicy=registryOptions.completion?.policy;
     this.store=store;this.workspace=workspace;this.factory=factory;this.projects=projects;
     this.subscriptionUsage=new SubscriptionUsageStore(store);
     this.claudeTasks=new ClaudeTaskService(store,projects,claudeOptions,this.subscriptionUsage);
@@ -144,6 +152,7 @@ export class Controller {
     this.verificationSetup=new VerificationSetupService(store,projects,verificationConfig);
     const commandResolver=(path:string)=>this.verificationSetup.commands(path);
     this.verification=new VerificationService(store,projects,commandResolver,()=>this.workerIntegrationBusy());
+    this.progress=new ProjectProgressService(store,new Studio(store),{deliverables:id=>this.deliverables(id),verification:(workspaceId,runId)=>this.verification.view(workspaceId,runId),...registryOptions.completion,policy:id=>this.completionPolicy?.(id)});
     this.sourceGraphs=new SourceGraphService(store,projects);
     this.merges=new MergeService(store,projects,this.verification,()=>this.qualityBusy()||this.soloRecoveryRequired()||!!this.extensionPending||!!this.active()||!!this.connecting||this.switching||this.modelHub.active||!!this.workflows?.active||!!this.reviews?.active||!!this.planningSuggestions?.active);
     this.workflows=new WorkflowService(store,projects,commandResolver,()=>this.qualityBusy()||this.soloRecoveryRequired()||!!this.extensionPending||!!this.active()||!!this.connecting||this.switching||this.modelHub.active||this.verification.active||this.merges.active||!!this.reviews?.active||!!this.planningSuggestions?.active,id=>{this.merges.ensureAvailable(id);this.verification.ensureAvailable(id);this.planningSuggestions.ensureAvailable(id);this.reviews.ensureAvailable(id);});
@@ -154,9 +163,10 @@ export class Controller {
     store.db.exec('CREATE TABLE IF NOT EXISTS quality_controller_receipts(id TEXT PRIMARY KEY,body TEXT NOT NULL)');
     this.qualityLoops=new QualityLoopService(store,this.qualityPorts);
   }
-  initializeWorkers(execution:CapabilityExecutionService,configuration:WorkerConfiguration={}){
+  initializeWorkers(execution:CapabilityExecutionService,configuration:WorkerConfiguration={},completion?:{policy:NonNullable<CompletionReaders['policy']>;candidate:IntegrationCompletionReader}){
     if(this.workerScheduler)return;
     if(!this.projects)return;
+    if(completion){this.completionPolicy=completion.policy;this.candidateCompletion=completion.candidate;}
     this.workerConfiguration=readWorkerConfiguration(configuration.targetBranch,JSON.stringify(configuration.projects??[]));this.workerExecution=execution;
     const workers=new ParallelWorkerService(this.store),spaces=new WorkerSpaces(this.store,this.projects,workers);
     this.integrationQueue=new IntegrationQueue(this.store,this.projects,workers,spaces,this.verification,this.merges,projectId=>{
@@ -165,8 +175,8 @@ export class Controller {
       if(!held)throw new AppError('INTEGRATION_BASELINE_CHANGED',409);
       const graph=new TaskGraphService(this.store).view(projectId,held.batch.planningVersionId,{verifiedDoneIds:[],blocked:[]},held.batch.graphRevision);
       if(graph.stale||new TaskGraphService(this.store).read(projectId,held.batch.planningVersionId).revision!==held.batch.graphRevision)throw new AppError('INTEGRATION_BASELINE_CHANGED',409);
-      return {approvedBaseline:held.batch.planningHash,defaultBranch:config?.defaultBranch??'',requiredChecks:config?.requiredChecks??[]};
-    });
+      return {approvedBaseline:held.batch.planningHash,defaultBranch:config?.defaultBranch??'',requiredChecks:config?.requiredChecks??[],completionPolicy:this.completionPolicy?.(projectId)};
+    },item=>this.candidateCompletion(item));
     this.store.db.exec('CREATE TABLE IF NOT EXISTS worker_integration_refusals(reservation_id TEXT PRIMARY KEY,project_id TEXT NOT NULL,reason TEXT NOT NULL);');
     for(const row of this.store.db.prepare('SELECT reservation_id FROM worker_integration_refusals').all()){
       const reservation=workers.read(String(row.reservation_id));
@@ -181,7 +191,7 @@ export class Controller {
     this.workerScheduler=new WorkerScheduler(this.store,this.projects,execution,runtime=>{
       const entries=this.subscriptionUsage.snapshot().filter(e=>e.observation.runtimeId===runtime);
       return entries.some(e=>e.observation.providerStatus==='rejected'||e.observation.buckets?.some(b=>[b.primary,b.secondary].some(w=>w?.providerStatus==='rejected'||w?.remainingPercent===0)))?'exhausted':'unknown';
-    });
+    },this.progress);
     for(const r of this.workerScheduler.list())if(r.state!=='released')this.workerRecovery.add(r.reservationId);
     this.store.db.exec(`CREATE TABLE IF NOT EXISTS worker_http_batches(id TEXT PRIMARY KEY,request_id TEXT UNIQUE NOT NULL,input_digest TEXT NOT NULL,body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS worker_http_submissions(request_id TEXT PRIMARY KEY,batch_id TEXT NOT NULL,body TEXT NOT NULL);`);
@@ -326,7 +336,7 @@ export class Controller {
       const taskId=this.workerExecution!.record(projectId,e.executionId).taskId;
       try{
         this.assertWorkerInputs(record.batch);
-        await this.workerScheduler!.submit({batch:record.batch,executionId:e.executionId,approval:{confirmed:true,expectedPlanDigest:e.expectedPlanDigest},claims:record.claims.find(c=>c.executionId===e.executionId)!.claims,verifiedDoneIds:[]});
+        await this.workerScheduler!.submit({batch:record.batch,executionId:e.executionId,approval:{confirmed:true,expectedPlanDigest:e.expectedPlanDigest},claims:record.claims.find(c=>c.executionId===e.executionId)!.claims});
       }catch(error){result.reasons.push({taskId,code:error instanceof AppError?error.message:'WORKER_SUBMISSION_UNCERTAIN'});}
     }
     result.state='recorded';this.store.db.prepare('UPDATE worker_http_submissions SET body=? WHERE request_id=?').run(JSON.stringify(result),input.requestId);

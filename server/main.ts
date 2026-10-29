@@ -1,3 +1,4 @@
+import {readCompletionPolicies} from './project-progress.ts';
 import { mkdirSync, existsSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -25,7 +26,8 @@ if(!Array.isArray(allowed)||allowed.some(p=>typeof p!=='string'))throw new Error
 const projects=new Projects(store,join(dataDir,'workspaces'),allowed,join(dataDir,'projects'));
 const verificationConfig=readVerificationConfiguration(process.env.ORBIT_VERIFICATION_COMMANDS);
 const modelHubConfig=readModelHubConfiguration(process.env.ORBIT_MODEL_HUB);
-const controller=new Controller(store,workspace,(path,write)=>codexFactory(path,write)(),projects,verificationConfig,modelHubConfig);
+const completionPolicies=readCompletionPolicies(process.env.ORBIT_COMPLETION_POLICIES);
+const controller=new Controller(store,workspace,(path,write)=>codexFactory(path,write)(),projects,verificationConfig,modelHubConfig,{},{},{},{completion:{policy:id=>completionPolicies.find(p=>p.projectPath===store.projects().find(project=>project.id===id)?.path)?.policy}});
 const workers=readWorkerConfiguration(process.env.ORBIT_INTEGRATION_BRANCH,process.env.ORBIT_INTEGRATION_PROJECTS);
 const server=createHttpServer(controller,resolve('dist'),{workers});
 let stopping=false;

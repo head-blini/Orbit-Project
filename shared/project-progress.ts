@@ -1,3 +1,4 @@
+import type {TaskCompletion} from './task-completion.ts';
 import type {QualityProgress} from './quality-progress.ts';
 import type {CapabilityExecutionRecord} from './capability-execution.ts';
 import type {CapabilityRouteDecision} from './capability-routing.ts';
@@ -32,6 +33,7 @@ export interface ProgressRun {
   verification:ProgressVerification;checks:number;planningVersionId:string|null;lastActivity:string|null;
 }
 export interface ProgressTask {
+  completion?:TaskCompletion;
   quality?:QualityProgress;
   capabilityRoutes?:CapabilityRouteDecision[];
   capabilityExecutions?:CapabilityExecutionRecord[];

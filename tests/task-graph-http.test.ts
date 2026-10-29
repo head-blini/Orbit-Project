@@ -26,6 +26,7 @@ test('HTTP task graph saves revisions, reads history and derives state without m
     const graph={contentHash:version.contentHash,expectedRevision:0,nodes:[{taskId:first.id},{taskId:second.id}],edges:[{taskId:second.id,dependsOn:first.id}]};
     assert.equal((await f.post(base+'/revisions',graph,{'X-CSRF-Token':''})).status,403);
     const smuggled=await f.post(base+'/revisions',{...graph,planningVersionId:'other'});assert.equal(smuggled.status,400);
+    assert.equal((await f.post(base+'/revisions',{...graph,verifiedDoneIds:[first.id]})).status,400);
     const saved=await f.post(base+'/revisions',graph);assert.equal(saved.status,200);assert.equal((await saved.json() as {revision:number}).revision,1);
     assert.equal((await f.post(base+'/revisions',graph)).status,409,'stale expectedRevision');
     const cycle=await f.post(base+'/revisions',{...graph,expectedRevision:1,edges:[...graph.edges,{taskId:first.id,dependsOn:second.id}]});
@@ -36,6 +37,7 @@ test('HTTP task graph saves revisions, reads history and derives state without m
     const seq=f.store.lastSeq();
     const state=await (await f.get(base+'/state')).json() as {stale:boolean;nodes:{taskId:string;state:string}[]};
     assert.equal(state.stale,false);
+    assert.deepEqual(state,f.controller.progress.graph(f.project.id,version.id).state,'HTTP uses the same completion snapshot reader');
     assert.deepEqual(state.nodes.map(node=>node.state),['ready','waiting']);
     assert.ok(state.nodes.every(node=>node.state!=='done'),'no done until the quality gate defines it');
     assert.equal(f.store.lastSeq(),seq,'GET is read-only');
