@@ -46,8 +46,8 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
   const progress=new ProjectProgressService(controller.store,studio,{deliverables:id=>controller.deliverables(id),verification:(workspaceId,runId)=>controller.verification.view(workspaceId,runId)});
   const planningHandoff=new PlanningHandoffService(controller.store,(workspaceId,runId)=>controller.verification.view(workspaceId,runId),id=>controller.workspaceDiff(id));
   // Share the Controller's caches so registry readiness and the readiness API never diverge.
-  const nativeProbe=options.nativeProbe??controller.nativeProbe;
-  const claudeAuthentication=options.claudeAuthentication??controller.claudeAuthentication;
+  const nativeProbe=options.nativeProbe??controller.nativeProbe??createNativeProbeService();
+  const claudeAuthentication=options.claudeAuthentication??controller.claudeAuthentication??createClaudeAuthenticationService();
   const nativeReadiness=():NativeReadinessReport=>{
     const installation=nativeProbe.get(),connection=controller.snapshot().provider;
     return {codex:{installation:installation?.codex??{status:'unknown',version:null},authentication:connection==='ready'?'confirmed':'unknown',connection},
