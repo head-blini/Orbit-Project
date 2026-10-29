@@ -30,7 +30,6 @@ import type { RpcPort } from './rpc.ts';
 import { AppError } from './errors.ts';
 import { Projects,assertGitProject } from './projects.ts';
 import { evaluateLaunch,outboundDenial,providerConnections } from './providers/policy.ts';
-import {HarnessStore} from './harness-store.ts';
 import {harnessV0} from './harness-policy.ts';
 import {HarnessService,type HarnessServiceOptions} from './harness-service.ts';
 import {briefPiiInspectionText,activeCodexHarness,type CodexHarnessContext} from './planning/execution.ts';
@@ -213,7 +212,7 @@ export class Controller {
   private toolLaunchContext(selection:Readonly<ToolInvocationSelection>):string {
     if(!this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);
     const acceptance=this.taskVerificationPreview(selection.projectId,selection.taskId,this.workspaceId);
-    return createHash('sha256').update(JSON.stringify([this.workspaceId,acceptance?.digest??null,activeCodexHarness(new HarnessStore(this.store),selection.projectId)])).digest('hex');
+    return createHash('sha256').update(JSON.stringify([this.workspaceId,acceptance?.digest??null,activeCodexHarness(this.harness.versions,selection.projectId)])).digest('hex');
   }
   private async launchTool(request:Readonly<ToolLaunchRequest>):Promise<ToolLaunchResult> {
     if(!toolGrantable(request.runtimeId,request.kind))throw new AppError('TOOL_NOT_GRANTABLE',403);
@@ -980,7 +979,7 @@ export class Controller {
     const sessionId=this.thread();if(!sessionId)throw new AppError('NOT_CONNECTED');
     const harnessSame=()=>{
       if(!harness)return;
-      try{if(task?.projectId&&JSON.stringify(activeCodexHarness(new HarnessStore(this.store),task.projectId))===JSON.stringify(harness.selected))return;}catch{/* fail closed */}
+      try{if(task?.projectId&&JSON.stringify(activeCodexHarness(this.harness.versions,task.projectId))===JSON.stringify(harness.selected))return;}catch{/* fail closed */}
       throw new AppError('LAUNCH_CONTEXT_CHANGED',409);
     };
     harnessSame();
