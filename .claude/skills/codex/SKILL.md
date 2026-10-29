@@ -39,7 +39,7 @@ EOF
 
 ## After exit
 
-The wrapper prints JSON: `runId`, `status` (`completed|failed|quota_exhausted|interrupted`), `exitCode`, `sessionId`, `record` and `lastMessage`.
+The wrapper prints JSON: `runId`, `status` (`completed|failed|quota_exhausted|provider_capacity|interrupted`), `exitCode`, `sessionId`, `record` and `lastMessage`.
 
 1. Read `last.md`. Codex's own claims are not evidence.
 2. Re-run the task's verification commands yourself (typecheck, test, build) in that worktree.
