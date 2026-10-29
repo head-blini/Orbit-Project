@@ -11,8 +11,9 @@ import type {ClaudeAuthenticationReport} from '../../shared/native-readiness.ts'
  * Claude Code runtime adapter over the official `claude -p --output-format stream-json`
  * interface. It reuses Orbit's isolation stance: no shell or web tools, no MCP servers,
  * no user/project settings, prompts answered by nobody, and subscription auth only.
+ * The one exception is 'research': web tools only, no file tools, run from an empty temp cwd.
  */
-export type ClaudeMode='read'|'write';
+export type ClaudeMode='read'|'write'|'research';
 export type ClaudeAuth='subscription'|'api_key'|'unknown';
 export interface ClaudeQuotaWindow {id:string;utilization:number|null;resetsAt:string|null;status:string}
 export type ClaudeEvent=
@@ -31,7 +32,7 @@ export interface ClaudeOutcome {
   identity?:NativeIdentity;
 }
 
-const tools:Record<ClaudeMode,string>={read:'Read,Grep,Glob',write:'Read,Grep,Glob,Edit,Write'};
+const tools:Record<ClaudeMode,string>={read:'Read,Grep,Glob',write:'Read,Grep,Glob,Edit,Write',research:'WebSearch,WebFetch'};
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_LINE=4*1024*1024;
 
