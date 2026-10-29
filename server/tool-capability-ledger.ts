@@ -4,6 +4,7 @@ import type {ToolAggregate,ToolDiscoverySection,ToolGrant,ToolInvocationRecord,T
 /** Orbit never loads plugins; hooks/subagents are discovery-only (TOOLS-D1 defaults 3-4). */
 // Adopted defaults (docs/ORBIT-TOOLS-D1.md): only Codex MCP is grantable; skills unsupported, slash/Claude MCP blocked, hooks/subagents discovery-only, plugins never loaded.
 const GRANTABLE:ReadonlySet<ToolKind>=new Set(['mcp']);
+export const toolGrantable=(runtimeId:unknown,kind:unknown)=>runtimeId==='codex'&&GRANTABLE.has(kind as ToolKind);
 const keyId=(key:ToolKey)=>JSON.stringify([key.runtimeId,key.kind,key.itemId]);
 const bySort=(a:string,b:string)=>a<b?-1:a>b?1:0;
 export const itemDigest=(meta:ToolItemMeta):string=>createHash('sha256').update(JSON.stringify([meta.kind,meta.id,meta.scope??null,meta.handlerType??null,meta.nativeTrust??null,meta.pluginOwned??null,meta.runtimeVersion??null,meta.adapterRevision??null])).digest('hex');
@@ -19,7 +20,7 @@ export function aggregate(sections:readonly ToolDiscoverySection[],grants:readon
     const digest=current.get(id);
     const installed=digest!==undefined?'discovered':sectionStatus.get(JSON.stringify([key.runtimeId,key.kind]))==='available'?'absent':'unknown';
     // grant is void unless its digest equals the current metadata digest
-    const grant=GRANTABLE.has(key.kind)&&key.runtimeId==='codex'&&digest!==undefined?sortedGrants.find(g=>keyId(g.key)===id&&g.itemDigest===digest)??null:null;
+    const grant=toolGrantable(key.runtimeId,key.kind)&&digest!==undefined?sortedGrants.find(g=>keyId(g.key)===id&&g.itemDigest===digest)??null:null;
     const invoked={native:0,mock:0,unknown:0};let verified=0;
     for(const record of records){if(keyId(record.key)!==id)continue;
       if(record.evidenceSource==='native'){invoked.native++;if(grant&&record.grantId===grant.grantId&&record.itemDigest===grant.itemDigest)verified++;}
