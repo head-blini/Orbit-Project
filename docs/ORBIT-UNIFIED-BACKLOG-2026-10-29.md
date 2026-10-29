@@ -13,7 +13,7 @@
 | 1 | LIVE-CLI | 승인된 임시 fixture에서 Claude Code, Codex 구독 CLI 각 최소 1회 Orbit Runtime 경유 E2E | INT-QG, 공식 명령·CLI 준비 | 실행/세션/기준/결과/종료·모델관측·중복/권한 분리 증거 |
 | 2 | CORE-LIVE | 독립 교차 리뷰, `modelId: null` 및 Codex 관측 제약, 인계/재시작 복구 보완 | LIVE-CLI | 실제 관측이 없는 항목은 blocked 유지, 검토 결과와 수정·재검증 증거 |
 | 3 | REGISTRY | 사용자 모델/제공자/실행기 Registry 등록·검증·비활성화 | 기본 Core contracts | 타입별 인증·capability·비용 및 사용자 UI CRUD, 회귀 |
-| 4 | GPT-EXCHANGE | ChatGPT 웹 요청·응답의 허용된 구조화 인계 | 승인/기준/인계 | 실제 연결 증거, 불가 시 blocked; 무단 API 전환 금지 |
+| 4 | GPT-EXCHANGE (**deferred** 2026-10-29: 1차 실사용 보류, 코드·설계 보존) | ChatGPT 웹 요청·응답의 허용된 구조화 인계 | 승인/기준/인계 | 실제 연결 증거, 불가 시 blocked; 무단 API 전환 금지 |
 | 5 | USAGE | Codex/Claude/GPT 다중 계정의 잔여 구독 한도 | provider 관측 | 출처/시점/공유 pool/unknown, API 비용과 구분 |
 | 6 | TG | 승인된 Task DAG 및 작업 계약·상태 | QG 및 기준 계약 | 순환/버전/차단·stale·작업 유형 테스트 |
 | 7 | PW | 기능 중심 병렬 Worker, 자원 소유권, 통합 큐 | TG, runtime 격리 | 실제 중첩 실행·충돌/재시작/병합 검증 |
