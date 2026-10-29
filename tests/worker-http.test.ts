@@ -102,7 +102,7 @@ const fixturePolicy={...defaultCompletionPolicy('general'),dependencyRelease:'qu
 function fixtureBinding(f:ReturnType<typeof setup>,item:Readonly<IntegrationItem>):CompletionBinding {
  const r=JSON.parse(String(f.store.db.prepare('SELECT body FROM worker_reservations WHERE id=?').get(item.fence.reservationId)!.body)) as import('../shared/parallel-workers.ts').WorkerReservation;
  const hash=(v:unknown)=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
- return {projectId:item.projectId,taskId:r.attempt.taskId,runId:f.store.findRequest(r.attempt.dispatchRequestId)!.run.id,planningVersionId:r.batch.planningVersionId,planningContentHash:item.approvedBaseline,acceptanceDigest:'acceptance',artifactId:item.id,artifactDigest:item.candidateDigest,graphRevision:String(r.batch.graphRevision),contractDigest:hash(r.batch.contractDigests),policyDigest:completionPolicyDigest(fixturePolicy),configDigest:item.configDigest,artifactScope:'task_manifest' as const,baseSha:null,inputSnapshotDigest:item.space.inputDigest};
+ return {projectId:item.projectId,taskId:r.attempt.taskId,runId:f.store.findRequest(r.attempt.dispatchRequestId)!.run.id,planningVersionId:r.batch.planningVersionId,planningContentHash:item.approvedBaseline,acceptanceDigest:f.store.findRequest(r.attempt.dispatchRequestId)!.run.acceptanceDigest??null,artifactId:item.id,artifactDigest:item.candidateDigest,graphRevision:String(r.batch.graphRevision),contractDigest:hash(r.batch.contractDigests),policyDigest:completionPolicyDigest(fixturePolicy),configDigest:item.configDigest,artifactScope:'task_manifest' as const,baseSha:null,inputSnapshotDigest:item.space.inputDigest};
 }
 function fixtureEvidence(binding:CompletionBinding):CompletionEvidence {
  const model=(id:string)=>({providerId:'fixture',modelId:id,runId:id==='producer'?binding.runId:'candidate-'+id,sessionId:'session-'+id,source:'native_observed' as const,evidenceSource:'native' as const});
@@ -176,7 +176,8 @@ for(const done of [true,false])test(`real Controller source reader delivers the 
    // worker runs are dispatched without one (and capability-execution rejects a changed digest while
    // running), so it is bound only after terminal detection, when the queue reads candidate evidence.
    current=item;const run=f.store.getRun(fixtureBinding(f,item).runId!)!;
-   if(!run.acceptanceDigest)f.store.db.prepare('UPDATE runs SET body=? WHERE id=?').run(JSON.stringify({...run,acceptanceDigest:'acceptance'}),run.id);
+   // GENERAL-ACCEPT-A: general worker runs carry the server-computed acceptance digest; never patch it in.
+   assert.match(String(run.acceptanceDigest),/^[a-f0-9]{64}$/);
    return candidateFixture(f,item);
   }});
   let sourceReads=0;
