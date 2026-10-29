@@ -25,6 +25,7 @@ import { HandoffService } from './handoff-service.ts';
 import {controlPlaneStatus} from './control-plane.ts';
 import {GoalService} from './goal-service.ts';
 import {TaskGraphService} from './task-graph.ts';
+import {ProjectProgressService} from './project-progress.ts';
 import {AppPreviewHost} from './app-preview.ts';
 import {assertGitProject} from './projects.ts';
 import {quotaSignal,type ProgressSignals} from '../shared/project-progress.ts';
@@ -42,7 +43,8 @@ export function createHttpServer(controller:Controller,assets:string,options:{wo
   const handoff=new HandoffService(controller.store,studio);
   const goals=new GoalService(controller.store);
   const taskGraphs=new TaskGraphService(controller.store);
-  const progress=controller.progress;
+  // Partial controllers (tests, embedded hosts) fall back to a reader without completion policy, i.e. 'wait'.
+  const progress=controller.progress??new ProjectProgressService(controller.store,studio,{deliverables:id=>controller.deliverables(id),verification:(workspaceId,runId)=>controller.verification.view(workspaceId,runId)});
   const planningHandoff=new PlanningHandoffService(controller.store,(workspaceId,runId)=>controller.verification.view(workspaceId,runId),id=>controller.workspaceDiff(id));
   // Share the Controller's caches so registry readiness and the readiness API never diverge.
   const nativeProbe=options.nativeProbe??controller.nativeProbe??createNativeProbeService();
