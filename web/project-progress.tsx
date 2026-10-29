@@ -125,7 +125,7 @@ const pendingKey='orbit.progress.pending';
 const runErrors:Record<string,string>={RUN_ACTIVE:'이 작업은 이미 실행 중입니다. 기존 실행이 끝난 뒤 다시 시도하세요.',PLANNING_VERSION_STALE:'작업의 승인 기준이 현재 승인본이 아닙니다. 기획을 확인하세요.',
   CLAUDE_NOT_INSTALLED:'Claude Code가 설치되어 있지 않습니다.',SOLO_RECOVERY_REQUIRED:'종료를 확인하지 못한 실행이 있어 새 실행이 차단되었습니다.',IDEMPOTENCY_CONFLICT:'저장된 요청과 다른 작업입니다. 새로고침 후 확인하세요.'};
 const recoveryErrors:Record<string,string>={CLAUDE_RUN_STILL_OWNED:'Orbit이 아직 이 실행을 관리 중입니다. 종료가 관측될 때까지 기다리거나 중단을 요청하세요.',
-  CLAUDE_RUN_NOT_LOST:'이 실행은 복구 대상이 아닙니다. 새로고침 후 상태를 확인하세요.',CLAUDE_STOP_CONFIRMATION_REQUIRED:'종료 확인이 필요합니다.',SESSION_BUSY:'Orbit이 종료 중입니다.'};
+  CLAUDE_RUN_NOT_LOST:'이 실행은 복구 대상이 아닙니다. 새로고침 후 상태를 확인하세요.',CLAUDE_RUN_WORKER_RECOVERY_REQUIRED:'별도 작업 공간 실행은 여기서 차단을 해제할 수 없습니다.',CLAUDE_STOP_CONFIRMATION_REQUIRED:'종료 확인이 필요합니다.',SESSION_BUSY:'Orbit이 종료 중입니다.'};
 function readPending(projectId:string):{taskId:string;requestId:string}|null{
   try{const value=JSON.parse(sessionStorage.getItem(pendingKey)??'null');return value&&value.projectId===projectId&&typeof value.taskId==='string'&&typeof value.requestId==='string'?value:null;}catch{return null;}
 }

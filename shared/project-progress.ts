@@ -22,7 +22,7 @@ export type ConnectionFreshness='live'|'quiet'|'offline';
 export interface ProgressSignals {provider?:ProviderStatus;quota?:'available'|'exhausted'|'unknown';recoveryRequired?:boolean;
   /** Expected reset of the exhausted observed window; null means unknown. Absent when the runtime reports none. */quotaResetsAt?:string|null}
 /** Explicit recovery state of a lost Claude Code run. `released` only lifts the dispatch block; the run stays lost. */
-export interface ClaudeRunRecovery {runId:string;taskId:string|null;state:'required'|'released';lostReason:string|null;exitObserved:boolean;
+export interface ClaudeRunRecovery {runId:string;taskId:string|null;state:'required'|'released'|'worker_recovery_required';lostReason:string|null;exitObserved:boolean;
   basis:'exit_observed'|'user_confirmed_stopped'|null;releasedAt:string|null}
 export interface ProgressInput {
   projectId:string;tasks:readonly SavedTask[];runs:readonly Run[];checks:readonly CheckRecord[];

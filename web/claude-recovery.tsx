@@ -18,6 +18,9 @@ export function ClaudeRecoveryControl({recovery,advanced,busy,onRecover}:{recove
   if(recovery.state==='released')return <section aria-label="실행 복구" className="progress-quality">
     <p role="status">차단 해제됨 · {recovery.basis==='exit_observed'?'종료 관측':'사용자가 종료 확인'}{recovery.releasedAt?` · ${kst(recovery.releasedAt)}`:''}{detail}. 이 실행의 결과는 여전히 미확인입니다. 새 실행은 직접 시작하세요.</p>
   </section>;
+  if(recovery.state==='worker_recovery_required')return <section aria-label="실행 복구" className="progress-quality">
+    <p role="alert">{reasons[recovery.lostReason??'']??'실행 종료를 확인하지 못했습니다.'}{detail} 별도 작업 공간에서 실행된 작업이라 여기서 차단을 해제할 수 없습니다. 작업 공간 복구 절차가 필요합니다.</p>
+  </section>;
   return <section aria-label="실행 복구" className="progress-quality">
     <p role="alert">{reasons[recovery.lostReason??'']??'실행 종료를 확인하지 못했습니다.'}{detail} 이 작업의 새 실행은 차단되어 있습니다.</p>
     <p>{recovery.exitObserved?'종료는 관측되었습니다.':'Orbit은 Claude 프로세스가 멈췄는지 확인할 수 없습니다. 직접 확인한 경우에만 해제하세요.'} 해제해도 성공으로 처리하거나 자동으로 다시 실행하지 않습니다.</p>

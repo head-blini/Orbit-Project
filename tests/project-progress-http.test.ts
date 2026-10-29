@@ -33,8 +33,11 @@ test('progress HTTP is authenticated, project scoped, read-only and reflects obs
     assert.equal(progress.projectId,'project-a');assert.equal(progress.plan?.title,'Report');
     assert.equal(progress.totals.tasks,1);assert.equal(progress.tasks[0].stage,'quota_wait');
     assert.deepEqual(progress.blockers,[{code:'QUOTA_EXHAUSTED',scope:'project',resetsAt:null}],'Claude quota applies; Codex login does not; reset unknown');
-    claudeQuota={kind:'quota',status:'rejected',windows:[{id:'five_hour',utilization:1,resetsAt:'2026-10-29T05:00:00.000Z',status:'rejected'}]};
-    assert.equal((await (await fetch(origin+path,{headers:{cookie}})).json() as ProjectProgress).blockers[0].resetsAt,'2026-10-29T05:00:00.000Z');
+    const future=new Date(Date.now()+3600_000).toISOString(),past=new Date(Date.now()-60_000).toISOString();
+    claudeQuota={kind:'quota',status:'rejected',windows:[{id:'five_hour',utilization:1,resetsAt:future,status:'rejected'}]};
+    assert.equal((await (await fetch(origin+path,{headers:{cookie}})).json() as ProjectProgress).blockers[0].resetsAt,future);
+    claudeQuota={kind:'quota',status:'rejected',windows:[{id:'five_hour',utilization:1,resetsAt:past,status:'rejected'}]};
+    assert.equal((await (await fetch(origin+path,{headers:{cookie}})).json() as ProjectProgress).blockers[0].resetsAt,null,'a passed reset shows as unknown');
     claudeQuota=null;
     const unknown=await (await fetch(origin+path,{headers:{cookie}})).json() as ProjectProgress;
     assert.deepEqual(unknown.blockers,[]);assert.equal(unknown.tasks[0].stage,'not_started','unobserved quota stays unknown');

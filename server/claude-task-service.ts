@@ -25,7 +25,7 @@ import {classifyHarnessCandidate,harnessDigest} from './harness-policy.ts';
 import {renderOverlay,type HarnessTarget,type HarnessVersion} from '../shared/harness.ts';
 import type {ClaudeRunRecovery} from '../shared/project-progress.ts';
 
-type Runner=Pick<ClaudeCodeRun,'start'|'interrupt'>;
+type Runner=Pick<ClaudeCodeRun,'start'|'interrupt'>&{owned?:()=>boolean};
 type Quota=Extract<ClaudeEvent,{kind:'quota'}>;
 export interface ClaudeTaskServiceOptions {
   findExecutable?:()=>string;
@@ -37,11 +37,17 @@ type Active={runner:Runner;done:Promise<void>};
 const RECOVERY='run.recovery_confirmed';
 
 /** Expected reset of the observed rejected windows; unknown unless every rejected window reports a valid time. */
-export function claudeQuotaResetsAt(quota:Pick<Quota,'windows'>|null):string|null{
+export function claudeQuotaResetsAt(quota:Pick<Quota,'windows'>|null,now=Date.now()):string|null{
   const rejected=quota?.windows.filter(window=>window.status==='rejected')??[];
   const times=rejected.map(window=>typeof window.resetsAt==='string'&&Number.isFinite(Date.parse(window.resetsAt))?window.resetsAt:null);
   // Every rejected window must reset before work can resume, so the latest one bounds the wait.
-  return times.length&&!times.includes(null)?(times as string[]).reduce((a,b)=>Date.parse(a)>=Date.parse(b)?a:b):null;
+  const latest=times.length&&!times.includes(null)?(times as string[]).reduce((a,b)=>Date.parse(a)>=Date.parse(b)?a:b):null;
+  // A reset time already passed is not an expectation; the window state is unknown until observed again.
+  return latest&&Date.parse(latest)>now?latest:null;
+}
+/** A lost run blocks until an explicit recovery record exists; non-Claude lost runs have no such action here. */
+export function lostUnresolved(store:Store,run:Run):boolean{
+  return run.execution==='lost'&&(run.runtime!=='claude-code'||!store.db.prepare('SELECT 1 FROM events WHERE kind=? AND run_id=? LIMIT 1').get(RECOVERY,run.id));
 }
 
 /** HE-5a: the promoted pointer only, re-checked against AX06 at injection. Anything unreadable or unsafe refuses
@@ -63,7 +69,7 @@ function activeHarness(harness:Pick<HarnessStore,'current'>,projectId:string,tar
 export class ClaudeTaskService {
   readonly subscriptionUsage:SubscriptionUsageStore;
   private store:Store;private projects?:Projects;private options:ClaudeTaskServiceOptions;
-  private active=new Map<string,Active>();private latestQuota:Quota|null=null;private closing=false;private harness:Pick<HarnessStore,'current'>;
+  private active=new Map<string,Active>();private held=new Map<string,Runner>();private latestQuota:Quota|null=null;private closing=false;private harness:Pick<HarnessStore,'current'>;
   constructor(store:Store,projects?:Projects,options:ClaudeTaskServiceOptions={},subscriptionUsage=new SubscriptionUsageStore(store)){this.subscriptionUsage=subscriptionUsage;this.store=store;this.projects=projects;this.options=options;this.harness=options.harness??new HarnessStore(store);}
   quota():Quota|null{return this.latestQuota?structuredClone(this.latestQuota):null;}
   submit(projectId:string,taskId:string,requestId:string,worker?:WorkerDispatchContext):Run {
@@ -135,7 +141,7 @@ export class ClaudeTaskService {
       return this.store.updateRun(run.id,{execution:'failed'},'run.failed',{reason:'RUNTIME_NOT_STARTED'});
     }
     const active:Active={runner,done:Promise.resolve()};this.active.set(run.id,active);
-    active.done=this.execute(run.id,runner).finally(()=>{this.subscriptionUsage.disconnect('claude-code',run.id);this.active.delete(run.id);});
+    active.done=this.execute(run.id,runner).finally(()=>{this.subscriptionUsage.disconnect('claude-code',run.id);this.active.delete(run.id);if(runner.owned?.())this.held.set(run.id,runner);});
     return this.store.getRun(run.id)!;
   }
   private observe(id:string,event:ClaudeEvent){
@@ -168,7 +174,10 @@ export class ClaudeTaskService {
     catch{/* The durable nonterminal intent still blocks this task and becomes lost on restart. */}
   }
   /** A lost run blocks new owners until the user explicitly records that it stopped. History is never rewritten. */
-  lostUnresolved(run:Run):boolean{return run.execution==='lost'&&(run.runtime!=='claude-code'||!this.released(run.id));}
+  lostUnresolved(run:Run):boolean{return lostUnresolved(this.store,run);}
+  /** Owned while executing, or while the runner still holds a child whose close was never observed. */
+  private owned(id:string){const held=this.held.get(id);if(held&&!held.owned?.())this.held.delete(id);return this.active.has(id)||this.held.has(id);}
+  private workerSpace(id:string){return !!this.store.db.prepare("SELECT 1 FROM events WHERE run_id=? AND kind='run.worker_space'").get(id);}
   private released(runId:string){
     const row=this.store.db.prepare('SELECT at,data FROM events WHERE kind=? AND run_id=? ORDER BY seq LIMIT 1').get(RECOVERY,runId);
     return row?{at:String(row.at),...JSON.parse(String(row.data)) as {requestId:string;basis:ClaudeRunRecovery['basis']}}:null;
@@ -181,7 +190,7 @@ export class ClaudeTaskService {
   recovery(runId:string):ClaudeRunRecovery|null{
     const run=this.store.getRun(runId);if(!run||run.runtime!=='claude-code'||run.execution!=='lost')return null;
     const released=this.released(run.id),reason=this.event(run.id,'run.lost')?.reason;
-    return {runId:run.id,taskId:run.taskId??null,state:released?'released':'required',lostReason:typeof reason==='string'?reason:null,
+    return {runId:run.id,taskId:run.taskId??null,state:released?'released':this.workerSpace(run.id)?'worker_recovery_required':'required',lostReason:typeof reason==='string'?reason:null,
       exitObserved:this.event(run.id,'run.runtime_outcome')?.exit==='observed',basis:released?.basis??null,releasedAt:released?.at??null};
   }
   recoveries(projectId:string):ClaudeRunRecovery[]{
@@ -201,8 +210,10 @@ export class ClaudeTaskService {
     if(prior){if(prior.run_id!==runId)throw new AppError('IDEMPOTENCY_CONFLICT',409);return this.recovery(runId)!;}
     if(this.closing)throw new AppError('SESSION_BUSY',409);
     // This server still owns the child: its exit will be observed, so a confirmation cannot replace it.
-    if(this.active.has(runId))throw new AppError('CLAUDE_RUN_STILL_OWNED',409);
+    if(this.owned(runId))throw new AppError('CLAUDE_RUN_STILL_OWNED',409);
     if(run.execution!=='lost')throw new AppError('CLAUDE_RUN_NOT_LOST',409);
+    // Worker-space runs stay quarantined by the worker scheduler (lost_unknown); this route cannot release them.
+    if(this.workerSpace(runId))throw new AppError('CLAUDE_RUN_WORKER_RECOVERY_REQUIRED',409);
     const view=this.recovery(runId)!;
     if(view.state==='released')return view;
     if(!input.confirmedStopped)throw new AppError('CLAUDE_STOP_CONFIRMATION_REQUIRED',409);

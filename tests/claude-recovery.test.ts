@@ -11,7 +11,14 @@ import {Projects} from '../server/projects.ts';
 import {Controller} from '../server/controller.ts';
 import {AppError} from '../server/errors.ts';
 import {createHttpServer} from '../server/http.ts';
-import {claudeQuotaResetsAt} from '../server/claude-task-service.ts';
+import {claudeQuotaResetsAt,ClaudeTaskService} from '../server/claude-task-service.ts';
+import {ClaudeCodeRun} from '../server/runtimes/claude-code.ts';
+import {GoalService} from '../server/goal-service.ts';
+import {Studio} from '../server/studio.ts';
+import {EventEmitter} from 'node:events';
+import {PassThrough} from 'node:stream';
+import type {ChildProcess} from 'node:child_process';
+import type {PlanningVersion,SavedTask} from '../shared/parallel.ts';
 import {buildProjectProgress,type ProjectProgress} from '../shared/project-progress.ts';
 import type {ClaudeTaskServiceOptions} from '../server/claude-task-service.ts';
 import {claudeFixture,outcome,session,tick} from './claude-task-fixture.ts';
@@ -119,12 +126,15 @@ test('HTTP recover route enforces session, CSRF and exact fields; progress GET e
 
 test('quota reset time is reported only from observed rejected windows',()=>{
   const w=(status:string,resetsAt:string|null)=>({id:'x',utilization:1,resetsAt,status});
-  assert.equal(claudeQuotaResetsAt(null),null);
-  assert.equal(claudeQuotaResetsAt({windows:[]}),null);
-  assert.equal(claudeQuotaResetsAt({windows:[w('rejected',null)]}),null);
-  assert.equal(claudeQuotaResetsAt({windows:[w('allowed','2026-10-29T01:00:00.000Z')]}),null);
-  assert.equal(claudeQuotaResetsAt({windows:[w('rejected','2026-10-29T01:00:00.000Z'),w('rejected',null)]}),null,'any unknown rejected window keeps it unknown');
-  assert.equal(claudeQuotaResetsAt({windows:[w('rejected','2026-10-29T01:00:00.000Z'),w('rejected','2026-10-30T01:00:00.000Z'),w('allowed','2026-10-31T01:00:00.000Z')]}),'2026-10-30T01:00:00.000Z');
+  const now=Date.parse('2026-10-29T00:00:00.000Z');
+  assert.equal(claudeQuotaResetsAt({windows:[w('rejected','2026-10-28T23:00:00.000Z')]},now),null,'a passed reset is unknown, not expected');
+  assert.equal(claudeQuotaResetsAt({windows:[w('rejected','2026-10-29T01:00:00.000Z')]},now),'2026-10-29T01:00:00.000Z');
+  assert.equal(claudeQuotaResetsAt(null,now),null);
+  assert.equal(claudeQuotaResetsAt({windows:[]},now),null);
+  assert.equal(claudeQuotaResetsAt({windows:[w('rejected',null)]},now),null);
+  assert.equal(claudeQuotaResetsAt({windows:[w('allowed','2026-10-29T01:00:00.000Z')]},now),null);
+  assert.equal(claudeQuotaResetsAt({windows:[w('rejected','2026-10-29T01:00:00.000Z'),w('rejected',null)]},now),null,'any unknown rejected window keeps it unknown');
+  assert.equal(claudeQuotaResetsAt({windows:[w('rejected','2026-10-29T01:00:00.000Z'),w('rejected','2026-10-30T01:00:00.000Z'),w('allowed','2026-10-31T01:00:00.000Z')]},now),'2026-10-30T01:00:00.000Z');
   const base={projectId:'p',tasks:[],runs:[],checks:[],plans:[],currentPlanIds:[]};
   assert.deepEqual(buildProjectProgress({...base,signals:{quota:'exhausted',quotaResetsAt:null}}).blockers,[{code:'QUOTA_EXHAUSTED',scope:'project',resetsAt:null}]);
   assert.deepEqual(buildProjectProgress({...base,signals:{quota:'exhausted'}}).blockers,[{code:'QUOTA_EXHAUSTED',scope:'project'}]);
@@ -147,4 +157,59 @@ test('UI shows plain recovery control, gated release button and manual-resume qu
   assert.match(released,/차단 해제됨/);assert.match(released,/여전히 미확인/);assert.match(released,/2026\. 10\. 29\.[^(]*9[^(]*\(KST\)/);
   assert.match(renderToStaticMarkup(createElement(QuotaResumeNote,{resetsAt:null})),/알 수 없음.*자동으로 재개하지 않습니다/);
   assert.equal(renderToStaticMarkup(createElement(QuotaResumeNote,{resetsAt:undefined})),'');
+});
+
+test('an unobserved-exit outcome whose runner still holds the child stays owned until close is observed',async()=>{
+  const child=Object.assign(new EventEmitter(),{pid:4242,stdout:new PassThrough(),stderr:new PassThrough(),stdin:new PassThrough(),signals:[] as string[]});
+  (child as unknown as {kill:(s:string)=>boolean}).kill=(signal:string)=>{child.signals.push(signal);return true;};
+  const f=claudeFixture({runnerFactory:config=>new ClaudeCodeRun({...config,spawn:()=>child as unknown as ChildProcess,killAfterMs:5})});
+  try{
+    const {task}=f.plan(),run=await f.controller.submitTask(f.project.id,task.id,{requestId:randomUUID()});await tick();
+    child.emit('error',new Error('io'));await tick();await tick();
+    assert.equal(f.store.getRun(run.id)!.execution,'lost');assert.deepEqual(child.signals,['SIGINT']);
+    assert.throws(()=>f.controller.recoverClaudeRun(f.project.id,run.id,{requestId:randomUUID(),confirmedStopped:true}),error('CLAUDE_RUN_STILL_OWNED'));
+    await new Promise(resolve=>setTimeout(resolve,20));assert.deepEqual(child.signals,['SIGINT','SIGKILL']);
+    assert.throws(()=>f.controller.recoverClaudeRun(f.project.id,run.id,{requestId:randomUUID(),confirmedStopped:true}),error('CLAUDE_RUN_STILL_OWNED'),'a kill request is not exit');
+    assert.equal(recoveryEvents(f.store).length,0);
+    child.emit('close',null,'SIGKILL');
+    assert.equal(f.controller.recoverClaudeRun(f.project.id,run.id,{requestId:randomUUID(),confirmedStopped:true}).state,'released');
+  }finally{await f.close();}
+});
+
+test('worker-space lost runs are refused by this route and never shown as released',async()=>{
+  const f=claudeFixture({runnerFactory:()=>({start:()=>Promise.reject(new Error('lost')),interrupt:()=>'not_running'})});
+  try{
+    const {task}=f.plan(),run=await f.controller.submitTask(f.project.id,task.id,{requestId:randomUUID()});await tick();
+    f.store.append('run.worker_space',run.id,{reservationId:'r',path:'never-read'});
+    assert.equal(f.controller.claudeRecoveries(f.project.id)[0].state,'worker_recovery_required');
+    assert.throws(()=>f.controller.recoverClaudeRun(f.project.id,run.id,{requestId:randomUUID(),confirmedStopped:true}),error('CLAUDE_RUN_WORKER_RECOVERY_REQUIRED'));
+    assert.equal(recoveryEvents(f.store).length,0);
+    const webRoot=new URL('../web/',import.meta.url).href;
+    const hooks=registerHooks({load(url,context,next){
+      if(url.startsWith(webRoot)&&url.endsWith('.tsx'))return {format:'module',source:ts.transpileModule(readFileSync(new URL(url),'utf8'),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText,shortCircuit:true};
+      return next(url,context);
+    }});
+    const {ClaudeRecoveryControl}=await import('../web/claude-recovery.tsx').finally(()=>hooks.deregister());
+    const html=renderToStaticMarkup(createElement(ClaudeRecoveryControl,{recovery:f.controller.claudeRecoveries(f.project.id)[0],advanced:false,busy:false,onRecover:()=>{}}));
+    assert.doesNotMatch(html,/차단 해제됨|<button/);assert.match(html,/작업 공간 복구/);
+  }finally{await f.close();}
+});
+
+test('goal recovery blocker honors an explicit Claude recovery; non-Claude lost runs and verifiedDone stay blocked',()=>{
+  const store=new Store(':memory:'),studio=new Studio(store);
+  try{
+    store.saveProject({id:'project-a',name:'a',path:'never-open',createdAt:'',writeEnabled:false,kind:'general'});
+    const input={format:'json',source:'manual',text:JSON.stringify({schema_version:'1.0',title:'G',goal:'Goal',requirements:[{id:'R1',description:'d',acceptance_criteria:['c']}],constraints:[],open_questions:[]})};
+    const draft=studio.mutate('project-a','plans',undefined,undefined,{requestId:randomUUID(),input}) as PlanningVersion;
+    const plan=studio.mutate('project-a','plans',draft.id,'approve',{expectedRevision:1}) as PlanningVersion,[task]=studio.mutate('project-a','plans',plan.id,'task-drafts',{}) as SavedTask[];
+    const meta={taskId:task.id,planningVersionId:plan.id,requirementLabels:['R1'],projectId:'project-a'};
+    const lost=store.createRun('goal-lost-1','digest','x',undefined,{...meta,runtime:'claude-code'});store.updateRun(lost.id,{execution:'lost'},'run.lost',{reason:'SERVER_RESTART'});
+    const goals=new GoalService(store);goals.create('project-a',{requestId:randomUUID(),planningVersionId:plan.id,expectedPlanningHash:plan.contentHash});
+    assert.ok(goals.list('project-a')[0].blockers.includes('RUN_RECOVERY_UNRESOLVED'));
+    new ClaudeTaskService(store).recover('project-a',lost.id,{requestId:randomUUID(),confirmedStopped:true});
+    const view=goals.list('project-a')[0];
+    assert.equal(view.blockers.includes('RUN_RECOVERY_UNRESOLVED'),false);assert.equal(view.verifiedDone,false,'a recovered lost run never proves completion');
+    const codex=store.createRun('goal-lost-2','digest','x',undefined,meta);store.updateRun(codex.id,{execution:'lost'},'run.lost');
+    assert.ok(goals.list('project-a')[0].blockers.includes('RUN_RECOVERY_UNRESOLVED'),'non-Claude lost runs have no release here');
+  }finally{store.close();}
 });
