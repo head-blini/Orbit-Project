@@ -68,12 +68,19 @@ export class PlanningAgentService {
   private owned(projectId:string,id:string,workspaceId?:string|null){const record=this.record(id);if(record.projectId!==projectId||record.workspaceId!==(workspaceId??null))throw new AppError('WORKSPACE_MISMATCH',409);this.context(projectId,workspaceId);return record;}
   private validated(projectId:string,workspaceId?:string|null){
     const context=this.context(projectId,workspaceId);if(!this.projects)throw new AppError('PLANNING_UNAVAILABLE',404);
-    if(!context){const project=this.projects.generalProject(projectId);return {id:null,path:project.path,baseSha:null};}
+    if(!context){
+      const project=this.projects.generalProject(projectId);
+      // Planning reads with cwd at the project folder; a registered user folder has no isolated planning space yet.
+      if(this.projects.isRegisteredFolder(projectId))throw new AppError('ISOLATION_REQUIRED',409);
+      return {id:null,path:project.path,baseSha:null};
+    }
     const workspace=this.projects.validate(context.id);if(workspace.projectId!==projectId)throw new AppError('WORKSPACE_MISMATCH',409);return workspace;
   }
   private selection(projectId:string){const preferences=this.preferences.read(projectId);return {runtime:this.store.projects().find(project=>project.id===projectId)?.kind==='general'?'claude-code' as const:preferences.planning,preferencesRevision:preferences.revision};}
   private previewHash(projectId:string,workspace:{id:string|null;path:string;baseSha:string|null},inputDigest:string,runtime:ProjectAiRuntime,preferencesRevision:number){
-    return hash({policy:'orbit-native-planning-v2',schema:planningOutputSchema,projectId,workspaceId:workspace.id,path:workspace.path,baseSha:workspace.baseSha,inputDigest,runtime,preferencesRevision,timeoutMs,turnLimit});
+    // Material contents bind the preview: replacing a material makes an approved preview stale.
+    const materials=workspace.id===null?listMaterials(workspace.path).map(({path,sha256})=>({path,sha256})):[];
+    return hash({policy:'orbit-native-planning-v2',schema:planningOutputSchema,projectId,workspaceId:workspace.id,path:workspace.path,baseSha:workspace.baseSha,inputDigest,materials,runtime,preferencesRevision,timeoutMs,turnLimit});
   }
   ensureAvailable(workspaceId?:string){
     if(this.pending)throw new AppError('PLANNING_BUSY',409);

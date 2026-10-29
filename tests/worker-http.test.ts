@@ -236,6 +236,18 @@ test('approved input hashes reject changed materials before dispatch',async()=>{
  }finally{await f.close();}
 });
 
+test('F02-REG: replacing a material as a new version makes an approved batch stale and keeps the old bytes',async()=>{
+ const f=setup();try{
+  const [item]=f.controller.addMaterials(f.project.id,{files:[{name:'evidence.txt',text:'original evidence'}]});
+  f.controller.initializeWorkers(f.execution);const batch=f.controller.createWorkerBatch(f.project.id,f.inputBatch);
+  const items=f.controller.replaceMaterial(f.project.id,{name:'evidence.txt',text:'revised evidence',expectedSha256:item.sha256});
+  assert.equal(items[0].previousVersions,1);
+  assert.equal(Buffer.from(f.controller.store.db.prepare('SELECT bytes FROM material_versions').get()!.bytes as Uint8Array).toString('utf8'),'original evidence');
+  const view=await f.controller.submitWorkerBatch(f.project.id,batch.id,{requestId:randomUUID()});
+  assert.equal(f.runners.length,0);assert.ok(view.reasons.length&&view.reasons.every(r=>r.code==='WORKER_INPUTS_CHANGED'));
+ }finally{await f.close();}
+});
+
 for(const status of ['queued','verifying','applying','applied'] as const){
  test(`AX03: Controller restart with ${status} queue item never dispatches, verifies or applies again`,async()=>{
   const {Store}=await import('../server/store.ts'),{Projects}=await import('../server/projects.ts'),{Controller}=await import('../server/controller.ts');

@@ -104,6 +104,9 @@ export class ClaudeTaskService {
     if(this.closing)throw new AppError('SESSION_BUSY',409);
     if(!this.projects)throw new AppError('PROJECT_CREATION_UNAVAILABLE',409);
     const project=this.projects.generalProject(projectId),studio=new Studio(this.store);
+    // A registered user folder holds files Orbit must not edit: no AI run outside an isolated worker space.
+    const isolation=()=>{if(!worker&&this.projects!.isRegisteredFolder(projectId))throw new AppError('ISOLATION_REQUIRED',409);};
+    isolation();
     const brief=studio.execution(projectId,taskId),handoff=new HandoffService(this.store,studio).build(projectId,taskId);
     if(repair&&(repair.source.planningVersionId!==brief.planningVersionId||repair.source.planningContentHash!==brief.planningContentHash))throw new AppError('QUALITY_BASELINE_CHANGED',409);
     const task=(studio.read(projectId,'tasks') as SavedTask[]).find(task=>task.id===taskId)!;
@@ -132,9 +135,9 @@ export class ClaudeTaskService {
       this.store.append('run.runtime_source',run.id,{source:this.options.runnerFactory?'mock':'native',interface:'claude.print'});
       if(repair)this.store.append('run.repair_source',run.id,{sourceRunId:repair.source.id,planningVersionId:brief.planningVersionId,planningContentHash:brief.planningContentHash});
       // Revalidate after synchronous Store observers, immediately before launch.
-      this.projects.generalProject(projectId);
+      this.projects.generalProject(projectId);isolation();
       runner=(this.options.runnerFactory??(options=>new ClaudeCodeRun(options)))({executable,cwd:worker?.space.path??project.path,mode:'write',env:claudeEnv(),beforeDispatch:()=>{
-        this.projects!.generalProject(projectId);
+        this.projects!.generalProject(projectId);isolation();
         worker?.beforeDispatch();
         if(this.closing||new ProjectAiPreferencesService(this.store).read(projectId).execution!=='claude-code'||JSON.stringify(studio.execution(projectId,taskId))!==JSON.stringify(brief)||!acceptanceSame()||!harnessSame())throw new AppError('LAUNCH_CONTEXT_CHANGED',409);
       }});

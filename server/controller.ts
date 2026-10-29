@@ -59,7 +59,7 @@ import {CodexModelTracker} from './codex-model-attribution.ts';
 import {getDevelopmentResult} from './development-results.ts';
 import {staticAppPreviewCapability} from './app-preview-policy.ts';
 import {listDeliverables,previewDeliverable,readOutputDeliverable,findOutputPath} from './deliverables.ts';
-import {addMaterials,listMaterials} from './materials.ts';
+import {addMaterials,listMaterials,MaterialHistory,replaceMaterial} from './materials.ts';
 import {ClaudeTaskService,type ClaudeTaskServiceOptions} from './claude-task-service.ts';
 import {QualityLoopService} from './quality-loop-service.ts';
 import {createQualityNativePorts,qualityRunEvidence,qualityVerifyGeneral,type QualityNativeOptions} from './quality-loop-native.ts';
@@ -115,6 +115,7 @@ export class Controller {
   private toolRun:{runId:string;request:Readonly<ToolLaunchRequest>;serverName:string}|null=null;
   readonly progress:ProjectProgressService;
   readonly deliverableVersions:DeliverableVersions;
+  private materialHistory:MaterialHistory;
   readonly qualityLoops:QualityLoopService;
   private qualityScope=false;
   private qualityPorts:QualityServicePorts;
@@ -148,6 +149,7 @@ export class Controller {
     this.candidateCompletion=registryOptions.candidateCompletion??(item=>this.readIntegrationCandidate(item));this.completionPolicy=registryOptions.completion?.policy;
     this.store=store;this.workspace=workspace;this.factory=factory;this.projects=projects;
     this.deliverableVersions=new DeliverableVersions(store);
+    this.materialHistory=new MaterialHistory(store);
     // No model or validation is run by this observer. A failed observation cannot alter execution state.
     store.on('event',event=>{
       if(!event.runId||event.kind!=='run.completed')return;
@@ -499,6 +501,7 @@ export class Controller {
   startModelRequest(input:Parameters<ModelHubService['start']>[0]){this.extensionIdle();this.planningSuggestions.ensureAvailable(this.workspaceId);this.reviews.ensureAvailable(this.workspaceId);this.workflows.ensureAvailable();this.merges.ensureAvailable();this.verification.ensureAvailable();if(this.active())throw new AppError('RUN_ACTIVE');if(this.connecting||this.switching)throw new AppError('SESSION_BUSY');return this.modelHub.start(input);}
   registerProject(path:string){this.idle();if(!this.projects)throw new AppError('UNSUPPORTED',404);return this.projects.register(path);}
   createProject(input:Parameters<Projects['createProject']>[0]){this.idle();if(!this.projects)throw new AppError('PROJECT_CREATION_UNAVAILABLE',503);return this.projects.createProject(input);}
+  registerGeneralFolder(input:Parameters<Projects['registerGeneralFolder']>[0]){this.idle();if(!this.projects)throw new AppError('PROJECT_CREATION_UNAVAILABLE',503);return this.projects.registerGeneralFolder(input);}
   createWorktree(projectId:string){this.idle();this.merges.ensureProjectAvailable(projectId);if(!this.projects)throw new AppError('UNSUPPORTED',404);return this.projects.create(projectId);}
   workspaceDiff(id:string){if(!this.projects)throw new AppError('UNSUPPORTED',404);return this.projects.diff(id);}
   appPreviewSnapshot(id:string){assertGitProject(this.store,id);if(!this.projects)throw new AppError('UNSUPPORTED',404);if(id!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);return this.projects.snapshot(id);}
@@ -879,15 +882,25 @@ export class Controller {
     return readOutputDeliverable(root,path);
   }
   /** User materials of a general project (inputs/). Adding never overwrites. */
-  materials(projectId:string){if(!this.projects)throw new AppError('PROJECT_CREATION_UNAVAILABLE',409);return listMaterials(this.projects.generalProject(projectId).path);}
-  addMaterials(projectId:string,input:unknown){
+  materials(projectId:string){
+    if(!this.projects)throw new AppError('PROJECT_CREATION_UNAVAILABLE',409);
+    const counts=this.materialHistory.counts(projectId);
+    return listMaterials(this.projects.generalProject(projectId).path).map(item=>({...item,previousVersions:counts.get(item.path)??0}));
+  }
+  private changeMaterials(projectId:string,change:(root:string)=>unknown){
     this.qualityAvailable();
     if(!this.projects)throw new AppError('PROJECT_CREATION_UNAVAILABLE',409);
     // AI runtimes read this folder; do not change it under an active run of this project.
     if(this.store.runs().some(run=>run.projectId===projectId&&!terminal(run.execution)))throw new AppError('RUN_ACTIVE',409);
-    const items=addMaterials(this.projects.generalProject(projectId).path,input);
+    // Planning suggestions are not runs; a pending one also reads these materials.
+    this.planningSuggestions.ensureAvailable(projectId);
+    change(this.projects.generalProject(projectId).path);
+    const items=this.materials(projectId);
     this.store.append('project.materials',null,{projectId,paths:items.map(item=>item.path)});return items;
   }
+  addMaterials(projectId:string,input:unknown){return this.changeMaterials(projectId,root=>addMaterials(root,input));}
+  /** A new version in place of the named material; approved worker batches then fail WORKER_INPUTS_CHANGED. */
+  replaceMaterial(projectId:string,input:unknown){return this.changeMaterials(projectId,root=>replaceMaterial(root,input,(prior,swap)=>this.materialHistory.keep(projectId,prior,swap)));}
   deliverablePreview(projectId:string,path:string){if(!this.projects)throw new AppError('PROJECT_CREATION_UNAVAILABLE',409);return previewDeliverable(this.projects.generalProject(projectId).path,path);}
   /** Switch only the existing Codex channel. Claude attempts keep their own runners. */
   async prepareWorkerWorkspace(worker:WorkerDispatchContext){

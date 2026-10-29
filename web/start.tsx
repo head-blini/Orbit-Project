@@ -4,7 +4,7 @@ import {terminal} from '../shared/types.ts';
 import type {SavedTask,PlanningVersion} from '../shared/parallel.ts';
 import type {Material} from '../shared/deliverables.ts';
 import {workspaceMatchesProject,executionLabels,providerLabels,type PageId} from './navigation.ts';
-import {ProjectCreatePanel} from './project-create.tsx';
+import {FolderRegisterPanel,ProjectCreatePanel} from './project-create.tsx';
 import {NewTaskPanel,takeNewTaskRequest,onNewTaskRequest} from './new-task.tsx';
 import {PlanningAgentPanel} from './planning/PlanningAgent.tsx';
 import {VerificationPanel} from './verification.tsx';
@@ -32,7 +32,8 @@ export function StartPage(props:StartProps){
   const home=<section className="surface start-welcome"><span className="eyebrow">NEW TASK</span><h2>목표를 말하면 기획부터 결과물까지 함께 만듭니다</h2><p>문서·조사·분석 같은 일반 작업을 자연어로 요청하세요. Git이나 작업 공간은 필요하지 않습니다.</p>
     {state.projectCreationAvailable?<NewTaskPanel online={online} locked={locked} post={props.post} onProject={id=>{setFresh(false);props.onProject(id);}}/>:<p className="notice">현재 서버에서 새 프로젝트를 준비할 수 없습니다. 서버 설정을 확인하세요.</p>}
     <div className="start-actions">{project&&<button onClick={()=>setFresh(false)}>{project.name}(으)로 돌아가기</button>}<button onClick={()=>props.onNavigate('projects')}>기존 프로젝트 선택</button></div>
-    {state.projectCreationAvailable&&<details className="start-code-project"><summary>코드 작업(Git 저장소) 프로젝트 만들기</summary><ProjectCreatePanel projectId={projectId} projectCount={state.projects?.length??0} selectedWorkspaceId={state.selectedWorkspaceId??null} online={online} locked={locked} onProject={props.onProject} action={props.workspaceAction} post={props.post}/></details>}</section>;
+    {state.projectCreationAvailable&&<details className="start-code-project"><summary>코드 작업(Git 저장소) 프로젝트 만들기</summary><ProjectCreatePanel projectId={projectId} projectCount={state.projects?.length??0} selectedWorkspaceId={state.selectedWorkspaceId??null} online={online} locked={locked} onProject={props.onProject} action={props.workspaceAction} post={props.post}/></details>}
+    {state.projectCreationAvailable&&<details className="start-code-project"><summary>내 컴퓨터의 기존 폴더를 일반 프로젝트로 등록</summary><FolderRegisterPanel online={online} locked={locked} post={props.post} onProject={id=>{setFresh(false);props.onProject(id);}}/></details>}</section>;
   if(!project||fresh)return home;
   const newTask=<div className="start-new-task"><button onClick={()=>setFresh(true)}>+ 새 작업</button></div>;
   if(project.kind==='general')return <>{newTask}<StartGeneral key={projectId} {...props} projectName={project.name}/></>;

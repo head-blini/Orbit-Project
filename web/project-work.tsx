@@ -8,6 +8,7 @@ import {takeNewTaskRequest,onNewTaskRequest} from './new-task.tsx';
 import {PlanningAgentPanel} from './planning/PlanningAgent.tsx';
 import {ProjectProgressPanel,blockerLabels} from './project-progress.tsx';
 import {AiPreferencesPanel} from './ai-preferences.tsx';
+import {MaterialsCard} from './materials.tsx';
 import {evidenceLabel} from './deliverables.tsx';
 import {useUiMode} from './ui-mode.ts';
 import './project-work.css';
@@ -82,6 +83,7 @@ function GeneralWork(props:Props&{name:string}){
     <Header name={props.name} kind="general" progress={progress} steps={steps} action={action} onAction={act}/>
     <div className="work-grid">
       <div className="work-main">
+        {props.state?.projects?.find(p=>p.id===projectId)?.registeredFolder&&<p className="notice" role="note">이 프로젝트는 내 컴퓨터의 기존 폴더를 등록한 것입니다. 기존 파일을 AI가 읽거나 바꾸지 않도록, 지금은 AI 기획과 실행을 시작하지 않습니다(격리된 작업 공간이 준비되면 열립니다). 자료 추가·교체와 결과물 확인은 그대로 할 수 있습니다.</p>}
         {!progress?.plan&&!saved&&followup}
         <section id="work-plan" className="work-section" aria-labelledby="work-plan-title">
           <h3 id="work-plan-title">기획</h3>
@@ -99,7 +101,7 @@ function GeneralWork(props:Props&{name:string}){
       <div className="work-aside" role="complementary" aria-label="프로젝트 정보">
         <section className="work-card" aria-label="AI 선택"><AiPreferencesPanel projectId={projectId} kind="general" online={online} post={props.rawPost}/></section>
         <section className="work-card" aria-labelledby="work-materials-title"><h3 id="work-materials-title">첨부 자료</h3>
-          {materials.length?<ul className="file-list">{materials.map(item=><li key={item.path} title={item.path}><span>{item.path.replace(/^inputs\//,'')}</span><small>{(item.size/1024).toFixed(1)} KB</small></li>)}</ul>:<p className="work-muted">첨부한 자료가 없습니다.</p>}</section>
+          <MaterialsCard projectId={projectId} materials={materials} online={online} locked={props.locked} post={props.post} onChange={setMaterials}/></section>
         <section className="work-card" aria-labelledby="work-results-title"><h3 id="work-results-title">결과물</h3>
           {!list?<p className="work-muted">불러오는 중…</p>:outputs.length?<ul className="file-list">{outputs.slice(0,5).map(item=><li key={item.path} title={item.path}><span>{item.taskTitle??item.path}</span>
             {item.checks.evidence&&<small className={'evidence-'+item.checks.evidence.status}>{evidenceLabel(item.checks.evidence)}</small>}</li>)}</ul>:<p className="work-muted">아직 결과물이 없습니다.</p>}

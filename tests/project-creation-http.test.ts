@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
-import {mkdtempSync,readFileSync,readdirSync,rmSync} from 'node:fs';
+import {mkdirSync,mkdtempSync,readFileSync,readdirSync,rmSync,writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from './temp.ts';
 import {Store} from '../server/store.ts';
@@ -10,9 +10,9 @@ import {Controller} from '../server/controller.ts';
 import {createWorkspace} from '../server/workspace.ts';
 import {createHttpServer} from '../server/http.ts';
 
-async function fixture(enabled=true){
+async function fixture(enabled=true,allow:(dir:string)=>string[]=()=>[]){
   const dir=mkdtempSync(join(tmpdir(),'orbit-project-create-http-')),store=new Store(':memory:');
-  const projects=new Projects(store,join(dir,'workspaces'),[],enabled?join(dir,'projects'):undefined);let nativeCalls=0;
+  const projects=new Projects(store,join(dir,'workspaces'),allow(dir),enabled?join(dir,'projects'):undefined);let nativeCalls=0;
   const controller=new Controller(store,createWorkspace(dir),()=>{nativeCalls++;throw new Error('NATIVE_FORBIDDEN');},projects);
   const server=createHttpServer(controller,'unused');await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
   const origin='http://127.0.0.1:'+(server.address() as {port:number}).port;
@@ -127,5 +127,26 @@ test('general HTTP creation keeps strict optional kind and credential-name valid
       assert.equal(response.status,400);assert.deepEqual(await response.json(),{error:'INVALID_FIELDS'});
     }
     assert.deepEqual(f.store.projects(),[]);assert.deepEqual(f.store.workspaces(),[]);assert.deepEqual(readdirSync(join(f.dir,'projects')),[]);
+  }finally{await f.close();}
+});
+
+test('F02-REG: an allowlisted folder registers over HTTP, materials can be replaced as a new version, and inputs/ is the only write',async()=>{
+  const f=await fixture(true,dir=>{const folder=join(dir,'report');mkdirSync(folder);writeFileSync(join(folder,'notes.md'),'existing');return [folder];});try{
+    const folder=join(f.dir,'report'),input={requestId:randomUUID(),name:'보고서',path:folder};
+    assert.equal((await f.post('/api/projects/register-folder',{...input,kind:'general'})).status,400);
+    const response=await f.post('/api/projects/register-folder',input);assert.equal(response.status,200);
+    const {project}=await response.json() as any;assert.equal(project.kind,'general');assert.equal(project.path,folder);
+    assert.equal((await (await f.post('/api/projects/register-folder',input)).json() as any).project.id,project.id);
+    const base='/api/projects/'+project.id+'/materials';
+    const [item]=await (await f.post(base,{files:[{name:'data.txt',text:'one'}]})).json() as any[];
+    assert.equal((await f.post(base,{files:[{name:'data.txt',text:'two'}]})).status,409);
+    const stale=await f.post(base+'/replace',{name:'data.txt',text:'two',expectedSha256:'0'.repeat(64)});
+    assert.equal(stale.status,409);assert.equal((await stale.json() as any).error,'MATERIAL_CHANGED');
+    const replaced=await (await f.post(base+'/replace',{name:'data.txt',text:'two',expectedSha256:item.sha256})).json() as any[];
+    assert.equal(replaced[0].previousVersions,1);assert.equal(readFileSync(join(folder,'inputs','data.txt'),'utf8'),'two');
+    assert.deepEqual((await (await fetch(f.origin+base,{headers:f.headers})).json() as any[]).map(m=>m.previousVersions),[1]);
+    assert.deepEqual(readdirSync(folder).sort(),['inputs','notes.md']);assert.equal(readFileSync(join(folder,'notes.md'),'utf8'),'existing');
+    const outside=await f.post('/api/projects/register-folder',{requestId:randomUUID(),name:'다른 폴더',path:f.dir});
+    assert.equal(outside.status,403);
   }finally{await f.close();}
 });
