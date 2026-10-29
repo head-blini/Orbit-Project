@@ -31,6 +31,7 @@ import { AppError } from './errors.ts';
 import { Projects,assertGitProject } from './projects.ts';
 import { evaluateLaunch,outboundDenial,providerConnections } from './providers/policy.ts';
 import {briefPiiInspectionText} from './planning/execution.ts';
+import {repairPiiInspectionText} from './repair-pii.ts';
 import { Studio,exact } from './studio.ts';
 import type { SavedTask } from '../shared/parallel.ts';
 import { VerificationService,type VerificationConfiguration } from './verification-service.ts';
@@ -816,8 +817,10 @@ export class Controller {
       this.store.setThread('',workspaceId);
       await this.ownQualityStep(()=>this.connect());
       if(request.signal.aborted)throw new AppError('QUALITY_PROCESS_STOP_UNCONFIRMED',409);
-      const repairPrompt=brief.prompt+'\n실패 항목만 수정하고 승인 기준과 통과 항목을 보존하세요.\n'+prompt;
-      run=await this.ownQualityStep(()=>this.start({requestId:context.stepId,workspaceId,prompt:repairPrompt},{taskId:source.taskId,planningVersionId:source.planningVersionId,planningContentHash:source.planningContentHash,requirementLabels:source.requirementLabels},acceptance.baseline!));
+      const head=brief.prompt+'\n실패 항목만 수정하고 승인 기준과 통과 항목을 보존하세요.\n',repairPrompt=head+prompt;
+      // Same structure-aware identifier exemption as the Claude repair path; the bytes sent stay repairPrompt.
+      const piiText=briefPiiInspectionText(head)+repairPiiInspectionText(prompt);
+      run=await this.ownQualityStep(()=>this.start({requestId:context.stepId,workspaceId,prompt:repairPrompt},{taskId:source.taskId,planningVersionId:source.planningVersionId,planningContentHash:source.planningContentHash,requirementLabels:source.requirementLabels},acceptance.baseline!,undefined,undefined,piiText));
       this.store.append('run.repair_source',run.id,{sourceRunId:source.id});
     }
     const completed=await this.waitQualityRun(run.id,request.signal);
@@ -841,7 +844,7 @@ export class Controller {
       checkIds.push(check.id);
     }
     const view=this.verification.view(workspaceId,runId),passed=checkIds.every(id=>view.checks.some(check=>check.id===id&&check.execution==='completed'&&check.verdict==='passed'&&check.finishedDigest===context.artifact.digest));
-    const failures=view.checks.filter(check=>checkIds.includes(check.id)&&check.verdict!=='passed').map(check=>({reviewerId:'verification',criterion:null,status:'not_met' as const,evidence:`${check.commandId}: ${check.verdict} (${check.id})`}));
+    const failures=view.checks.filter(check=>checkIds.includes(check.id)&&check.verdict!=='passed').map(check=>({reviewerId:'verification',criterion:null,status:'not_met' as const,evidence:`${check.commandId}: ${check.verdict}`,checkIds:[check.id]}));
     return {status:passed?'passed':'failed',checkIds,issue:passed?null:'QUALITY_REGRESSION_FAILED',failures};
   }
   /** Read-only view of a general project's server-owned folder. */
@@ -920,11 +923,11 @@ export class Controller {
     return this.start({...input,prompt},task,acceptance??undefined,worker);
   }
   async submit(input:{requestId:string;prompt:string;workspaceId?:string|null}):Promise<Run>{return this.start(input);}
-  private async start(input:{requestId:string;prompt:string;workspaceId?:string|null},task?:Pick<Run,'taskId'|'planningVersionId'|'planningContentHash'|'requirementLabels'|'projectId'|'runtime'>,acceptance?:TaskVerificationPreview,worker?:WorkerDispatchContext,tool?:{request:Readonly<ToolLaunchRequest>;serverName:string}):Promise<Run>{
+  private async start(input:{requestId:string;prompt:string;workspaceId?:string|null},task?:Pick<Run,'taskId'|'planningVersionId'|'planningContentHash'|'requirementLabels'|'projectId'|'runtime'>,acceptance?:TaskVerificationPreview,worker?:WorkerDispatchContext,tool?:{request:Readonly<ToolLaunchRequest>;serverName:string},piiText?:string):Promise<Run>{
     assertGitProject(this.store,input?.workspaceId);assertGitProject(this.store,this.workspaceId);
     if(typeof input?.requestId!=='string'||!/^[a-zA-Z0-9-]{8,80}$/.test(input.requestId)||typeof input.prompt!=='string'||!input.prompt.trim()||input.prompt.length>4000)throw new AppError('INVALID_PROMPT',400);
     if(containsCredential(input.prompt))throw new AppError('CREDENTIAL_LIKE_INPUT',400);
-    const denial=outboundDenial(briefPiiInspectionText(input.prompt));
+    const denial=outboundDenial(piiText??briefPiiInspectionText(input.prompt));
     if(denial){this.store.append('guardrail.denied',null,{providerId:'codex',code:denial});throw new AppError(denial,400);}
     if(this.projects&&(input.workspaceId===undefined||input.workspaceId!==(this.workspaceId??null)))throw new AppError('WORKSPACE_MISMATCH');
     const digest=createHash('sha256').update(input.prompt).digest('hex');const prior=this.store.findRequest(input.requestId);

@@ -5,7 +5,8 @@ export interface QualityBaseline {id:string;digest:string;criteria:string[]}
 export interface QualityReviewer {id:string;modelKey:string}
 export interface QualityCriterion {criterion:string;status:'met'|'not_met'|'unclear';evidence:string}
 export interface QualityReview extends QualityIdentity {baselineDigest:string;artifactDigest:string;criteria:QualityCriterion[];findings:string[]}
-export interface QualityFailure {reviewerId:string;criterion:string|null;evidence:string;status:'not_met'|'unclear'}
+/** checkIds: verification check ids kept out of free-text evidence so PII inspection can exempt them by field. */
+export interface QualityFailure {reviewerId:string;criterion:string|null;evidence:string;status:'not_met'|'unclear';checkIds?:string[]}
 export interface QualityRound {number:number;artifact:QualityArtifact;reviews:{reviewerId:string;result:QualityReview}[];failures:QualityFailure[]}
 export interface QualityLoopInput {baseline:QualityBaseline;artifact:QualityArtifact;producer:QualityIdentity;reviewers:QualityReviewer[];limits:{maxRepairs:number;maxCalls:number;timeoutMs:number}}
 /** passed means unanimous supported AI opinions only; never a CheckRecord pass or user approval.
