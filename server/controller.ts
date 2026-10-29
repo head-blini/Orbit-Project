@@ -18,7 +18,7 @@ import type {TaskVerificationPreview} from '../shared/acceptance.ts';
 import { collectCodexUsage,unknownUsage } from './usage.ts';
 import type { CodexUsage } from '../shared/usage.ts';
 import { SourceGraphService } from './source-graph-service.ts';
-import { ModelHubService } from './model-hub-service.ts';
+import { ModelHubService,registryHubConfigurations,type ModelHubTransports } from './model-hub-service.ts';
 import type { ModelHubConfiguration } from './providers/model-hub-configuration.ts';
 import { MergeService } from './merge-service.ts';
 import { WorkflowService } from './workflow-service.ts';
@@ -39,6 +39,17 @@ import {ClaudeTaskService,type ClaudeTaskServiceOptions} from './claude-task-ser
 import {QualityLoopService} from './quality-loop-service.ts';
 import {createQualityNativePorts,qualityRunEvidence,qualityVerifyGeneral,type QualityNativeOptions} from './quality-loop-native.ts';
 import type {QualityServicePorts,QualityStepContext,QualityVerificationResult} from '../shared/quality-loop-record.ts';
+import {ModelRegistryService,type RegistryConnectionContext} from './model-registry-service.ts';
+import {createNativeProbeService} from './capability-probe.ts';
+import {createClaudeAuthenticationService} from './native-readiness.ts';
+import {compatibleRuntimeVersion} from './capability-runtime-adapters.ts';
+import type {NativeReadinessReport} from '../shared/native-readiness.ts';
+export interface ControllerRegistryOptions {
+  nativeProbe?:ReturnType<typeof createNativeProbeService>;
+  claudeAuthentication?:ReturnType<typeof createClaudeAuthenticationService>;
+  configuredCredentialRefs?:readonly string[];
+  transports?:ModelHubTransports;
+}
 export { AppError } from './errors.ts';
 export class Controller {
   store:Store;workspace:string;private factory:(workspace:string,write:boolean)=>RpcPort;private rpc:RpcPort|null=null;
@@ -51,6 +62,9 @@ export class Controller {
   readonly verification:VerificationService;
   readonly sourceGraphs:SourceGraphService;
   readonly modelHub:ModelHubService;
+  readonly modelRegistry:ModelRegistryService;
+  readonly nativeProbe:ReturnType<typeof createNativeProbeService>;
+  readonly claudeAuthentication:ReturnType<typeof createClaudeAuthenticationService>;
   readonly merges:MergeService;
   readonly workflows:WorkflowService;
   private readonly verificationSetup:VerificationSetupService;
@@ -70,7 +84,7 @@ export class Controller {
   private qualityAvailable(){if(!this.qualityScope)this.qualityLoops?.ensureAvailable();}
   private ownQualityStep<T>(work:()=>T):T{const before=this.qualityScope;this.qualityScope=true;try{return work();}finally{this.qualityScope=before;}}
   assertExecutionAvailable(){this.qualityAvailable();if(this.soloRecoveryRequired())throw new AppError('SOLO_RECOVERY_REQUIRED',409);}
-  constructor(store:Store,workspace:string,factory:(workspace:string,write:boolean)=>RpcPort,projects?:Projects,verificationConfig:VerificationConfiguration[]=[],modelHubConfig:readonly ModelHubConfiguration[]=[],claudeOptions:ClaudeTaskServiceOptions={},claudePlanningOptions:ClaudePlanningOptions={},qualityOptions:Pick<QualityNativeOptions,'findExecutable'|'claudeFactory'|'codexReview'>={}){
+  constructor(store:Store,workspace:string,factory:(workspace:string,write:boolean)=>RpcPort,projects?:Projects,verificationConfig:VerificationConfiguration[]=[],modelHubConfig:readonly ModelHubConfiguration[]=[],claudeOptions:ClaudeTaskServiceOptions={},claudePlanningOptions:ClaudePlanningOptions={},qualityOptions:Pick<QualityNativeOptions,'findExecutable'|'claudeFactory'|'codexReview'>={},registryOptions:ControllerRegistryOptions={}){
     this.store=store;this.workspace=workspace;this.factory=factory;this.projects=projects;
     this.claudeTasks=new ClaudeTaskService(store,projects,claudeOptions);
     this.aiPreferences=new ProjectAiPreferencesService(store);
@@ -78,7 +92,17 @@ export class Controller {
     this.telemetry=new RunTelemetry(metrics=>this.store.saveRunMetrics(metrics));
     this.modelTracker=new CodexModelTracker((runId,value)=>this.store.saveCodexModelAttribution(runId,value));
     const selected=projects?.workspaces().find(w=>w.id===store.getMeta('selectedWorkspace'));if(selected){this.workspaceId=selected.id;this.workspace=selected.path;}
-    this.modelHub=new ModelHubService(store,modelHubConfig,undefined,undefined,()=>this.assertExecutionAvailable());
+    this.nativeProbe=registryOptions.nativeProbe??createNativeProbeService();
+    this.claudeAuthentication=registryOptions.claudeAuthentication??createClaudeAuthenticationService();
+    const owner=this;
+    const nativeReadiness:NativeReadinessReport={get codex(){return owner.registryNativeReadiness().codex;},get claude(){return owner.registryNativeReadiness().claude;},
+      actualModel:'unknown',liveValidation:'approval_required',costUsd:null,remainingQuota:null};
+    // Only enumerate configured reference names; credential values remain transport-owned.
+    const configuredCredentialRefs=registryOptions.configuredCredentialRefs??Object.keys(process.env).filter(name=>
+      /^ORBIT_MODEL_KEY_[A-Z0-9_]{1,50}$/.test(name)||/^ORBIT_BEDROCK_[A-Z0-9_]{1,50}$/.test(name));
+    this.modelRegistry=new ModelRegistryService(store,{configurations:modelHubConfig,configuredCredentialRefs,nativeReadiness,
+      connection:context=>this.validateRegistryConnection(context)});
+    this.modelHub=new ModelHubService(store,modelHubConfig,undefined,undefined,()=>this.assertExecutionAvailable(),()=>registryHubConfigurations(this.modelRegistry),registryOptions.transports);
     this.verificationSetup=new VerificationSetupService(store,projects,verificationConfig);
     const commandResolver=(path:string)=>this.verificationSetup.commands(path);
     this.verification=new VerificationService(store,projects,commandResolver,()=>this.qualityBusy()||this.soloRecoveryRequired()||!!this.extensionPending||!!this.active()||!!this.connecting||this.switching||this.modelHub.active||!!this.workflows?.active||!!this.reviews?.active||!!this.planningSuggestions?.active);
@@ -91,6 +115,44 @@ export class Controller {
     this.qualityPorts=projects?createQualityNativePorts({store,projects,factory,...qualityOptions,guard:run=>this.guardQuality(run),repair:async(request,context)=>{try{const result=await this.repairQuality(request,context);this.saveQualityReceipt(context,{result,evidence:result.evidence});return result;}catch(error){if(context.sourceRun.runtime==='claude-code'&&!store.findRequest(context.stepId)){const failureIssue=error instanceof Error&&/^[A-Z][A-Z0-9_]{1,100}$/.test(error.message)?error.message:'QUALITY_REPAIR_NOT_STARTED';this.saveQualityReceipt(context,{failureIssue,processStopped:true});}throw error;}},verify:async context=>{const result=await this.verifyQuality(context);this.saveQualityReceipt(context,{result,evidence:null});return result;},recover:(step,context)=>this.recoverQuality(step,context)}):{guard:unavailable,snapshot:unavailable,review:unavailable,repair:unavailable,verify:unavailable};
     store.db.exec('CREATE TABLE IF NOT EXISTS quality_controller_receipts(id TEXT PRIMARY KEY,body TEXT NOT NULL)');
     this.qualityLoops=new QualityLoopService(store,this.qualityPorts);
+  }
+  registryNativeReadiness():NativeReadinessReport {
+    const installation=this.nativeProbe.get(),connection=this.provider;
+    return {codex:{installation:installation?.codex??{status:'unknown',version:null},authentication:connection==='ready'?'confirmed':'unknown',connection},
+      claude:{installation:installation?.claude??{status:'unknown',version:null},authentication:this.claudeAuthentication.get()},
+      actualModel:'unknown',liveValidation:'approval_required',costUsd:null,remainingQuota:null};
+  }
+  private async validateRegistryConnection(context:RegistryConnectionContext){
+    const guard=()=>{
+      this.assertExecutionAvailable();
+      if(context.confirmed!==true)throw new AppError('REGISTRY_CONFIRMATION_REQUIRED',403);
+      const entry=this.modelRegistry.get(context.entry.id),provider=this.modelRegistry.get(context.provider.id);
+      const intent=this.modelRegistry.validations(entry.id).find(value=>value.id===context.validation.id);
+      if(!entry.enabled||!provider.enabled||entry.revision!==context.validation.revision||entry.configDigest!==context.validation.configDigest
+        ||provider.revision!==context.provider.revision||intent?.state!=='intent')throw new AppError('REGISTRY_DISPATCH_DENIED',409);
+    };
+    guard();
+    const adapter=context.provider.connection.adapterId;
+    if(adapter==='codex'||adapter==='claude-code'){
+      const installation=await this.nativeProbe.refresh();
+      guard();
+      const probe=adapter==='codex'?installation.codex:installation.claude;
+      if(probe.status!=='found'||!probe.version)return {state:'unknown' as const};
+      if(!compatibleRuntimeVersion(adapter,probe.version))return {state:'unsupported' as const};
+      if(adapter==='claude-code'){
+        const auth=await this.claudeAuthentication.refresh();
+        guard();
+        return {state:auth.authentication==='subscription'?'passed' as const:auth.authentication==='unknown'?'unknown' as const:'failed' as const};
+      }
+      return {state:this.provider==='ready'?'passed' as const:'unknown' as const};
+    }
+    const project=this.store.projects().find(project=>project.path===context.projectPath);
+    if(!project)throw new AppError('PROJECT_NOT_FOUND',404);
+    const destination=this.modelHub.view(project.id).destinations.find(entry=>entry.id===context.provider.id);
+    if(!destination)return {state:'unsupported' as const};
+    const catalog=await this.modelHub.diagnose(destination.id,{projectId:project.id,expectedConfigDigest:destination.configDigest,confirmed:true},guard);
+    guard();
+    return {state:catalog.status==='available'||catalog.status==='empty'?'passed' as const:'failed' as const};
   }
   snapshot():Snapshot{return {soloRecoveryRequired:this.soloRecoveryRequired(),provider:this.provider,issue:this.issue,threadId:this.thread(),workspace:basename(this.workspace),readOnly:!this.workspaceId,runs:this.store.runs().filter(r=>r.workspaceId===this.workspaceId),lastSeq:this.store.lastSeq(),connections:providerConnections,externalApiEnabled:this.modelHub.externalEnabled,modelHubConfigured:this.modelHub.configured,modelHubBusy:this.modelHub.active,extensionBusy:!!this.extensionPending,verificationBusy:this.verification.active,mergeBusy:this.merges.active,workflowBusy:this.workflows.active,reviewBusy:this.reviews.active,planningBusy:this.planningSuggestions.active,...(this.projects?{projectCreationAvailable:this.projects.creationAvailable,selectedWorkspaceId:this.workspaceId??null,projects:this.projects.list(),workspaces:this.projects.workspaces()}:{})};}
   private thread(){return this.store.getThread(this.workspaceId);}
