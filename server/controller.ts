@@ -1,3 +1,9 @@
+import {ToolInvocationService} from './tool-invocation.ts';
+import {ToolPermissionStore} from './tool-permissions.ts';
+import {itemDigest,toolGrantable} from './tool-capability-ledger.ts';
+import {toolLaunchConfig} from './codex.ts';
+import type {ToolInvocationSelection,ToolLaunchRequest,ToolLaunchResult} from '../shared/tool-invocation.ts';
+import type {ToolItemMeta} from '../shared/tool-capabilities.ts';
 import {ProjectProgressService,type CompletionReaders} from './project-progress.ts';
 import type {CandidateCompletionContext,IntegrationItem,IntegrationCompletionReader} from './integration-queue.ts';
 import {lstatSync,readdirSync} from 'node:fs';
@@ -99,6 +105,9 @@ export class Controller {
   private projects?:Projects;private workspaceId?:string;private switching=false;
   private provider:ProviderStatus='disconnected';private issue:string|null=null;private connecting:Promise<void>|null=null;
   private generation=0;private output=new Map<string,string>();private deadline:NodeJS.Timeout|null=null;private launchValidated=false;
+  readonly toolInvocations:ToolInvocationService;
+  private toolClosing:Promise<void>|null=null;
+  private toolRun:{runId:string;request:Readonly<ToolLaunchRequest>;serverName:string}|null=null;
   readonly progress:ProjectProgressService;
   readonly qualityLoops:QualityLoopService;
   private qualityScope=false;
@@ -125,10 +134,10 @@ export class Controller {
   private claudeTasks:ClaudeTaskService;
   private readonly ownerIncarnation=randomUUID();
   private soloRecoveryRequired(){return this.soloLost||this.store.runs().some(run=>run.runtime!=='claude-code'&&run.execution==='lost');}
-  private qualityBusy(){return !this.qualityScope&&!!this.qualityLoops&&(this.qualityLoops.active||this.qualityLoops.records().some(record=>record.recoveryRequired));}
+  private qualityBusy(){return !!this.toolClosing||!this.qualityScope&&!!this.qualityLoops&&(this.qualityLoops.active||this.qualityLoops.records().some(record=>record.recoveryRequired));}
   private qualityAvailable(){if(!this.qualityScope)this.qualityLoops?.ensureAvailable();}
   private ownQualityStep<T>(work:()=>T):T{const before=this.qualityScope;this.qualityScope=true;try{return work();}finally{this.qualityScope=before;}}
-  assertExecutionAvailable(){this.qualityAvailable();if(this.soloRecoveryRequired())throw new AppError('SOLO_RECOVERY_REQUIRED',409);}
+  assertExecutionAvailable(){if(this.toolClosing)throw new AppError('SESSION_BUSY',409);this.qualityAvailable();if(this.soloRecoveryRequired())throw new AppError('SOLO_RECOVERY_REQUIRED',409);}
   constructor(store:Store,workspace:string,factory:(workspace:string,write:boolean)=>RpcPort,projects?:Projects,verificationConfig:VerificationConfiguration[]=[],modelHubConfig:readonly ModelHubConfiguration[]=[],claudeOptions:ClaudeTaskServiceOptions={},claudePlanningOptions:ClaudePlanningOptions={},qualityOptions:Pick<QualityNativeOptions,'findExecutable'|'claudeFactory'|'codexReview'>={},registryOptions:ControllerRegistryOptions={}){
     this.candidateCompletion=registryOptions.candidateCompletion??(item=>this.readIntegrationCandidate(item));this.completionPolicy=registryOptions.completion?.policy;
     this.store=store;this.workspace=workspace;this.factory=factory;this.projects=projects;
@@ -166,6 +175,68 @@ export class Controller {
     this.qualityPorts.verify=context=>this.captureQualityCompletion(context,()=>verify(context));
     store.db.exec('CREATE TABLE IF NOT EXISTS quality_controller_receipts(id TEXT PRIMARY KEY,body TEXT NOT NULL)');
     this.qualityLoops=new QualityLoopService(store,this.qualityPorts);
+    this.toolInvocations=new ToolInvocationService(store,{grants:new ToolPermissionStore(store),
+      discovery:selection=>this.toolMeta(selection),planningContentHash:(projectId,taskId)=>{
+        try{return new Studio(store).execution(projectId,taskId).planningContentHash??null;}catch{return null;}
+      },launchContext:selection=>this.toolLaunchContext(selection),launch:{invoke:request=>this.launchTool(request)}});
+  }
+  private toolMeta(selection:Readonly<ToolInvocationSelection>):ToolItemMeta|null {
+    if(!toolGrantable(selection.runtimeId,selection.kind)||!this.workspaceId||this.store.workspaces().find(w=>w.id===this.workspaceId)?.projectId!==selection.projectId)return null;
+    const item=this.extensionSnapshot().sections.find(s=>s.kind==='mcp')?.items.find(i=>i.id===selection.itemId);
+    if(!item||item.pluginOwned===true||!this.knownMcpNames?.includes(item.name))return null;
+    return {kind:'mcp',id:item.id,scope:item.scope,handlerType:item.handlerType,nativeTrust:item.nativeTrust,pluginOwned:item.pluginOwned,
+      runtimeVersion:this.nativeProbe.get()?.codex.version??null,adapterRevision:'orbit.codex.mcp.v1'};
+  }
+  private toolLaunchContext(selection:Readonly<ToolInvocationSelection>):string {
+    if(!this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);
+    const acceptance=this.taskVerificationPreview(selection.projectId,selection.taskId,this.workspaceId);
+    return createHash('sha256').update(JSON.stringify([this.workspaceId,acceptance?.digest??null])).digest('hex');
+  }
+  private async launchTool(request:Readonly<ToolLaunchRequest>):Promise<ToolLaunchResult> {
+    if(!toolGrantable(request.runtimeId,request.kind))throw new AppError('TOOL_NOT_GRANTABLE',403);
+    const meta=this.toolMeta(request),serverName=this.knownMcpNames?.find(name=>createHash('sha256').update(JSON.stringify(['mcp',name])).digest('hex')===request.itemId);
+    if(!meta||itemDigest(meta)!==request.itemDigest||!serverName||!this.workspaceId)throw new AppError('ROUTE_CHANGED',409);
+    const task=new Studio(this.store).execution(request.projectId,request.taskId);
+    if(task.planningContentHash!==request.planningContentHash||this.toolLaunchContext(request)!==request.launchContext)throw new AppError('ROUTE_CHANGED',409);
+    assertWorkerOwnership(this.store,request.projectId,request.taskId);
+    if(this.aiPreferences.read(request.projectId).execution!=='codex')throw new AppError('RUNTIME_NOT_SUPPORTED',409);
+    const acceptance=this.taskVerificationPreview(request.projectId,request.taskId,this.workspaceId);
+    const {prompt,...binding}=task;
+    const run=await this.start({requestId:request.invocationId,prompt,workspaceId:this.workspaceId},{...binding,projectId:request.projectId,runtime:'codex'},acceptance??undefined,undefined,{request,serverName});
+    const finished=await new Promise<Run>(resolve=>{
+      const check=()=>{const current=this.store.getRun(run.id)!;if(terminal(current.execution)){this.store.off('event',check);resolve(current);}};
+      this.store.on('event',check);check();
+    });
+    const origin=this.store.db.prepare("SELECT data FROM events WHERE run_id=? AND kind='run.runtime_source' ORDER BY seq DESC LIMIT 1").get(run.id);
+    const source=origin?JSON.parse(String(origin.data)).source:'unknown';
+    return {status:finished.execution==='completed'?'completed':finished.execution==='lost'?'unknown':'failed',evidenceSource:source==='native'?'native':source==='mock'?'mock':'unknown'};
+  }
+  private async enableTool(rpc:RpcPort,run:Run,tool:{request:Readonly<ToolLaunchRequest>;serverName:string}){
+    this.toolRun={...tool,runId:run.id};this.launchValidated=false;
+    const response=await rpc.request('config/read',{includeLayers:false,cwd:this.workspace});
+    const servers=response?.config?.mcp_servers;
+    if(!servers||typeof servers!=='object'||Array.isArray(servers))throw new AppError('MCP_ISOLATION_REQUIRED',409);
+    const config=toolLaunchConfig(Object.keys(servers),tool.serverName),threadId=this.thread();
+    const resumed=await rpc.request('thread/resume',{threadId,cwd:this.workspace,excludeTurns:true,config,sandbox:'workspace-write',approvalPolicy:this.approvalPolicy(),approvalsReviewer:'user'});
+    if(resumed.thread?.id!==threadId||resumed.thread?.status?.type==='active'||resumed.sandbox?.type!=='workspaceWrite'
+      ||resumed.sandbox.networkAccess!==false||!Array.isArray(resumed.sandbox.writableRoots)||resumed.sandbox.writableRoots.length
+      ||resumed.sandbox.excludeTmpdirEnvVar!==true||resumed.sandbox.excludeSlashTmp!==true||resumed.approvalPolicy!==this.approvalPolicy()||resumed.approvalsReviewer!=='user')throw new AppError('POLICY_MISMATCH',409);
+    const inventory=await rpc.request('mcpServerStatus/list',{threadId,detail:'toolsAndAuthOnly',limit:100});
+    const remaining=new Set(Object.keys(config.mcp_servers));
+    if(!Array.isArray(inventory.data)||inventory.nextCursor||inventory.data.some((entry:any)=>!entry||!remaining.delete(entry.name)
+      ||!entry.tools||typeof entry.tools!=='object'||Array.isArray(entry.tools)
+      ||(entry.name===tool.serverName?entry.runtimeStatus!=='ready':entry.runtimeStatus!=='disabled'||Object.keys(entry.tools).length>0))||remaining.size)throw new AppError('MCP_ISOLATION_REQUIRED',409);
+    this.store.append('tool.launch.binding',run.id,{...tool.request,serverName:tool.serverName,threadId});
+  }
+  private retireToolSession(runId:string){
+    if(this.toolRun?.runId!==runId)return;
+    this.toolRun=null;this.launchValidated=false;
+    const rpc=this.rpc;this.rpc=null;++this.generation;
+    this.toolClosing=Promise.resolve().then(async()=>{
+      if(rpc)await rpc.close();
+      if(this.store.unresolvedNativeConnections())this.soloLost=true;
+    }).catch(()=>{this.soloLost=true;}).finally(()=>{this.toolClosing=null;});
+    this.telemetry.disconnect();this.modelTracker.disconnect();this.status('disconnected');
   }
   private readIntegrationSource(item:Readonly<IntegrationItem>){
     const row=this.store.db.prepare('SELECT body FROM worker_reservations WHERE id=?').get(item.fence.reservationId);
@@ -822,7 +893,7 @@ export class Controller {
     return this.start({...input,prompt},task,acceptance??undefined,worker);
   }
   async submit(input:{requestId:string;prompt:string;workspaceId?:string|null}):Promise<Run>{return this.start(input);}
-  private async start(input:{requestId:string;prompt:string;workspaceId?:string|null},task?:Pick<Run,'taskId'|'planningVersionId'|'planningContentHash'|'requirementLabels'>,acceptance?:TaskVerificationPreview,worker?:WorkerDispatchContext):Promise<Run>{
+  private async start(input:{requestId:string;prompt:string;workspaceId?:string|null},task?:Pick<Run,'taskId'|'planningVersionId'|'planningContentHash'|'requirementLabels'|'projectId'|'runtime'>,acceptance?:TaskVerificationPreview,worker?:WorkerDispatchContext,tool?:{request:Readonly<ToolLaunchRequest>;serverName:string}):Promise<Run>{
     assertGitProject(this.store,input?.workspaceId);assertGitProject(this.store,this.workspaceId);
     if(typeof input?.requestId!=='string'||!/^[a-zA-Z0-9-]{8,80}$/.test(input.requestId)||typeof input.prompt!=='string'||!input.prompt.trim()||input.prompt.length>4000)throw new AppError('INVALID_PROMPT',400);
     if(containsCredential(input.prompt))throw new AppError('CREDENTIAL_LIKE_INPUT',400);
@@ -846,6 +917,12 @@ export class Controller {
     this.output.clear();this.deadline=setTimeout(()=>{void this.failTransport('RUN_TIMEOUT');},120000);
     try{
       this.store.append('run.runtime_source',run.id,{source:rpc.evidenceSource==='native'?'native':rpc.evidenceSource==='mock'?'mock':'unknown',interface:'codex.app_server'});
+      if(tool){
+        await this.enableTool(rpc,run,tool);
+        if(this.rpc!==rpc||this.toolRun?.runId!==run.id||terminal(this.store.getRun(run.id)!.execution)
+          ||new Studio(this.store).execution(tool.request.projectId,tool.request.taskId).planningContentHash!==tool.request.planningContentHash
+          ||this.toolLaunchContext(tool.request)!==tool.request.launchContext)throw new AppError('ROUTE_CHANGED',409);
+      }
       worker?.beforeDispatch();
       const result=await rpc.request('turn/start',{threadId:this.thread(),cwd:this.workspace,input:[{type:'text',text:input.prompt}],sandboxPolicy:this.sandbox(),approvalPolicy:this.approvalPolicy(),approvalsReviewer:'user'});
       if(typeof result.turn?.id!=='string')throw new Error('INVALID_TURN');
@@ -892,11 +969,21 @@ export class Controller {
       this.output.set(p.item.id??'message',p.item.text.slice(0,64000));
       this.store.updateRun(r.id,{response:this.safeOutput(false)},'message.updated');
     }
+    if(e.method==='item/completed'&&p.item?.type==='mcpToolCall'&&this.toolRun?.runId===r.id){
+      const {request,serverName}=this.toolRun;
+      const scalar=(value:unknown)=>typeof value==='string'&&value.length<=128&&!containsCredential(value)?value:null;
+      const toolName=scalar(p.item.tool);
+      this.store.append('item/completed',r.id,{threadId:scalar(p.threadId),turnId:scalar(p.turnId),
+        binding:{projectId:request.projectId,taskId:request.taskId,runId:r.id,threadId:this.thread(),grantId:request.grantId,itemDigest:request.itemDigest,
+          approvedDigest:request.digest,invocationId:request.invocationId,serverName,toolName,key:{runtimeId:request.runtimeId,kind:request.kind,itemId:request.itemId}},
+        item:{id:scalar(p.item.id),type:'mcpToolCall',status:scalar(p.item.status),server:scalar(p.item.server),tool:toolName}});
+    }
     if(e.method==='turn/completed'){
       const execution:Execution=['completed','interrupted','failed'].includes(p.turn?.status)?p.turn.status:'failed';
       this.store.updateRun(r.id,{execution,response:this.safeOutput(true),...(typeof turnId==='string'?{turnId}:{})},'run.'+execution);this.clearDeadline();
       this.telemetry.finish(r.id);
       this.modelTracker.finish(r.id,execution==='completed'?'completed':execution==='interrupted'?'interrupted':'failed');
+      this.retireToolSession(r.id);
     }
     if(e.method==='item/completed'&&p.item?.type==='fileChange')this.store.append('workspace.changed',r.id,{workspaceId:this.workspaceId??null,status:['completed','failed','declined'].includes(p.item.status)?p.item.status:'unknown'});
     if(e.method==='error')this.store.append('provider.error',r.id,{retrying:p.willRetry===true});
@@ -922,5 +1009,5 @@ export class Controller {
     // Closing the connection is best effort, never evidence permitting a new dispatch.
     try{if(rpc)await rpc.close();}catch{/* The generation remains fenced and recovery stays required. */}
   }
-  async close(){await this.qualityLoops.close();await this.claudeTasks.close();await this.planningSuggestions.close();await this.reviews.close();await this.workflows.close();await this.modelHub.close();await this.verification.close();this.loseActive();this.telemetry.disconnect();this.modelTracker.disconnect();const rpc=this.rpc;this.rpc=null;++this.generation;if(rpc)await rpc.close();this.provider='disconnected';this.subscriptionUsage.disconnect('codex');this.usagePending=null;this.launchValidated=false;this.clearExtensions();}
+  async close(){await this.toolClosing;await this.qualityLoops.close();await this.claudeTasks.close();await this.planningSuggestions.close();await this.reviews.close();await this.workflows.close();await this.modelHub.close();await this.verification.close();this.loseActive();this.telemetry.disconnect();this.modelTracker.disconnect();const rpc=this.rpc;this.rpc=null;++this.generation;if(rpc)await rpc.close();this.provider='disconnected';this.subscriptionUsage.disconnect('codex');this.usagePending=null;this.launchValidated=false;this.clearExtensions();}
 }

@@ -7,7 +7,7 @@ const meta=(kind:ToolKind,id:string,over:Partial<ToolItemMeta>={}):ToolItemMeta=
 const key=(kind:ToolKind,itemId:string)=>({runtimeId:'codex' as const,kind,itemId});
 const sec=(kind:ToolKind,items:ToolItemMeta[],status:ToolDiscoverySection['status']='available'):ToolDiscoverySection=>({runtimeId:'codex',kind,status,items});
 const grant=(m:ToolItemMeta,grantId='g1'):ToolGrant=>({grantId,key:key(m.kind,m.id),itemDigest:itemDigest(m)});
-const rec=(m:ToolItemMeta,evidenceSource:ToolInvocationRecord['evidenceSource'],g:ToolGrant|null):ToolInvocationRecord=>({key:key(m.kind,m.id),evidenceSource,grantId:g?.grantId??null,itemDigest:g?.itemDigest??null});
+const rec=(m:ToolItemMeta,evidenceSource:ToolInvocationRecord['evidenceSource'],g:ToolGrant|null):ToolInvocationRecord=>({key:key(m.kind,m.id),evidenceSource,grantId:g?.grantId??null,itemDigest:g?.itemDigest??null,invocationId:'i1',approvedDigest:'approved',bindingDigest:'approved',nativeObserved:true,callCompleted:true});
 
 test('installed does not imply permitted, invoked or verified',()=>{
   const m=meta('mcp','a'),r=aggregate([sec('mcp',[m])],[],[]);
@@ -20,7 +20,7 @@ test('permitted without invocation is not invoked; invoked without grant is not 
   assert.equal(s.invoked.native,1);assert.equal(s.verified,0);
 });
 test('native with matching grant verifies; mock/unknown/local give verified 0',()=>{
-  const m=meta('mcp','a'),g=grant(m),s=(rs:ToolInvocationRecord[])=>aggregate([sec('mcp',[m])],[g],rs).states[0];
+  const m=meta('mcp','a'),g=grant(m),s=(rs:ToolInvocationRecord[])=>aggregate([sec('mcp',[m])],[{...g,state:'used',consumedBy:{invocationId:'i1',approvalDigest:'approved'}}],rs).states[0];
   assert.equal(s([rec(m,'native',g)]).verified,1);
   const bad=s([rec(m,'mock',g),rec(m,'unknown',g),rec(m,'local',g)]);
   assert.deepEqual(bad.invoked,{native:0,mock:1,unknown:2});assert.equal(bad.verified,0);
@@ -48,7 +48,8 @@ test('unknown inputs stay unknown; absent only from an available section',()=>{
 test('totals are deterministic regardless of input order',()=>{
   const a=meta('mcp','a'),b=meta('skill','b'),ga=grant(a,'g1'),gb=grant(b,'g2');
   const secs=[sec('mcp',[a]),sec('skill',[b])],rs=[rec(a,'native',ga),rec(b,'mock',gb),rec(a,'unknown',null)];
-  const one=aggregate(secs,[ga,gb],rs),two=aggregate([...secs].reverse(),[gb,ga],[...rs].reverse());
+  const used={...ga,grantId:'used',state:'used' as const,consumedBy:{invocationId:'i1',approvalDigest:'approved'}};rs[0].grantId=used.grantId;
+  const one=aggregate(secs,[ga,gb,used],rs),two=aggregate([...secs].reverse(),[used,gb,ga],[...rs].reverse());
   assert.deepEqual(one,two);
   // Only Codex MCP is grantable under the adopted defaults, so the skill grant is void.
   assert.deepEqual(one.totals,{keys:2,installed:2,permitted:1,invoked:{native:1,mock:1,unknown:1},verified:1});
@@ -60,4 +61,15 @@ test('only Codex MCP is grantable: skills, slash commands and Claude MCP grants 
     const out=aggregate([{...sec(kind,[m]),runtimeId}],[g],[{...rec(m,'native',g),key:k}]);
     assert.equal(out.totals.permitted,0,kind+'/'+runtimeId);assert.equal(out.totals.verified,0,kind+'/'+runtimeId);
   }
+});
+
+test('consumed grant verifies only its invocation and approval, never permission for another call',()=>{
+  const m=meta('mcp','a'),g={...grant(m),state:'used' as const,consumedBy:{invocationId:'i1',approvalDigest:'approved'}};
+  const r={...rec(m,'native',g),invocationId:'i1',approvedDigest:'approved',bindingDigest:'approved',nativeObserved:true,callCompleted:true};
+  const check=(grantValue:ToolGrant,record:ToolInvocationRecord=r)=>aggregate([sec('mcp',[m])],[grantValue],[record]).states[0];
+  assert.equal(check(g).verified,1);assert.equal(check(g).permitted,null);
+  for(const state of ['active','revoked','expired'] as const)assert.equal(check({...g,state}).verified,0);
+  assert.equal(check({...g,consumedBy:{...g.consumedBy,invocationId:'other'}}).verified,0);
+  assert.equal(check({...g,consumedBy:{...g.consumedBy,approvalDigest:'other'}}).verified,0);
+  for(const patch of [{bindingDigest:'other'},{nativeObserved:false},{callCompleted:false},{evidenceSource:'mock' as const},{evidenceSource:'unknown' as const}])assert.equal(check(g,{...r,...patch}).verified,0);
 });

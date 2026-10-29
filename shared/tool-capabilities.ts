@@ -8,8 +8,8 @@ export interface ToolItemMeta {kind:ToolKind;id:string;scope:string|null;handler
 export type ToolSectionStatus='available'|'partial'|'unknown'|'not_connected';
 /** One discovery section per (runtime, kind); only 'available' lets a missing item read as absent. */
 export interface ToolDiscoverySection {runtimeId:RuntimeId;kind:ToolKind;status:ToolSectionStatus;items:ToolItemMeta[]}
-export interface ToolGrant {grantId:string;key:ToolKey;itemDigest:string}
-export interface ToolInvocationRecord {key:ToolKey;evidenceSource:QualityEvidenceSource;grantId:string|null;itemDigest:string|null}
+export interface ToolGrant {grantId:string;key:ToolKey;itemDigest:string;state?:'active'|'used'|'revoked'|'expired';consumedBy?:{invocationId:string;approvalDigest:string}}
+export interface ToolInvocationRecord {key:ToolKey;evidenceSource:QualityEvidenceSource;grantId:string|null;itemDigest:string|null;invocationId?:string;approvedDigest?:string;bindingDigest?:string;nativeObserved?:boolean;callCompleted?:boolean}
 export type ToolInstalled='discovered'|'absent'|'unknown';
 export interface ToolPermitted {grantId:string;itemDigest:string}
 export interface ToolInvoked {native:number;mock:number;unknown:number}

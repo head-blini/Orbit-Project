@@ -1,3 +1,4 @@
+import {AppError} from './errors.ts';
 import { realpathSync } from 'node:fs';
 import { join, dirname, basename, isAbsolute } from 'node:path';
 import { Rpc } from './rpc.ts';
@@ -31,3 +32,10 @@ export const restrictedArgs=['app-server','--listen','stdio://','-c','web_search
   ...['apps','plugins','hooks','goals','browser_use','browser_use_external','computer_use','multi_agent','image_generation','shell_tool','shell_snapshot','view_image','code_mode','code_mode_host','skill_search','skill_mcp_dependency_install'].flatMap(f=>['--disable',f])];
 export function codexArgs(write=false){return write?restrictedArgs.flatMap((arg,i)=>arg==='--disable'&&restrictedArgs[i+1]==='code_mode_host'?['--enable']:[arg]):[...restrictedArgs];}
 export function codexFactory(workspace:string,write=false){return ()=>{const rpc=new Rpc(findCodex(),codexArgs(write),workspace);rpc.evidenceSource='native';return rpc;};}
+
+/** Task-scoped override: configuration values never cross the approval boundary. */
+export function toolLaunchConfig(names:readonly string[],allowedName:string){
+  if(!names.includes(allowedName)||new Set(names).size!==names.length)throw new AppError('MCP_ISOLATION_REQUIRED',409);
+  return {mcp_servers:Object.fromEntries(names.map(name=>[name,{enabled:name===allowedName}])),
+    sandbox_workspace_write:{writable_roots:[],network_access:false,exclude_tmpdir_env_var:true,exclude_slash_tmp:true}};
+}

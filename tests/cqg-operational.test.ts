@@ -72,3 +72,12 @@ test('Controller source reader selects the exact dispatch attempt, re-reads comp
   assert.equal(f.store.lastSeq(),seq);assert.equal(f.store.db.prepare('SELECT total_changes() AS n').get()!.n,changes);
  }finally{await f.close();}
 });
+
+test('requiredTools host policy accepts exact item keys and rejects malformed or duplicate entries',()=>{
+ const key={runtimeId:'codex',kind:'mcp',itemId:'a'.repeat(64)};
+ assert.deepEqual(parse({...policy(),requiredTools:[key]})[0].policy.requiredTools,[key]);
+ assert.deepEqual(parse({...policy(),requiredTools:[]})[0].policy.requiredTools,[]);
+ for(const requiredTools of [null,{},[key,key],[{...key,command:'injected'}],[{...key,itemId:'free text'}],[{...key,runtimeId:'other'}]]){
+  assert.throws(()=>parse({...policy(),requiredTools}),/INVALID_COMPLETION_CONFIGURATION/);
+ }
+});

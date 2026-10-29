@@ -5,6 +5,8 @@ export interface ToolInvocationPreview {previewId:string;digest:string}
 export interface ToolInvocationInput {requestId:string;previewId:string;expectedDigest:string;confirmed:true}
 export interface ToolInvocationBinding extends ToolInvocationSelection {
   itemDigest:string;grantId:string;planningContentHash:string;
+  /** Additional server-owned workspace/acceptance fence; never supplied by HTTP. */
+  launchContext?:string;
 }
 /** Completion is an execution observation, never a verification verdict. */
 export interface ToolLaunchResult {

@@ -15,3 +15,12 @@ test('both native session modes explicitly disable unowned Goal continuations',(
     assert.equal(args.some((arg,index)=>arg==='--enable'&&args[index+1]==='goals'),false);
   }
 });
+
+import {toolLaunchConfig} from '../server/codex.ts';
+test('tool profile enables exactly one known server and preserves network isolation',()=>{
+  const profile=toolLaunchConfig(['fixture','other'],'fixture');
+  assert.deepEqual(profile.mcp_servers,{fixture:{enabled:true},other:{enabled:false}});
+  assert.deepEqual(profile.sandbox_workspace_write,{writable_roots:[],network_access:false,exclude_tmpdir_env_var:true,exclude_slash_tmp:true});
+  assert.throws(()=>toolLaunchConfig(['other'],'fixture'),/MCP_ISOLATION_REQUIRED/);
+  assert.throws(()=>toolLaunchConfig(['fixture','fixture'],'fixture'),/MCP_ISOLATION_REQUIRED/);
+});

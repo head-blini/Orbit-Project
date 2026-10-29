@@ -84,3 +84,7 @@ test('missing identity, empty approval, wrong thread and alternate tool event re
   const unknown=event('item/completed',{},2);
   assert.equal(read([origin(),unknown,structuredClone(unknown)]).length,1);
 });
+
+test('explicit unknown outcome cannot be upgraded by native origin',()=>{
+  assert.equal(source([origin(),completed(),event('run.runtime_outcome',{source:'unknown'},3)]),'unknown');
+});

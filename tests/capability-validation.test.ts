@@ -58,7 +58,7 @@ test('tool evidence counts stay separate from execution and model history and re
   const r=discoverCapabilities({probe:null,codexReady:false},context),seq=store.lastSeq();
   const mock=enrichCapabilityValidation(r,store,{...context,records});
   assert.deepEqual(mock.tools!.totals,{keys:1,installed:1,permitted:1,invoked:{native:0,mock:1,unknown:2},verified:0});
-  records.push({key,grantId:grant.grantId,itemDigest:digest,evidenceSource:'native'},{key,grantId:'wrong',itemDigest:digest,evidenceSource:'native'},{key,grantId:grant.grantId,itemDigest:'b'.repeat(64),evidenceSource:'native'});
+  records.push({key,grantId:grant.grantId,itemDigest:digest,evidenceSource:'native',invocationId:'invocation',approvedDigest:'approved',bindingDigest:'approved',nativeObserved:true,callCompleted:true},{key,grantId:'wrong',itemDigest:digest,evidenceSource:'native'},{key,grantId:grant.grantId,itemDigest:'b'.repeat(64),evidenceSource:'native'});
   const toolsOnly=enrichCapabilityValidation(r,store,{...context,records});
   assert.deepEqual(toolsOnly.tools!.totals,{keys:1,installed:1,permitted:1,invoked:{native:3,mock:1,unknown:2},verified:1});
   for(const provider of toolsOnly.providers)for(const c of provider.capabilities)assert.deepEqual(c.validation,{nativeRuns:0,mockRuns:0,unknownRuns:0,lastRunId:null});

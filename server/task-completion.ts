@@ -1,3 +1,4 @@
+import {toolInvocationVerified} from './tool-capability-ledger.ts';
 import {createHash} from 'node:crypto';
 import {CODE_GATES, GENERAL_GATES} from '../shared/task-completion.ts';
 import type {CandidateCompletion, CandidateCompletionEvidence, IntegrationCandidateSubject, CodeGate, CompletionBinding, CompletionDecision, CompletionEvidence, CompletionGate, CompletionPolicy, TaskCompletion} from '../shared/task-completion.ts';
@@ -9,6 +10,7 @@ const sorted = (v:string[]) => [...new Set(v)].sort();
 /** Stable field ordering; gate/command order is not policy semantics. */
 export function completionPolicyDigest(policy:CompletionPolicy):string {
   return createHash('sha256').update(JSON.stringify({projectKind:policy.projectKind,
+    ...(policy.requiredTools?.length?{requiredTools:sorted(policy.requiredTools.map(k=>JSON.stringify([k.runtimeId,k.kind,k.itemId])))}:{}),
     requiredGates:sorted(policy.requiredGates),gateCommandMap:CODE_GATES.map(g=>[g,sorted(policy.gateCommandMap[g]??[])]),
     notApplicable:[...policy.notApplicable].sort((a,b)=>a.gate.localeCompare(b.gate)).map(n=>({gate:n.gate,reason:n.reason,approvedBy:n.approvedBy,approvedAt:n.approvedAt})),
     requireIndependentReview:policy.requireIndependentReview,dependencyRelease:policy.dependencyRelease})).digest('hex');
@@ -183,6 +185,16 @@ function evaluateCompletion(evidence:CandidateCompletionEvidence, policy:Complet
     const source=states.some(s=>s.source==='mock')?'mock':states.every(s=>s.source==='local')?'local':'unknown';
     return {id,status:freshness==='stale'?'stale':source==='mock'||source==='unknown'?'recorded':blockers.length?'blocked':'passed',evidenceIds:sorted(states.flatMap(s=>s.evidenceIds)),source,freshness,blockers};
   });
+  const tools=(policy.requiredTools??[]).map(key=>{
+    const rows=(evidence.toolInvocations??[]).filter(r=>r.key.runtimeId===key.runtimeId&&r.key.kind===key.kind&&r.key.itemId===key.itemId);
+    const current=rows.filter(r=>r.projectId===binding.projectId&&r.taskId===binding.taskId&&r.runId===binding.runId&&r.planningContentHash===binding.planningContentHash);
+    const verified=current.filter(r=>toolInvocationVerified(r,r.grant));
+    const nonNative=current.some(r=>r.evidenceSource!=='native');
+    const blockers=verified.length?[]:[!rows.length?'CQG_TOOL_EVIDENCE_MISSING':!current.length?'CQG_TOOL_BINDING_CHANGED':nonNative?'CQG_TOOL_EVIDENCE_NOT_NATIVE':'CQG_TOOL_NOT_VERIFIED'];
+    return {key:{...key},...decision(blockers,current.map(r=>r.id)),status:verified.length?'passed' as const:nonNative?'recorded' as const:'blocked' as const,
+      source:verified.length?'native' as const:current.some(r=>r.evidenceSource==='mock')?'mock' as const:'unknown' as const,freshness:current.length?'current' as const:rows.length?'stale' as const:'unavailable' as const};
+  });
+  reasons.push(...tools.flatMap(t=>t.blockers));
   reasons.push(...gates.flatMap(g=>g.blockers));
   if(!candidate&&(policy.projectKind==='general'||policy.requireIndependentReview||loopId))reasons.push(...independentReview.blockers);
   if(!candidate&&(loop?.steps.some(s=>s.kind==='repair')||loop?.result.repairs||q.repair.status!=='not_run')){
@@ -205,7 +217,7 @@ function evaluateCompletion(evidence:CandidateCompletionEvidence, policy:Complet
   if(policy.dependencyRelease==='wait')reasons.push('CQG_DEPENDENCY_RELEASE_WAIT');
   if(policy.dependencyRelease==='quality_passed_and_user_approval')reasons.push(...userApproval.blockers);
   const verifiedDone=qualityPassed&&(policy.dependencyRelease==='quality_passed'||policy.dependencyRelease==='quality_passed_and_user_approval'&&userApproval.status==='passed');
-  return {binding:{...binding},policyDigest,gates,qualityPassed,independentReview,userApproval,verifiedDone,reasonCodes:sorted(reasons)};
+  return {...(tools.length?{tools}:{}),binding:{...binding},policyDigest,gates,qualityPassed,independentReview,userApproval,verifiedDone,reasonCodes:sorted(reasons)};
 }
 
 /** Pure candidate projection. Source completion must be freshly read by the server
