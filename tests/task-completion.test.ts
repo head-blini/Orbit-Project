@@ -94,3 +94,47 @@ test('missing supplement or original null cannot be backfilled',()=>{for(const m
 test('policy digest stable across object key and command ordering',()=>{const f=fixture();f.policy.gateCommandMap.lint=['b','a'];const a=completionPolicyDigest(f.policy);f.policy.requiredGates.reverse();f.policy.gateCommandMap.lint.reverse();assert.equal(completionPolicyDigest(f.policy),a);});
 test('mock review is recorded with mock source, never passed',()=>{const f=fixture('general');f.quality.evidence.find(e=>e.id==='loop')!.evidenceSource='mock';const r=f.evaluate();assert.equal(r.gates.find(g=>g.id==='semantic_review')!.status,'recorded');assert.equal(r.verifiedDone,false);});
 test('review observation cannot be native when step provenance is unknown',()=>{const f=fixture('general');f.evidence.loops[0].steps[0].evidence!.evidenceSource='unknown';const r=f.evaluate();assert.equal(r.independentReview.source,'unknown');assert.equal(r.independentReview.status,'recorded');});
+
+// Candidate local checks and native source observations are independent fixtures.
+async function candidateFixture(){
+  const {evaluateCandidateCompletion}=await import('../server/task-completion.ts');
+  assert.equal(typeof evaluateCandidateCompletion,'function','candidate evaluator must be separate from task evaluator');
+  const source=fixture(),candidate=fixture();
+  candidate.evidence.producer=undefined;candidate.quality.execution.evidenceSource='local';
+  const subject={subject:'integration_candidate' as const,producer:'orbit_merge' as const,integrationId:candidate.binding.artifactId!,candidateDigest:candidate.binding.artifactDigest!,targetDigest:candidate.binding.baseSha,sourceBinding:{...source.binding}};
+  return {source,candidate,subject,evaluate:()=>evaluateCandidateCompletion(candidate.evidence,candidate.policy,candidate.binding,subject,source.evaluate())};
+}
+test('candidate: local gates plus CQG-1 source passes without an AI candidate producer',async()=>{
+  const f=await candidateFixture(),before=structuredClone(f.candidate.evidence);
+  assert.equal(f.evaluate().verifiedDone,true);assert.equal(f.candidate.evaluate().verifiedDone,false);
+  assert.deepEqual(f.candidate.evidence,before);assert.deepEqual(f.evaluate(),f.evaluate());
+});
+for(const defect of ['mock','unknown','stale','format-only','base mismatch','manifest mismatch','missing gate','stale gate','native gate','worker only'] as const){
+  test(`candidate: refuses ${defect}`,async()=>{
+    const f=await candidateFixture();
+    if(defect==='mock')f.source.evidence.producer!.model.evidenceSource='mock';
+    if(defect==='unknown')f.source.evidence.producer!.model.modelId=null;
+    if(defect==='stale')f.source.evidence.bindings.unit.artifactDigest='old';
+    if(defect==='format-only')f.source.evidence.checks=[];
+    if(defect==='base mismatch')f.subject.sourceBinding.baseSha='other';
+    if(defect==='manifest mismatch')f.subject.sourceBinding.artifactDigest='other';
+    if(defect==='missing gate'||defect==='worker only')f.candidate.evidence.checks=[];
+    if(defect==='stale gate')f.candidate.evidence.bindings.unit.artifactDigest='old';
+    if(defect==='native gate')f.candidate.quality.evidence[0].evidenceSource='native';
+    assert.equal(f.evaluate().verifiedDone,false);
+  });
+}
+for(const defect of ['none','format-only source','native semantic','missing semantic'] as const)test(`general candidate: ${defect}`,async()=>{
+ const {evaluateCandidateCompletion}=await import('../server/task-completion.ts');
+ const source=fixture('general'),candidate=fixture('general');
+ const evidence:import('../shared/task-completion.ts').CandidateCompletionEvidence=structuredClone(candidate.evidence);
+ evidence.producer=undefined;evidence.loops=[];evidence.quality.execution.evidenceSource='local';
+ evidence.quality.independentReview=dimension();evidence.quality.semantic=dimension();
+ evidence.quality.evidence=evidence.quality.evidence.filter(e=>e.kind!=='quality_loop');
+ evidence.bindings.semantic={...candidate.binding};
+ evidence.quality.evidence.push({id:'semantic',kind:'artifact_check',binding:{...candidate.binding},evidenceSource:defect==='native semantic'?'native':'local',freshness:'current',recordedStatus:'passed',blockers:[]});
+ if(defect!=='missing semantic')evidence.gateResults.push({gate:'semantic_review',evidenceId:'semantic',status:'passed'});
+ if(defect==='format-only source'){source.evidence.gateResults=source.evidence.gateResults.filter(g=>g.gate==='artifact_format');source.evidence.loops=[];}
+ const result=evaluateCandidateCompletion(evidence,candidate.policy,candidate.binding,{subject:'integration_candidate',producer:'orbit_merge',integrationId:candidate.binding.artifactId!,candidateDigest:candidate.binding.artifactDigest!,targetDigest:null,sourceBinding:source.binding},source.evaluate());
+ assert.equal(result.verifiedDone,defect==='none');
+});
