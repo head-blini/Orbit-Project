@@ -100,7 +100,14 @@ export class HarnessStore {
   private ports: HarnessStorePorts;
   constructor(store: Store, ports: HarnessStorePorts = {}) {
     this.store = store; this.ports = ports;
-    store.transaction(() => {
+    // DDL only: a SAVEPOINT is atomic both standalone and inside a caller's transaction
+    // (store.transaction would throw NESTED_TRANSACTION when constructed inside one).
+    const ddl = (work: () => void) => {
+      store.db.exec('SAVEPOINT harness_store_init');
+      try { work(); store.db.exec('RELEASE harness_store_init'); }
+      catch (error) { store.db.exec('ROLLBACK TO harness_store_init; RELEASE harness_store_init'); throw error; }
+    };
+    ddl(() => {
       store.db.exec(`CREATE TABLE IF NOT EXISTS harness_versions(
         version_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, target TEXT NOT NULL,
         request_id TEXT NOT NULL, request_digest TEXT NOT NULL, body TEXT NOT NULL, body_digest TEXT NOT NULL,

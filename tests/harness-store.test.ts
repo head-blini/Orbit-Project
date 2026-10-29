@@ -234,3 +234,13 @@ test('two connections serialize pointer changes and reject the losing stale appr
   assert.equal(second.history('project-1', target).length, 1);
   assert.equal(second.current('project-1', target).versionId, v.versionId);
 });
+
+test('constructing a HarnessStore inside a caller transaction does not nest transactions',()=>{
+  const store=new Store(':memory:');
+  try{
+    const inside=store.transaction(()=>{const harness=new HarnessStore(store);return harness.current('p','claude_task');});
+    assert.equal(inside.versionId,harnessV0('claude_task').versionId);
+    assert.ok(store.db.prepare("SELECT 1 FROM sqlite_master WHERE name='harness_versions'").get());
+    new HarnessStore(store);
+  }finally{store.close();}
+});
