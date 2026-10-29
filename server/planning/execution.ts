@@ -1,6 +1,11 @@
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import type { PlanningVersion, SavedTask } from '../../shared/parallel.ts';
+import {renderOverlay,type HarnessVersion} from '../../shared/harness.ts';
+import {classifyHarnessCandidate,harnessDigest,harnessV0} from '../harness-policy.ts';
+import {containsCredential} from '../privacy.ts';
+import {outboundDenial} from '../providers/policy.ts';
+import type {HarnessStore} from '../harness-store.ts';
 import { AppError } from '../errors.ts';
 import { approvalIssues, normalizeStoredPlanningDraft } from './parser.ts';
 
@@ -10,12 +15,16 @@ const validId=(value:unknown):value is string=>typeof value==='string'&&/^[A-Za-
 const BRIEF_HEADER='Implement the saved task below within the selected isolated workspace. Follow every plan constraint. Report verification honestly; an agent response is not a passed check.\n';
 // Random digit runs in UUIDs/SHA-256 digests match phone/national-id patterns, so PII inspection blanks only the
 // brief's leading identifier values when UUID/digest-shaped. Free text and credential checks still see everything.
-const briefIdentifiers=new RegExp('^'+BRIEF_HEADER.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')
+const BRIEF_GUIDANCE='Implement the saved task below within the selected isolated workspace. ';
+const escapeRegex=(text:string)=>text.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+const briefIdentifiers=new RegExp('^('+escapeRegex(BRIEF_GUIDANCE)
+  +'(?:\\n추가 실행 지침\\(Orbit 하네스 v[1-9][0-9]*\\):\\n(?:- [^\\r\\n]{1,160}\\n){1,5})?'
+  +escapeRegex(BRIEF_HEADER.slice(BRIEF_GUIDANCE.length))+')'
   +'\\{\\n  "taskId": "([^"]*)",\\n  "planningVersionId": "([^"]*)",\\n  "contentHash": "([^"]*)"');
 const opaqueId=(v:string)=>/^(?:[a-f0-9]{64}|[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})$/.test(v);
 /** Text for PII inspection of an outbound prompt that may start with an execution brief. Never send this text. */
-export const briefPiiInspectionText=(text:string)=>text.replace(briefIdentifiers,(_m,taskId:string,versionId:string,hash:string)=>
-  `${BRIEF_HEADER}{\n  "taskId": "${opaqueId(taskId)?'':taskId}",\n  "planningVersionId": "${opaqueId(versionId)?'':versionId}",\n  "contentHash": "${opaqueId(hash)?'':hash}"`);
+export const briefPiiInspectionText=(text:string)=>text.replace(briefIdentifiers,(_m,header:string,taskId:string,versionId:string,hash:string)=>
+  `${header}{\n  "taskId": "${opaqueId(taskId)?'':taskId}",\n  "planningVersionId": "${opaqueId(versionId)?'':versionId}",\n  "contentHash": "${opaqueId(hash)?'':hash}"`);
 
 /**
  * Pure validation/formatting only. The caller must load both records from its
@@ -52,4 +61,30 @@ export function buildExecutionBrief(task:SavedTask,version:PlanningVersion):Exec
   },null,2);
   if(prompt.length>MAX_EXECUTION_PROMPT_CHARS)throw new AppError('EXECUTION_BRIEF_TOO_LARGE',422);
   return {prompt,planningVersionId:version.id,planningContentHash:version.contentHash,requirementLabels:[...task.requirementLabels]};
+}
+
+export type CodexHarnessContext={selected:HarnessVersion;applied:Pick<HarnessVersion,'target'|'versionId'|'revision'|'digest'>;reason?:'HARNESS_TOO_LARGE'};
+
+/** Same injection-time AX06 and rendered-text checks as the Claude path. Only current() selects a version. */
+export function activeCodexHarness(harness:Pick<HarnessStore,'current'>,projectId:string):HarnessVersion {
+  let version:HarnessVersion,overlay:string;
+  try{version=harness.current(projectId,'codex_brief');overlay=renderOverlay(version);}
+  catch(error){throw new AppError(error instanceof AppError&&/^HARNESS_[A-Z_]+$/.test(error.message)?error.message:'HARNESS_INTEGRITY',409);}
+  if(version.target!=='codex_brief'||version.class!=='execution_guidance'||version.digest!==harnessDigest(version))throw new AppError('HARNESS_INTEGRITY',409);
+  if(version.revision>0){
+    const verdict=classifyHarnessCandidate({class:version.class,target:version.target,lines:version.lines,origin:'user',evidence:null});
+    if(verdict.status==='blocked')throw new AppError(verdict.reasons[0],409);
+    if(containsCredential(overlay)||outboundDenial(overlay))throw new AppError('HARNESS_UNSAFE_TEXT',409);
+  }
+  return version;
+}
+
+/** Preserve the entire v0 prompt, including repair context, when the overlay exceeds the Codex bound. */
+export function injectCodexHarness(prompt:string,selected:HarnessVersion):{prompt:string;harness:CodexHarnessContext} {
+  const overlay=renderOverlay(selected);
+  if(!prompt.startsWith(BRIEF_HEADER))throw new AppError('HARNESS_INTEGRITY',409);
+  const rendered=overlay?BRIEF_GUIDANCE+'\n'+overlay+'\n'+prompt.slice(BRIEF_GUIDANCE.length):prompt;
+  const overflow=!!overlay&&rendered.length>MAX_EXECUTION_PROMPT_CHARS;
+  const {target,versionId,revision,digest}=overflow?harnessV0('codex_brief'):selected;
+  return {prompt:overflow?prompt:rendered,harness:{selected,applied:{target,versionId,revision,digest},...(overflow?{reason:'HARNESS_TOO_LARGE' as const}:{})}};
 }

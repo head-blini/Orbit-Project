@@ -29,6 +29,7 @@ import {GoalService} from './goal-service.ts';
 import {TaskGraphService} from './task-graph.ts';
 import {ProjectProgressService} from './project-progress.ts';
 import {FailureIntelligenceService} from './failure-intelligence-service.ts';
+import {HarnessService} from './harness-service.ts';
 import {AppPreviewHost} from './app-preview.ts';
 import {assertGitProject} from './projects.ts';
 import {quotaSignal,type ProgressSignals} from '../shared/project-progress.ts';
@@ -50,6 +51,9 @@ export function createHttpServer(controller:Controller,assets:string,options:{wo
   // Partial controllers (tests, embedded hosts) fall back to a reader without completion policy, i.e. 'wait'.
   const progress=controller.progress??new ProjectProgressService(controller.store,studio,{deliverables:id=>controller.deliverables(id),verification:(workspaceId,runId)=>controller.verification.view(workspaceId,runId)});
   const failureIntel=new FailureIntelligenceService(controller.store);
+  // Partial controllers (tests) get a lazily built service; it still wires the HE-4 approval port, so promotion needs a fresh approval.
+  let harnessFallback:HarnessService|null=null;
+  const harness=()=>controller.harness??(harnessFallback??=new HarnessService(controller.store));
   const goals=new GoalService(controller.store,{
     progress:id=>progress.read(id,{}),deliverables:id=>controller.deliverableVersions?.references(id)??[],
   });
@@ -138,6 +142,11 @@ export function createHttpServer(controller:Controller,assets:string,options:{wo
         if(url.search)throw new AppError('INVALID_FIELDS',400);
         json(res,200,failureIntel.view(failureIndexRoute[1]));return;
       }
+      const harnessRoute=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/harness(?:\/(candidates\/generate|proposals|evaluations|approvals|promotions|rollbacks))?$/);
+      if(req.method==='GET'&&harnessRoute&&!harnessRoute[2]){
+        if(url.search)throw new AppError('INVALID_FIELDS',400);
+        json(res,200,harness().view(harnessRoute[1]));return;
+      }
       const failureCaseRoute=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/failure-cases(?:\/([A-Za-z0-9][A-Za-z0-9_.:-]{0,127})\/delete)?$/);
       const handoffLog=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/tasks\/([a-f0-9-]{36})\/handoff-history$/);
       if(req.method==='GET'&&handoffLog){
@@ -211,6 +220,18 @@ export function createHttpServer(controller:Controller,assets:string,options:{wo
           if(failureCaseRoute[2]){exact(data,['confirmed']);json(res,200,failureIntel.deleteCase(failureCaseRoute[1],failureCaseRoute[2],data.confirmed as boolean));return;}
           exact(data,['requestId','failureId','confirmed']);
           json(res,200,failureIntel.createCase(failureCaseRoute[1],data as {requestId:string;failureId:string;confirmed:boolean}));return;
+        }
+        if(harnessRoute&&harnessRoute[2]){
+          if(url.search)throw new AppError('INVALID_FIELDS',400);
+          const projectId=harnessRoute[1],service=harness();
+          switch(harnessRoute[2]){
+            case 'candidates/generate':exact(data,[]);json(res,200,service.generate(projectId));return;
+            case 'proposals':exact(data,['requestId','target','line','evidence','confirmed']);json(res,200,service.propose(projectId,data as unknown as Parameters<HarnessService['propose']>[1]));return;
+            case 'evaluations':exact(data,['requestId','candidateVersionId','liveApproval']);json(res,200,await service.evaluate(projectId,data as unknown as Parameters<HarnessService['evaluate']>[1]));return;
+            case 'approvals':exact(data,['requestId','evaluationId','candidateDigest','evaluationDigest','expectedSequence','confirmed']);json(res,200,service.approve(projectId,data as unknown as Parameters<HarnessService['approve']>[1]));return;
+            case 'promotions':exact(data,['requestId','target','versionId','fromVersionId','expectedSequence','candidateDigest','evaluationDigest']);json(res,200,service.promote(projectId,data as unknown as Parameters<HarnessService['promote']>[1]));return;
+            case 'rollbacks':exact(data,['requestId','target','versionId','fromVersionId','expectedSequence','confirmed']);json(res,200,service.rollback(projectId,data as unknown as Parameters<HarnessService['rollback']>[1]));return;
+          }
         }
         if(qualityRoute){
           if(url.search)throw new AppError('INVALID_FIELDS',400);
