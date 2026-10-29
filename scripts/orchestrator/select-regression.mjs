@@ -27,7 +27,7 @@ if (!opts.base || !opts.head || !Number.isInteger(opts.depth) || opts.depth < 1)
 const git = (...a) => execFileSync('git', a, {encoding: 'utf8', maxBuffer: 64 * 1024 * 1024});
 const root = git('rev-parse', '--show-toplevel').trim();
 const changed = git('diff', '--name-only', `${opts.base}...${opts.head}`).split('\n').filter(Boolean).sort();
-const files = git('ls-files', '--', '*.ts').split('\n').filter((f) => /^(server|shared|tests)\//.test(f) && existsSync(join(root, f)));
+const files = git('ls-files', '--', '*.ts', '*.tsx').split('\n').filter((f) => /^(server|shared|web|tests)\//.test(f) && existsSync(join(root, f)));
 const isTest = (f) => f.startsWith('tests/') && f.endsWith('.test.ts');
 const tests = files.filter(isTest);
 const text = new Map(files.map((f) => [f, readFileSync(join(root, f), 'utf8')]));
@@ -49,7 +49,7 @@ const add = (t, r) => { if (!reasons.has(t)) reasons.set(t, []); if (!reasons.ge
 
 for (const f of changed) if (isTest(f) && existsSync(join(root, f))) add(f, 'changed');
 
-const sources = changed.filter((f) => /^(server|shared)\/.+\.ts$/.test(f));
+const sources = changed.filter((f) => /^(server|shared|web)\/.+\.tsx?$/.test(f));
 for (const src of sources) {
   const seen = new Set([src]);
   let frontier = [src];

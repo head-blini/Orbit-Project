@@ -70,6 +70,44 @@ test('c: tests reading a changed source by basename', () => {
   } finally { f.cleanup(); }
 });
 
+for (const ext of ['ts', 'tsx']) test(`web .${ext}: static imports, dynamic view helper, transitive imports and depth`, () => {
+  const source = `web/component.${ext}`;
+  const f = fixture({
+    ...base,
+    [source]: 'export const component=1;\n',
+    'web/panel.tsx': `export {component} from './component.${ext}';\n`,
+    'server/bridge.ts': "export {component} from '../web/panel.tsx';\n",
+    'shared/bridge.ts': "export {component} from '../server/bridge.ts';\n",
+    'tests/web-direct.test.ts': `import {component} from '../web/component.${ext}';\n`,
+    'tests/web-dynamic.test.ts': `async function view(){return await import('../web/component.${ext}');}\nawait view();\n`,
+    'tests/web-transitive.test.ts': "import {component} from '../web/panel.tsx';\n",
+    'tests/web-cross.test.ts': "import {component} from '../shared/bridge.ts';\n",
+  });
+  try {
+    f.change({[source]: 'export const component=2;\n'});
+    assert.deepEqual(f.select('--depth', '1'), ['tests/web-direct.test.ts', 'tests/web-dynamic.test.ts']);
+    assert.deepEqual(f.select(), ['tests/web-direct.test.ts', 'tests/web-dynamic.test.ts', 'tests/web-transitive.test.ts']);
+    assert.deepEqual(f.select('--depth', '4'), ['tests/web-cross.test.ts', 'tests/web-direct.test.ts', 'tests/web-dynamic.test.ts', 'tests/web-transitive.test.ts']);
+    const json = JSON.parse(execFileSync('node', [script, '--base', f.base, '--json'], {cwd: f.dir, encoding: 'utf8'}));
+    for (const name of ['direct', 'dynamic']) assert.ok(json.reasons[`tests/web-${name}.test.ts`].includes(`imports ${source} (1 hop)`));
+  } finally { f.cleanup(); }
+});
+
+test('web basename references select tests without imports; unrelated web source selects nothing', () => {
+  const f = fixture({
+    ...base,
+    'web/component.tsx': 'export const component=1;\n',
+    'web/unused.tsx': 'export const unused=1;\n',
+    'tests/web-reads.test.ts': "readFileSync(new URL('../web/component.tsx', import.meta.url));\n",
+  });
+  try {
+    f.change({'web/unused.tsx': 'export const unused=2;\n'});
+    assert.deepEqual(f.select(), []);
+    f.change({'web/component.tsx': 'export const component=2;\n'});
+    assert.deepEqual(f.select(), ['tests/web-reads.test.ts']);
+  } finally { f.cleanup(); }
+});
+
 test('d: mandatory set for gate files, only existing tests', () => {
   const f = fixture(base);
   try {
