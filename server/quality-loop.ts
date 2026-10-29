@@ -5,6 +5,12 @@ const digest=(s:string)=>typeof s==='string'&&/^[a-f0-9]{64}$/.test(s);
 const nonempty=(s:unknown):s is string=>typeof s==='string'&&s.trim().length>0;
 const knownModel=(s:unknown):s is string=>nonempty(s)&&!s.split('/').some(part=>part.toLowerCase()==='unknown');
 const clone=<T>(value:T):T=>structuredClone(value);
+// Random digit runs in SHA-256 digests and UUIDs match phone/national-id patterns (~1.4% of digests), so PII
+// inspection skips only schema identifier fields whose value is such an identifier; free text and credentials stay fully inspected.
+const identifierFields=new Set(['id','digest','baselineDigest','artifactDigest','sessionId','runId','executionId','checkIds']);
+const opaqueIdentifier=(v:unknown)=>typeof v==='string'&&/^(?:[a-f0-9]{64}|[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})$/.test(v);
+const withoutIdentifiers=(key:string,v:unknown)=>!identifierFields.has(key)?v:opaqueIdentifier(v)?'':Array.isArray(v)?v.map(x=>opaqueIdentifier(x)?'':x):v;
+export const qualityEvidenceBlocked=(value:unknown)=>containsCredential(JSON.stringify(value))||inspectOutbound(JSON.stringify(value,withoutIdentifiers)).length>0;
 /** Bounded policy coordinator; native execution, approval and durable recovery remain owned by existing services.
  * Not exposed via HTTP until those adapters are wired. This function never spawns processes.
  */
@@ -30,7 +36,7 @@ export async function runQualityLoop(source:QualityLoopInput,ports:QualityLoopPo
   function validate(review:QualityReview,modelKey:string){
     if(review.modelKey!==modelKey||!nonempty(review.sessionId)||sessions.has(review.sessionId)||review.baselineDigest!==baseline.digest||review.artifactDigest!==result.artifact.digest)throw Error('QUALITY_EVIDENCE_MISMATCH');
     if(!Array.isArray(review.criteria)||review.criteria.length!==baseline.criteria.length||new Set(review.criteria.map(c=>c.criterion)).size!==baseline.criteria.length||!review.criteria.every(c=>baseline.criteria.includes(c.criterion)&&['met','not_met','unclear'].includes(c.status)&&nonempty(c.evidence)&&c.evidence.length<=4000)||!Array.isArray(review.findings)||review.findings.length>50||!review.findings.every(f=>nonempty(f)&&f.length<=4000))throw Error('QUALITY_EVIDENCE_INVALID');
-    const text=JSON.stringify(review);if(containsCredential(text)||inspectOutbound(text).length)throw Error('QUALITY_EVIDENCE_BLOCKED');
+    if(qualityEvidenceBlocked(review))throw Error('QUALITY_EVIDENCE_BLOCKED');
     sessions.add(review.sessionId);
   }
   try{
@@ -52,7 +58,7 @@ export async function runQualityLoop(source:QualityLoopInput,ports:QualityLoopPo
       if(ports.verify){
         const failures=await bounded(()=>ports.verify!({baseline:clone(baseline),artifact:clone(result.artifact),signal:controller.signal}));
         if(!Array.isArray(failures)||failures.length>100||!failures.every(f=>nonempty(f.reviewerId)&&(f.criterion===null||baseline.criteria.includes(f.criterion))&&['not_met','unclear'].includes(f.status)&&nonempty(f.evidence)&&f.evidence.length<=4000))throw Error('QUALITY_EVIDENCE_INVALID');
-        const text=JSON.stringify(failures);if(containsCredential(text)||inspectOutbound(text).length)throw Error('QUALITY_EVIDENCE_BLOCKED');
+        if(qualityEvidenceBlocked(failures))throw Error('QUALITY_EVIDENCE_BLOCKED');
         round.failures.push(...clone(failures));
         if(limited(0))return await finish('limit_reached','QUALITY_CALL_OR_TIME_LIMIT');
       }
