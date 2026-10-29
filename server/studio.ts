@@ -6,7 +6,8 @@ import type { PlanningInput } from './planning/parser.ts';
 import { SqliteArtifactRepository,validateArtifactInput } from './visualization/artifacts.ts';
 import type { ArtifactInput,ArtifactRecord,PlanningVersion,SavedTask,TaskDraft } from '../shared/parallel.ts';
 import type { PlanningComparison } from '../shared/planning-revisions.ts';
-import { buildExecutionBrief } from './planning/execution.ts';
+import {HarnessStore} from './harness-store.ts';
+import { buildExecutionBrief,activeCodexHarness,injectCodexHarness } from './planning/execution.ts';
 import { comparePlanningVersions } from './planning/comparison.ts';
 import { serializePlanningExport } from './planning/export.ts';
 import { serializePresentation } from './visualization/pptx.ts';
@@ -70,6 +71,10 @@ export class Studio {
     const head=this.store.db.prepare('SELECT version_id FROM planning_heads WHERE lineage_id=?').get(version.lineageId!);
     if(head?.version_id!==version.id)throw new AppError('PLANNING_VERSION_STALE',409);
     return {...buildExecutionBrief(task,version),taskId:task.id};
+  }
+  codexExecution(projectId:string,taskId:string,suffix=''){
+    const brief=this.execution(projectId,taskId);
+    return {...brief,...injectCodexHarness(brief.prompt+suffix,activeCodexHarness(new HarnessStore(this.store),projectId))};
   }
   comparePlanning(projectId:string,targetId:string,baseId:string):PlanningComparison {
     this.project(projectId);
