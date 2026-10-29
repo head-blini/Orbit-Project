@@ -43,6 +43,7 @@ The wrapper prints JSON: `runId`, `status` (`completed|failed|quota_exhausted|in
 
 1. Read `last.md`. Codex's own claims are not evidence.
 2. Re-run the task's verification commands yourself (typecheck, test, build) in that worktree.
-3. If `quota_exhausted`, do not retry automatically. Record a checkpoint and move to work that does not need Codex.
-4. If `failed`, read `stderr.log` and the tail of `events.jsonl`, then decide: fix the prompt and use `--resume`, or reassign.
-5. Mark the task done in `.local/orchestrator/STATE.md` only with verification evidence.
+3. If `provider_capacity` (model at capacity), the turn never ran: check the worktree is unchanged, then retry once after a wait with the same prompt. Do not switch models silently.
+4. If `quota_exhausted`, do not retry automatically. Record a checkpoint and move to work that does not need Codex.
+5. If `failed`, read `stderr.log` and the tail of `events.jsonl`, then decide: fix the prompt and use `--resume`, or reassign.
+6. Mark the task done in `.local/orchestrator/STATE.md` only with verification evidence.

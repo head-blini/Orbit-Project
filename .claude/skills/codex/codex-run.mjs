@@ -71,7 +71,7 @@ process.on('SIGINT',()=>stop('SIGINT'));process.on('SIGTERM',()=>stop('SIGTERM')
 child.on('error',error=>{meta.error=error.message;});
 child.on('close',(code,signal)=>{
   meta.exitCode=code;meta.finishedAt=new Date().toISOString();
-  meta.status=code===0?'completed':signal?'interrupted':/usage limit|rate limit|quota|429|too many requests/i.test(errors)?'quota_exhausted':'failed';
+  meta.status=code===0?'completed':signal?'interrupted':/usage limit|rate limit|quota|429|too many requests/i.test(errors)?'quota_exhausted':/at capacity|overloaded|503/i.test(errors)?'provider_capacity':'failed';
   if(meta.status!=='completed')meta.error=(meta.error??errors.trim().split('\n').slice(-3).join('\n'))||null;
   save();rmSync(lockPath,{force:true});
   out({runId,status:meta.status,exitCode:code,sessionId:meta.sessionId,record:dir,lastMessage:existsSync(join(dir,'last.md'))?join(dir,'last.md'):null,error:meta.error});
