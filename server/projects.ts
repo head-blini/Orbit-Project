@@ -75,9 +75,21 @@ export class Projects {
     const p=this.project(projectId);if(!p.writeEnabled)throw new AppError('WRITES_DISABLED',403);
     return this.prepareWorktree(p,randomUUID());
   }
-  private prepareWorktree(p:Project,id:string):Workspace {
+  /** Internal PW-3 entry point; caller holds the authoritative Store write lock. */
+  createWorkerWorkspace(projectId:string,baseSha:string,id:string):Workspace {
+    if(!this.store.db.isTransaction)throw new AppError('WORKER_SERIALIZATION_REQUIRED',409);
+    const p=this.project(projectId);if(!p.writeEnabled)throw new AppError('WRITES_DISABLED',403);
+    if(!/^[a-f0-9-]{36}$/.test(id)||this.workspaces().some(w=>w.id===id)||! /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(baseSha))throw new AppError('WORKER_BASE_INVALID',409);
+    return this.prepareWorktree(p,id,baseSha);
+  }
+  private prepareWorktree(p:Project,id:string,approvedBase?:string):Workspace {
     if(p.kind==='general')throw new AppError('GIT_REQUIRED',409);
-    const {sha}=repository(p.path);accessSync(join(p.path,'.git'),constants.W_OK);canonical(this.managed);
+    const current=repository(p.path),sha=approvedBase??current.sha;accessSync(join(p.path,'.git'),constants.W_OK);canonical(this.managed);
+    if(approvedBase){
+      if(git(p.path,['rev-parse','--verify',sha+'^{commit}']).trim()!==sha)throw new AppError('WORKER_BASE_INVALID',409);
+      const tree=git(p.path,['ls-tree','-rz',sha]);
+      if(tree.split('\0').some(e=>/^(120000|160000) /.test(e)||/\t(?:.*\/)?(?:\.codex|\.agents|\.aws|\.git)(?:\/|$)/i.test(e)))throw new AppError('UNSUPPORTED_TREE');
+    }
     const w:Workspace={id,projectId:p.id,path:join(this.managed,id),branch:'orbit/'+id,baseSha:sha,createdAt:new Date().toISOString(),status:'creating'};
     this.store.saveWorkspace(w);
     try{git(p.path,['worktree','add','--no-track','-b',w.branch,'--',w.path,sha]);for(const name of ['.codex','.agents','.aws'])mkdirSync(join(w.path,name),{recursive:true});w.status='ready';this.store.saveWorkspace(w);this.validate(w.id);return w;}
@@ -108,6 +120,23 @@ export class Projects {
   fingerprint(id:string):string {
     const workspace=this.writable(id);
     try{return fingerprintWorkspace(workspace.path,workspace.baseSha,this.manifest(workspace));}catch{throw new AppError('FINGERPRINT_UNAVAILABLE',409);}
+  }
+  /** Includes ignored files: ignore rules cannot hide out-of-scope worker writes. */
+  workerChanges(id:string){
+    const w=this.writable(id);
+    const changed=git(w.path,['diff','--no-ext-diff','--no-textconv','--no-renames','--name-only','-z',w.baseSha,'--']).split('\0').filter(Boolean);
+    const untracked=git(w.path,['ls-files','--others','-z']).split('\0').filter(Boolean);
+    const names=[...new Set([...changed,...untracked])].sort();
+    const files=names.map(path=>({path,mode:existsSync(join(w.path,path))&&(lstatSync(join(w.path,path)).mode&0o111)?'100755':'100644'}));
+    return readWorkspaceSnapshot(w.path,w.baseSha,files);
+  }
+  /** Only PW-3-owned workspaces, after termination; caller serializes through Store. */
+  removeWorkerWorkspace(id:string):void {
+    if(!this.store.db.isTransaction)throw new AppError('WORKER_SERIALIZATION_REQUIRED',409);
+    const w=this.writable(id),p=this.project(w.projectId);
+    git(p.path,['worktree','remove','--force','--',w.path]);
+    git(p.path,['branch','-D','--',w.branch]);
+    this.store.db.prepare('DELETE FROM workspaces WHERE id=?').run(id);
   }
   mergeContext(id:string){
     const workspace=this.writable(id);
