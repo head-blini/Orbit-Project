@@ -28,12 +28,53 @@ export interface IntegrationPolicy {
 }
 /** Read-only, trusted server evidence adapter. Bindings must have been captured
  * on this candidate; callers must never rebind worker passes to these values.
- * No adapter means no auto-apply. It must not run checks or invoke providers. */
+ * Missing candidate provenance means no auto-apply. Readers never run checks or invoke providers. */
 export interface IntegrationCompletionEvidence {
   subject:{integrationId:string;candidateDigest:string;targetDigest:string|null};
   binding:CompletionBinding;evidence:CompletionEvidence;
 }
 export type IntegrationCompletionReader=(item:Readonly<IntegrationItem>)=>IntegrationCompletionEvidence|null;
+/** Optional provenance captured by a trusted candidate producer, alongside its
+ * integration check. The current verifier emits command-only rows: those cannot
+ * establish AI provenance and stay refused until a candidate producer records it.
+ * No worker record or current policy is used to fill these fields on reads.
+ */
+export interface CandidateCompletionContext {
+  subject:IntegrationCompletionEvidence['subject'];
+  binding:CompletionBinding;
+  producer:CompletionEvidence['producer'];
+  quality:CompletionEvidence['quality'];
+  commands:CompletionEvidence['commands'];
+  bindings:CompletionEvidence['bindings'];
+  loops:CompletionEvidence['loops'];
+  gateResults:CompletionEvidence['gateResults'];
+}
+export function readCandidateCompletion(store:Store,item:Readonly<IntegrationItem>):IntegrationCompletionEvidence|null {
+  if(!store.db.prepare("SELECT 1 FROM sqlite_master WHERE name='integration_checks'").get())return null;
+  try{
+    const rows=store.db.prepare('SELECT id,body FROM integration_checks ORDER BY rowid').all().map(row=>({...JSON.parse(String(row.body)),id:String(row.id)}));
+    const matches=rows.filter(row=>row.integrationId===item.id&&row.sourceDigest===item.candidateDigest&&row.configDigest===item.configDigest&&row.approvedBaseline===item.approvedBaseline);
+    const contexts=matches.flatMap(row=>row.completionContext?[row.completionContext as CandidateCompletionContext]:[]);
+    const context=contexts.at(-1);
+    if(!context||contexts.some(c=>hash(c)!==hash(context)))return null;
+    const {binding,subject}=context;
+    if(subject.integrationId!==item.id||subject.candidateDigest!==item.candidateDigest||subject.targetDigest!==(item.target?.head??item.generalTargetDigest)
+      ||binding.artifactId!==item.id||binding.artifactDigest!==item.candidateDigest||binding.configDigest!==item.configDigest||binding.policyDigest!==item.completionPolicyDigest)return null;
+    const evidence:CompletionEvidence={...structuredClone(context),checks:[],approvals:[]};
+    // Check truth comes only from candidate command results, never the context.
+    evidence.quality.evidence=evidence.quality.evidence.filter(e=>e.kind!=='verification_check');
+    for(const row of matches){
+      const r=row.result as VerificationResult|undefined,command=context.commands.find(c=>c.id===row.commandId);
+      if(!r||!command||r.commandId!==row.commandId||r.workspaceId!==item.id||r.baseSha!==(item.target?.head??zero)||r.sourceDigest!==item.candidateDigest||r.finishedDigest!==item.candidateDigest)continue;
+      evidence.bindings[row.id]=structuredClone(binding);
+      evidence.quality.evidence.push({id:row.id,kind:'verification_check',binding:structuredClone(binding),evidenceSource:'local',freshness:'current',recordedStatus:row.status,blockers:[]});
+      evidence.checks.push({id:row.id,requestId:row.id,runId:binding.runId!,projectId:item.projectId,workspaceId:item.id,taskId:binding.taskId!,planningVersionId:binding.planningVersionId!,planningContentHash:binding.planningContentHash!,acceptanceDigest:binding.acceptanceDigest!,
+        commandId:row.commandId,configDigest:command.configDigest,baseSha:r.baseSha,sourceDigest:r.sourceDigest,finishedDigest:r.finishedDigest,createdAt:r.startedAt,
+        completedAt:Number.isFinite(r.durationMs)?new Date(Date.parse(r.startedAt)+r.durationMs).toISOString():null,execution:'completed',verdict:r.status,exitCode:r.exitCode,durationMs:r.durationMs,output:r.output,recoveredAt:null,evidenceSource:'local'});
+    }
+    return {subject:structuredClone(subject),binding:structuredClone(binding),evidence};
+  }catch{return null;}
+}
 export interface IntegrationInput {requestId:string;fence:WorkerFence;targetBranch:string|null}
 export interface IntegrationItem {
   id:string;requestId:string;inputDigest:string;fence:WorkerFence;projectId:string;space:WorkerSpace;
@@ -68,7 +109,7 @@ export class IntegrationQueue {
   private store:Store;private projects:Projects;private workers:ParallelWorkerService;private spaces:WorkerSpaces;
   private verification:VerificationService;private merge:MergeService;private policy:(projectId:string)=>IntegrationPolicy;
   private readCompletion:IntegrationCompletionReader;
-  constructor(store:Store,projects:Projects,workers:ParallelWorkerService,spaces:WorkerSpaces,verification:VerificationService,merge:MergeService,policy:(projectId:string)=>IntegrationPolicy,readCompletion:IntegrationCompletionReader=()=>null){
+  constructor(store:Store,projects:Projects,workers:ParallelWorkerService,spaces:WorkerSpaces,verification:VerificationService,merge:MergeService,policy:(projectId:string)=>IntegrationPolicy,readCompletion:IntegrationCompletionReader=item=>readCandidateCompletion(store,item)){
     this.store=store;this.projects=projects;this.workers=workers;this.spaces=spaces;this.verification=verification;this.merge=merge;this.policy=policy;
     this.readCompletion=readCompletion;
     store.db.exec('CREATE TABLE IF NOT EXISTS integration_queue(id TEXT PRIMARY KEY,request_id TEXT NOT NULL UNIQUE,input_digest TEXT NOT NULL,slot INTEGER UNIQUE CHECK(slot=1),body TEXT NOT NULL);');

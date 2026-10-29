@@ -22,7 +22,7 @@ export interface CompletionReaders extends QualityProgressReaders {
  evidence?:(quality:CompletionEvidence,run:Run)=>CompletionEvidence;
 }
 /** Host configuration only. Missing entries retain the conservative wait policy. */
-export function readCompletionPolicies(raw:string|undefined):{projectPath:string;policy:CompletionPolicy}[]{
+export function readCompletionPolicies(raw:string|undefined,commands?:(path:string)=>readonly {id:string}[]):{projectPath:string;policy:CompletionPolicy}[]{
  if(raw===undefined)return [];
  try{
   if(raw.length>64000)throw Error();
@@ -30,7 +30,7 @@ export function readCompletionPolicies(raw:string|undefined):{projectPath:string
   if(!Array.isArray(values)||values.length>100)throw Error();
   const exact=(v:object,keys:string[])=>!!v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).sort().join()===keys.sort().join();
   for(const entry of values){
-   if(!exact(entry,['projectPath','policy'])||typeof entry.projectPath!=='string'||!isAbsolute(entry.projectPath))throw Error();
+   if(!exact(entry,['projectPath','policy'])||typeof entry.projectPath!=='string'||!isAbsolute(entry.projectPath)||/[\x00-\x1f]/.test(entry.projectPath))throw Error();
    const p=entry.policy;
    if(!exact(p,['projectKind','requiredGates','gateCommandMap','notApplicable','requireIndependentReview','dependencyRelease'])
     ||!['code','general'].includes(p.projectKind)||typeof p.requireIndependentReview!=='boolean'
@@ -40,10 +40,21 @@ export function readCompletionPolicies(raw:string|undefined):{projectPath:string
     ||!p.gateCommandMap||typeof p.gateCommandMap!=='object'||Array.isArray(p.gateCommandMap)
     ||!Object.entries(p.gateCommandMap).every(([gate,ids])=>(CODE_GATES as readonly string[]).includes(gate)&&Array.isArray(ids)&&ids.every(id=>typeof id==='string'&&!!id.trim())&&new Set(ids).size===ids.length)
     ||!Array.isArray(p.notApplicable)||!p.notApplicable.every((n:{gate:string;reason:string;approvedBy:string;approvedAt:string})=>exact(n,['gate','reason','approvedBy','approvedAt'])&&p.requiredGates.includes(n.gate)&&[n.reason,n.approvedBy,n.approvedAt].every(v=>typeof v==='string'&&!!v.trim())&&Number.isFinite(Date.parse(n.approvedAt))))throw Error();
+   const gates=p.projectKind==='code'?CODE_GATES:GENERAL_GATES;
+   if(p.requiredGates.length!==gates.length||new Set(p.notApplicable.map((n:{gate:string})=>n.gate)).size!==p.notApplicable.length)throw Error();
+   if(p.projectKind==='general'&&Object.keys(p.gateCommandMap).length)throw Error();
+   if(p.projectKind==='code'){
+    const known=commands?.(entry.projectPath);
+    for(const gate of CODE_GATES){
+     const ids=p.gateCommandMap[gate]??[];
+     if(p.dependencyRelease!=='wait'&&!p.notApplicable.some((n:{gate:string})=>n.gate===gate)&&!ids.length)throw Error();
+     if(ids.some((id:string)=>!(/^[A-Za-z0-9_-]{1,100}$/.test(id))||known&&!known.some(c=>c.id===id)))throw Error();
+    }
+   }
   }
   if(new Set(values.map(v=>v.projectPath)).size!==values.length)throw Error();
   return values;
- }catch{throw Error('INVALID_COMPLETION_CONFIGURATION');}
+ }catch{throw new AppError('INVALID_COMPLETION_CONFIGURATION',503);}
 }
 export function defaultCompletionPolicy(kind:'code'|'general'):CompletionPolicy {
  return {projectKind:kind,requiredGates:[...(kind==='code'?CODE_GATES:GENERAL_GATES)],gateCommandMap:{},notApplicable:[],requireIndependentReview:kind==='general',dependencyRelease:'wait'};
@@ -114,6 +125,23 @@ export class ProjectProgressService {
       }
       let view;try{if(run?.workspaceId)view=this.qualityReaders.verification?.(run.workspaceId,run.id);}catch{/* Missing current files fail closed. */}
       let evidence:CompletionEvidence=run?quality.completionEvidence(task.quality,run,view):{quality:task.quality,bindings:{},checks:[],commands:[],loops:[],gateResults:[],approvals:[]};
+      const capturedProducer=[...evidence.checks].reverse().map(c=>(c as CheckRecord & {completionProducer?:CompletionEvidence['producer']}).completionProducer).find(p=>p);
+      if(capturedProducer)evidence.producer=capturedProducer;
+      if(run&&this.store.db.prepare("SELECT 1 FROM sqlite_master WHERE name='quality_controller_receipts'").get()){
+        let producerSelected=!!capturedProducer;const bound=new Set<string>();
+        for(const row of this.store.db.prepare('SELECT body FROM quality_controller_receipts ORDER BY rowid DESC').all())try{
+          const capture=JSON.parse(String(row.body)).completionCapture;
+          if(capture?.sourceRunId!==run.id||!Array.isArray(capture.records))continue;
+          for(const record of capture.records){
+            if(bound.has(record.evidenceId)||!['quality_native_receipts','quality_artifact_checks'].includes(record.table)||!evidence.quality.evidence.some(e=>e.id===record.evidenceId&&e.kind===(record.table==='quality_native_receipts'?'quality_loop':'artifact_check')))continue;
+            if(!this.store.db.prepare("SELECT 1 FROM sqlite_master WHERE name=?").get(record.table))continue;
+            const original=this.store.db.prepare(`SELECT body FROM ${record.table} WHERE id=?`).get(record.id);
+            if(!original||createHash('sha256').update(String(original.body)).digest('hex')!==record.digest)continue;
+            evidence.bindings[record.evidenceId]=capture.binding;bound.add(record.evidenceId);
+            if(!producerSelected&&capture.producer){evidence.producer=capture.producer;producerSelected=true;}
+          }
+        }catch{/* Missing or corrupt capture never upgrades legacy evidence. */}
+      }
       if(run&&this.qualityReaders.evidence)evidence=this.qualityReaders.evidence(evidence,run);
       let artifactId=run?.workspaceId??null,artifactDigest=view?.sourceDigest??null,inputSnapshotDigest:string|null=null;
       if(run&&!run.workspaceId)try{const snapshot=generalEvidenceSnapshot(this.store,run,()=>{throw Error('NO_MANIFEST');});artifactId=snapshot.artifactId;artifactDigest=snapshot.digest;inputSnapshotDigest=snapshot.space?.inputDigest??null;}catch{/* Never substitute project inventory for task outputs. */}

@@ -12,7 +12,7 @@ import {repositoryIdentity} from '../server/repository-resource.ts';
 import {trustedGit} from '../server/git-process.ts';
 import {VerificationService} from '../server/verification-service.ts';
 import {MergeService} from '../server/merge-service.ts';
-import {IntegrationQueue,type IntegrationItem,type IntegrationCompletionEvidence} from '../server/integration-queue.ts';
+import {IntegrationQueue,readCandidateCompletion,type IntegrationItem,type IntegrationCompletionEvidence} from '../server/integration-queue.ts';
 import {CODE_GATES,GENERAL_GATES,type CompletionPolicy,type CompletionEvidence} from '../shared/task-completion.ts';
 import {completionPolicyDigest} from '../server/task-completion.ts';
 import {readVerificationConfiguration,verificationCommandPreviews,verificationGateCommandMap} from '../server/verification-configuration.ts';
@@ -281,5 +281,51 @@ test('candidate movement while reading completion evidence rebuilds before apply
   const q=f.worker('result.txt','result').enqueue();await f.queue.drain();
   assert.equal(f.queue.get(q.id).status,'applied',f.queue.get(q.id).reason??'');assert.equal(f.queue.get(q.id).attempts,2);
   assert.equal(readFileSync(join(f.project.path,'output/result.txt'),'utf8'),'result');
+ }finally{f.store.close();}
+});
+
+for(const defect of ['none','missing category','worker only','wrong target','old policy','no provenance'] as const)test(`persisted candidate reader: ${defect}`,async()=>{
+ const f=fixture();try{
+  const verify=f.verification.verifyIntegration.bind(f.verification),fixtureReader=f.completion.read;
+  f.verification.verifyIntegration=async input=>{
+   const result=await verify(input),item=f.queue.get(input.id);
+   const captured=fixtureReader(item)!;
+   const {quality,producer,commands,bindings,loops,gateResults}=captured.evidence;
+   const context={subject:captured.subject,binding:captured.binding,quality,producer,commands,bindings,loops,gateResults};
+   if(defect==='wrong target')context.subject.targetDigest='wrong';
+   if(defect==='old policy')context.binding.policyDigest='old';
+   if(defect==='worker only'){
+    f.store.db.exec('CREATE TABLE IF NOT EXISTS verification_checks(id TEXT PRIMARY KEY,request_id TEXT NOT NULL UNIQUE,body TEXT NOT NULL)');
+    for(const check of captured.evidence.checks)f.store.db.prepare('INSERT INTO verification_checks VALUES(?,?,?)').run(check.id,check.id,JSON.stringify({...check,workspaceId:item.space.workspaceId,completionBinding:{...captured.binding,artifactId:item.space.workspaceId}}));
+    f.store.db.exec('DELETE FROM integration_checks');
+   }
+   if(defect!=='worker only'&&defect!=='no provenance')for(const row of f.store.db.prepare('SELECT id,body FROM integration_checks').all()){
+    const body=JSON.parse(String(row.body));body.completionContext=context;
+    f.store.db.prepare('UPDATE integration_checks SET body=? WHERE id=?').run(JSON.stringify(body),String(row.id));
+   }
+   return result;
+  };
+  if(defect==='missing category')f.policy.completionPolicy.gateCommandMap.e2e=['absent'];
+  f.completion.read=item=>readCandidateCompletion(f.store,item);
+  const q=f.worker('a.txt','A').enqueue();await f.queue.drain();
+  assert.equal(f.queue.get(q.id).status,defect==='none'?'applied':'refused');
+ }finally{f.store.close();}
+});
+
+for(const defect of ['none','semantic missing'] as const)test(`persisted general candidate reader: ${defect}`,async()=>{
+ const f=fixture('general');try{
+  const verify=f.verification.verifyIntegration.bind(f.verification),fixtureReader=f.completion.read;
+  f.verification.verifyIntegration=async input=>{
+   const result=await verify(input),captured=fixtureReader(f.queue.get(input.id))!;
+   const {quality,producer,commands,bindings,loops,gateResults}=captured.evidence;
+   const context={subject:captured.subject,binding:captured.binding,quality,producer,commands,bindings,loops: defect==='semantic missing'?[]:loops,gateResults};
+   for(const row of f.store.db.prepare('SELECT id,body FROM integration_checks').all()){
+    f.store.db.prepare('UPDATE integration_checks SET body=? WHERE id=?').run(JSON.stringify({...JSON.parse(String(row.body)),completionContext:context}),String(row.id));
+   }
+   return result;
+  };
+  f.completion.read=item=>readCandidateCompletion(f.store,item);
+  const q=f.worker('result.txt','result').enqueue();await f.queue.drain();
+  assert.equal(f.queue.get(q.id).status,defect==='none'?'applied':'refused');
  }finally{f.store.close();}
 });

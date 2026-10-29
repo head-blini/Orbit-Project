@@ -6,7 +6,7 @@ import type {CapabilityExecutionService} from './capability-execution.ts';
 import type {CapabilityExecutionRecord} from '../shared/capability-execution.ts';
 import {ParallelWorkerService} from './parallel-workers.ts';
 import {WorkerSpaces,generalAttemptPath,resolveWorkerPath,type WorkerSpace} from './worker-spaces.ts';
-import {IntegrationQueue} from './integration-queue.ts';
+import {IntegrationQueue,readCandidateCompletion} from './integration-queue.ts';
 import {TaskGraphService} from './task-graph.ts';
 import {WORKER_LIMITS,type ApprovedExecutionBatch,type WorkerResourceClaim} from '../shared/parallel-workers.ts';
 import {WorkerScheduler,approvedWorkerBase,assertWorkerOwnership,type WorkerDispatchContext} from './worker-scheduler.ts';
@@ -129,7 +129,7 @@ export class Controller {
   private ownQualityStep<T>(work:()=>T):T{const before=this.qualityScope;this.qualityScope=true;try{return work();}finally{this.qualityScope=before;}}
   assertExecutionAvailable(){this.qualityAvailable();if(this.soloRecoveryRequired())throw new AppError('SOLO_RECOVERY_REQUIRED',409);}
   constructor(store:Store,workspace:string,factory:(workspace:string,write:boolean)=>RpcPort,projects?:Projects,verificationConfig:VerificationConfiguration[]=[],modelHubConfig:readonly ModelHubConfiguration[]=[],claudeOptions:ClaudeTaskServiceOptions={},claudePlanningOptions:ClaudePlanningOptions={},qualityOptions:Pick<QualityNativeOptions,'findExecutable'|'claudeFactory'|'codexReview'>={},registryOptions:ControllerRegistryOptions={}){
-    this.candidateCompletion=registryOptions.candidateCompletion??(()=>null);this.completionPolicy=registryOptions.completion?.policy;
+    this.candidateCompletion=registryOptions.candidateCompletion??(item=>readCandidateCompletion(store,item));this.completionPolicy=registryOptions.completion?.policy;
     this.store=store;this.workspace=workspace;this.factory=factory;this.projects=projects;
     this.subscriptionUsage=new SubscriptionUsageStore(store);
     this.claudeTasks=new ClaudeTaskService(store,projects,claudeOptions,this.subscriptionUsage);
@@ -160,6 +160,9 @@ export class Controller {
     this.planningSuggestions=new PlanningAgentService(store,projects,factory,projectId=>this.qualityBusy()||this.soloRecoveryRequired()||store.runs().some(run=>run.runtime==='claude-code'&&(!terminal(run.execution)||run.execution==='lost'&&run.projectId===projectId))||!!this.extensionPending||!!this.active()||!!this.connecting||this.switching||this.modelHub.active||this.verification.active||this.merges.active||this.workflows.active||this.reviews.active,id=>{this.merges.ensureAvailable(id);this.verification.ensureAvailable(id);this.workflows.ensureAvailable(id);this.reviews.ensureAvailable(id);},undefined,claudePlanningOptions);
     const unavailable=()=>{throw new AppError('QUALITY_PROJECT_REQUIRED',409);};
     this.qualityPorts=projects?createQualityNativePorts({store,projects,factory,...qualityOptions,guard:run=>this.guardQuality(run),repair:async(request,context)=>{try{const result=await this.repairQuality(request,context);this.saveQualityReceipt(context,{result,evidence:result.evidence});return result;}catch(error){if(context.sourceRun.runtime==='claude-code'&&!store.findRequest(context.stepId)){const failureIssue=error instanceof Error&&/^[A-Z][A-Z0-9_]{1,100}$/.test(error.message)?error.message:'QUALITY_REPAIR_NOT_STARTED';this.saveQualityReceipt(context,{failureIssue,processStopped:true});}throw error;}},verify:async context=>{const result=await this.verifyQuality(context);this.saveQualityReceipt(context,{result,evidence:null});return result;},recover:(step,context)=>this.recoverQuality(step,context)}):{guard:unavailable,snapshot:unavailable,review:unavailable,repair:unavailable,verify:unavailable};
+    const review=this.qualityPorts.review,verify=this.qualityPorts.verify;
+    this.qualityPorts.review=(request,context,selection)=>this.captureQualityCompletion(context,()=>review(request,context,selection));
+    this.qualityPorts.verify=context=>this.captureQualityCompletion(context,()=>verify(context));
     store.db.exec('CREATE TABLE IF NOT EXISTS quality_controller_receipts(id TEXT PRIMARY KEY,body TEXT NOT NULL)');
     this.qualityLoops=new QualityLoopService(store,this.qualityPorts);
   }
@@ -413,7 +416,45 @@ export class Controller {
     this.workflows.ensureAvailable(input.workspaceId);
     this.merges.ensureAvailable(input.workspaceId);
     if(input.workspaceId!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);
-    return this.verification.start(input);
+    return this.startBoundVerification(input);
+  }
+  private async captureQualityCompletion<T>(context:QualityStepContext,work:()=>Promise<T>):Promise<T>{
+    const projectId=context.sourceRun.projectId??this.store.workspaces().find(w=>w.id===context.sourceRun.workspaceId)?.projectId;
+    const completion=projectId&&this.completionPolicy?.(projectId)&&this.progress.read(projectId,{}).tasks.find(t=>t.latestRunId===context.sourceRun.id)?.completion;
+    const tables=['quality_native_receipts','quality_artifact_checks'];
+    const existing=new Set(tables.filter(table=>this.store.db.prepare("SELECT 1 FROM sqlite_master WHERE name=?").get(table)&&this.store.db.prepare(`SELECT id FROM ${table} WHERE id=?`).get(context.stepId)));
+    const producer=completion?{binding:structuredClone(completion.binding),model:qualityRunEvidence(this.store,context.sourceRun)}:undefined;
+    const result=await work();
+    if(completion&&producer&&completion.binding.artifactId===context.artifact.id&&completion.binding.artifactDigest===context.artifact.digest){
+      this.store.transaction(()=>{
+        const records=tables.flatMap(table=>{
+          if(existing.has(table)||!this.store.db.prepare("SELECT 1 FROM sqlite_master WHERE name=?").get(table))return [];
+          const row=this.store.db.prepare(`SELECT body FROM ${table} WHERE id=?`).get(context.stepId);
+          if(!row)return [];
+          const body=JSON.parse(String(row.body));
+          if(body.sourceRunId!==context.sourceRun.id||body.artifactDigest!==context.artifact.digest)return [];
+          return [{table,id:context.stepId,evidenceId:table==='quality_native_receipts'?context.loopId:context.stepId,digest:createHash('sha256').update(String(row.body)).digest('hex')}];
+        });
+        // Original native/artifact receipts have exact replay contracts; preserve their bytes.
+        if(records.length)this.store.db.prepare('INSERT INTO quality_controller_receipts VALUES(?,?) ON CONFLICT(id) DO NOTHING').run('completion:'+context.stepId,JSON.stringify({completionCapture:{sourceRunId:context.sourceRun.id,binding:completion.binding,producer,records}}));
+      });
+    }
+    return result;
+  }
+  private startBoundVerification(input:Parameters<VerificationService['start']>[0]){
+    const prior=this.store.db.prepare('SELECT id FROM verification_checks WHERE request_id=?').get(input.requestId);
+    if(prior)return this.verification.start(input);
+    const run=this.store.runs().find(r=>r.id===input.runId);
+    const projectId=this.store.workspaces().find(w=>w.id===input.workspaceId)?.projectId;
+    const completion=projectId&&this.progress.read(projectId,{}).tasks.find(t=>t.latestRunId===input.runId)?.completion;
+    const check=this.verification.start(input);
+    if(run&&completion&&this.completionPolicy?.(check.projectId)){
+      // Capture before the async command starts; its final save retains this object.
+      check.completionBinding=structuredClone(completion.binding);
+      Object.assign(check,{completionProducer:{binding:structuredClone(completion.binding),model:qualityRunEvidence(this.store,run)}});
+      this.store.db.prepare('UPDATE verification_checks SET body=? WHERE id=?').run(JSON.stringify(check),check.id);
+    }
+    return check;
   }
   approveVerification(input:Parameters<VerificationService['approve']>[0]){this.extensionIdle();
     assertGitProject(this.store,input.workspaceId);
@@ -687,7 +728,7 @@ export class Controller {
       if(context.signal.aborted)throw new AppError('QUALITY_PROCESS_STOP_UNCONFIRMED',409);
       const view=this.verification.view(workspaceId,runId);
       if(!view.sourceDigest||view.sourceDigest!==context.artifact.digest)throw new AppError('QUALITY_ARTIFACT_CHANGED',409);
-      const check=this.ownQualityStep(()=>this.verification.start({requestId:context.stepId+'-'+command.id,runId,workspaceId,commandId:command.id,expectedSourceDigest:view.sourceDigest!,expectedConfigDigest:command.configDigest}));
+      const check=this.ownQualityStep(()=>this.startBoundVerification({requestId:context.stepId+'-'+command.id,runId,workspaceId,commandId:command.id,expectedSourceDigest:view.sourceDigest!,expectedConfigDigest:command.configDigest}));
       const abort=()=>this.verification.interrupt(workspaceId,check.id);
       context.signal.addEventListener('abort',abort,{once:true});
       try{await this.verification.settle();}finally{context.signal.removeEventListener('abort',abort);}

@@ -78,3 +78,107 @@ test('wait policy with fully matching passing evidence keeps qualityPassed separ
   assert.equal(f.progress.graph(f.project.id,f.version.id).state.nodes[1].state,'waiting');
  }finally{await f.close();}
 });
+
+test('configured policy changes stale captured gates and producer without releasing dependents',async()=>{
+ const f=fixture();try{
+  assert.equal(f.progress.read(f.project.id,{}).tasks[0].completion!.verifiedDone,true);
+  f.policy.notApplicable.push({gate:'e2e',reason:'approved exception',approvedBy:'user',approvedAt:'2026-10-29T00:00:00Z'});
+  const completion=f.progress.read(f.project.id,{}).tasks[0].completion!;
+  assert.equal(completion.verifiedDone,false);
+  assert.ok(completion.reasonCodes.includes('CQG_BINDING_CHANGED:policyDigest'));
+  assert.ok(completion.gates.some(g=>g.freshness==='stale'));
+  assert.equal(f.progress.graph(f.project.id,f.version.id).state.nodes[1].state,'waiting');
+ }finally{await f.close();}
+});
+
+test('new verification captures policy and producer once; replay cannot rebind old checks',async()=>{
+ const f=fixture();try{
+  const {Controller}=await import('../server/controller.ts');
+  const c=new Controller(f.store,f.dir,()=>{throw Error('NO_PROVIDER');},f.projects,[],[],{}, {}, {},{completion:{policy:()=>f.policy}});
+  try{
+   c.progress.read=f.progress.read.bind(f.progress);
+   const runId=f.evidence.producer!.binding.runId!;
+   f.store.append('run.identity',runId,{providerId:'fixture',modelId:'producer',sessionId:'session',modelEvidence:'assistant_message'});
+   const source={...f.evidence.checks[0],requestId:randomUUID()};
+   c.verification.start=()=>{
+    const row=f.store.db.prepare('SELECT body FROM verification_checks WHERE request_id=?').get(source.requestId);
+    if(row)return JSON.parse(String(row.body));
+    f.store.db.prepare('INSERT INTO verification_checks VALUES(?,?,?)').run(source.id,source.requestId,JSON.stringify(source));return source;
+   };
+   const input={requestId:source.requestId,workspaceId:'workspace',runId,commandId:'lint',expectedSourceDigest:'artifact',expectedConfigDigest:'command'};
+   const check=c['startBoundVerification'](input);
+   assert.equal(check.completionBinding!.policyDigest,f.evidence.producer!.binding.policyDigest);
+   const saved=JSON.parse(String(f.store.db.prepare('SELECT body FROM verification_checks WHERE id=?').get(check.id)!.body));
+   assert.equal(saved.completionProducer.model.modelId,'producer');
+   assert.equal(saved.completionProducer.binding.policyDigest,check.completionBinding!.policyDigest);
+   f.policy.dependencyRelease='wait';
+   assert.deepEqual(c['startBoundVerification'](input),saved);
+  }finally{await c.close();}
+ }finally{await f.close();}
+});
+
+test('quality receipts keep start-time policy binding and never retrofit legacy receipts',async()=>{
+ const f=fixture();try{
+  const {Controller}=await import('../server/controller.ts');
+  const c=new Controller(f.store,f.dir,()=>{throw Error('NO_PROVIDER');},f.projects,[],[],{}, {}, {},{completion:{policy:()=>f.policy}});
+  try{
+   c.progress.read=f.progress.read.bind(f.progress);
+   const run=f.store.getRun(f.evidence.producer!.binding.runId!)!;
+   const context={loopId:'loop',stepId:'step',signal:new AbortController().signal,sourceRun:run,version:f.version,task:f.tasks[0],artifact:{id:'workspace',digest:'artifact'}};
+   const oldDigest=f.evidence.producer!.binding.policyDigest;
+   await c['captureQualityCompletion'](context,async()=>{
+    f.policy.dependencyRelease='wait';
+    f.store.db.prepare('INSERT INTO quality_native_receipts VALUES(?,?)').run('step',JSON.stringify({id:'step',loopId:'loop',sourceRunId:run.id,artifactDigest:'artifact'}));return 'done';
+   });
+   const saved=String(f.store.db.prepare('SELECT body FROM quality_native_receipts WHERE id=?').get('step')!.body);
+   assert.equal(saved,JSON.stringify({id:'step',loopId:'loop',sourceRunId:run.id,artifactDigest:'artifact'}));
+   const captured=String(f.store.db.prepare('SELECT body FROM quality_controller_receipts WHERE id=?').get('completion:step')!.body);
+   const capture=JSON.parse(captured).completionCapture;
+   assert.equal(capture.binding.policyDigest,oldDigest);
+   assert.equal(capture.producer.binding.policyDigest,oldDigest);
+   assert.equal(capture.records[0].evidenceId,'loop');
+   await c['captureQualityCompletion'](context,async()=>null);
+   assert.equal(String(f.store.db.prepare('SELECT body FROM quality_native_receipts WHERE id=?').get('step')!.body),saved);
+   assert.equal(String(f.store.db.prepare('SELECT body FROM quality_controller_receipts WHERE id=?').get('completion:step')!.body),captured);
+  }finally{await c.close();}
+ }finally{await f.close();}
+});
+
+test('completion reader uses latest captured producer after policy revalidation',async()=>{
+ const f=fixture();try{
+  for(const [index,check] of f.evidence.checks.entries()){
+   const producer=structuredClone(f.evidence.producer!);
+   if(index===0)producer.binding.policyDigest='previous-policy';
+   f.store.db.prepare('INSERT INTO verification_checks VALUES(?,?,?)').run(check.id,check.requestId,JSON.stringify({...check,completionBinding:f.evidence.bindings[check.id],completionProducer:producer}));
+  }
+  const progress=new ProjectProgressService(f.store,f.studio,{verification:()=>f.view,policy:()=>f.policy,evidence:base=>({...f.evidence,producer:base.producer})});
+  assert.equal(progress.read(f.project.id,{}).tasks[0].completion!.verifiedDone,true);
+ }finally{await f.close();}
+});
+
+test('artifact completion supplement preserves replay bytes and rejects a changed source record',async()=>{
+ const f=fixture();try{
+  const {Controller}=await import('../server/controller.ts');
+  const c=new Controller(f.store,f.dir,()=>{throw Error('NO_PROVIDER');},f.projects,[],[],{}, {}, {},{completion:{policy:()=>f.policy}});
+  try{
+   c.progress.read=f.progress.read.bind(f.progress);
+   const run=f.store.getRun(f.evidence.producer!.binding.runId!)!,binding=f.evidence.producer!.binding;
+   const context={loopId:'loop',stepId:'artifact-check',signal:new AbortController().signal,sourceRun:run,version:f.version,task:f.tasks[0],artifact:{id:'workspace',digest:'artifact'}};
+   const body=JSON.stringify({id:context.stepId,loopId:'loop',sourceRunId:run.id,projectId:f.project.id,taskId:f.tasks[0].id,planningVersionId:f.version.id,baselineDigest:f.version.contentHash,artifactId:'workspace',artifactDigest:'artifact',evidenceSource:'local',completionBinding:{...binding,policyDigest:null},formatStatus:'passed',result:{status:'passed',checkIds:[context.stepId],issue:null}});
+   await c['captureQualityCompletion'](context,async()=>{
+    f.store.db.exec('CREATE TABLE IF NOT EXISTS quality_artifact_checks(id TEXT PRIMARY KEY,loop_id TEXT NOT NULL,body TEXT NOT NULL)');
+    f.store.db.prepare('INSERT INTO quality_artifact_checks VALUES(?,?,?)').run(context.stepId,'loop',body);
+   });
+   assert.equal(f.store.db.prepare('SELECT body FROM quality_artifact_checks WHERE id=?').get(context.stepId)!.body,body);
+   let observed:CompletionEvidence|undefined;
+   const progress=new ProjectProgressService(f.store,f.studio,{verification:()=>f.view,policy:()=>f.policy,evidence:base=>{observed=base;return f.evidence;}});
+   progress.read(f.project.id,{});
+   assert.equal(observed!.bindings[context.stepId].policyDigest,binding.policyDigest);
+   assert.equal(observed!.producer!.binding.policyDigest,binding.policyDigest);
+   f.store.db.prepare('UPDATE quality_artifact_checks SET body=? WHERE id=?').run(JSON.stringify({...JSON.parse(body),formatStatus:'failed'}),context.stepId);
+   progress.read(f.project.id,{});
+   assert.equal(observed!.bindings[context.stepId].policyDigest,null);
+   assert.equal(observed!.producer,undefined);
+  }finally{await c.close();}
+ }finally{await f.close();}
+});
