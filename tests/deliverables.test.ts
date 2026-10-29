@@ -35,7 +35,7 @@ test('lists files with size, digest and producing task, skipping hidden files, l
 test('format checks separate existence and readable structure from meaning',()=>{
   const root=folder();try{
     const items=listDeliverables(root,tasks).items,by=(p:string)=>items.find(i=>i.path===p)!;
-    assert.deepEqual(by('task-2d5a1ea8.md').checks,{exists:true,readable:true,nonEmpty:true,format:'passed',meaning:'unverified'});
+    assert.deepEqual(by('task-2d5a1ea8.md').checks,{exists:true,readable:true,nonEmpty:true,format:'passed',meaning:'unverified',evidence:{status:'unverified',numbers:0,matched:0,unmatched:[],results:[],inputPaths:[]}});
     assert.equal(by('empty.md').checks.nonEmpty,false);assert.equal(by('empty.md').checks.format,'failed');
     assert.equal(by('table.csv').checks.format,'passed');
     assert.equal(by('image.png').checks.format,'unsupported');assert.equal(by('image.png').previewable,false);

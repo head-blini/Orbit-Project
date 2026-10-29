@@ -1,12 +1,13 @@
+import {CODE_GATES,type CodeGate} from '../shared/task-completion.ts';
 import {createHash} from 'node:crypto';
 import {isAbsolute,resolve} from 'node:path';
-import type {VerificationCommandPreview} from '../shared/verification.ts';
+import type {VerificationCommandPreview,VerificationGateMapping} from '../shared/verification.ts';
 import {AppError} from './errors.ts';
 import {containsCredential} from './privacy.ts';
 import {validateVerificationCommand,type VerificationCommand} from './verification.ts';
 import {protectedFilePaths} from './acceptance.ts';
 
-export interface VerificationConfiguration extends VerificationCommand {projectPath:string;protectedFiles?:string[]}
+export interface VerificationConfiguration extends VerificationCommand,VerificationGateMapping {projectPath:string;protectedFiles?:string[]}
 const hash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 // Credential-bearing CLI options must be rejected as a pair, even when the
 // value alone has no recognizable secret format. This is finite pattern defense.
@@ -17,7 +18,8 @@ const pathKey=(value:string)=>process.platform==='win32'?resolve(value).toLowerC
 export function verificationCommandPreviews(configuration:readonly VerificationConfiguration[],projectPath:string):VerificationCommandPreview[]{
   return configuration.filter(command=>pathKey(command.projectPath)===pathKey(projectPath)).map(({projectPath:_,...command})=>{
     if(credentialArguments(command.args))throw new AppError('INVALID_VERIFICATION_CONFIGURATION',503);
-    return {...command,args:[...command.args],...(command.protectedFiles?{protectedFiles:[...command.protectedFiles]}:{}),configDigest:hash({policy:'orbit-local-check-v1',projectPath:pathKey(projectPath),...command})};
+    const {categories:__,...executable}=command;
+    return {...executable,args:[...command.args],...(command.protectedFiles?{protectedFiles:[...command.protectedFiles]}:{}),configDigest:hash({policy:'orbit-local-check-v1',projectPath:pathKey(projectPath),...command})};
   });
 }
 function exact(value:object,keys:string[]){
@@ -30,13 +32,14 @@ export function readVerificationConfiguration(raw:string|undefined):Verification
     const values:unknown=JSON.parse(raw);if(!Array.isArray(values)||values.length>32)throw new Error();
     const seen=new Set<string>();
     return Object.freeze(values.map(value=>{
-      exact(value,['projectPath','id','label','executable','args','timeoutMs',...(value&&Object.hasOwn(value,'protectedFiles')?['protectedFiles']:[])]);
+      exact(value,['projectPath','id','label','executable','args','timeoutMs',...(value&&Object.hasOwn(value,'protectedFiles')?['protectedFiles']:[]),...(value&&Object.hasOwn(value,'categories')?['categories']:[])]);
       if(typeof value.projectPath!=='string'||value.projectPath.length>2000||!isAbsolute(value.projectPath)||containsCredential(value.projectPath)||/[\x00-\x1f]/.test(value.projectPath))throw new Error();
-      const {projectPath,protectedFiles,...input}=value,command=validateVerificationCommand(input);
+      const {projectPath,protectedFiles,categories,...input}=value,command=validateVerificationCommand(input);
+      if(categories!==undefined&&(!Array.isArray(categories)||categories.some(c=>!CODE_GATES.includes(c))||new Set(categories).size!==categories.length))throw new Error();
       const files=protectedFiles===undefined?undefined:protectedFilePaths(protectedFiles);
       if(containsCredential(command.executable)||credentialArguments(command.args))throw new Error();
       const key=pathKey(projectPath)+'\0'+command.id;if(seen.has(key))throw new Error();seen.add(key);
-      return Object.freeze({...command,projectPath:resolve(projectPath),...(files?{protectedFiles:Object.freeze(files) as unknown as string[]}: {})});
+      return Object.freeze({...command,projectPath:resolve(projectPath),...(categories?{categories:Object.freeze([...categories].sort()) as unknown as CodeGate[]}:{}),...(files?{protectedFiles:Object.freeze(files) as unknown as string[]}: {})});
     })) as unknown as VerificationConfiguration[];
   }catch{throw new Error('INVALID_VERIFICATION_CONFIGURATION');}
 }
@@ -48,4 +51,13 @@ export function resolveVerificationCommands(source:VerificationConfigurationSour
   if(typeof source==='function')return source;
   const configuration=readVerificationConfiguration(JSON.stringify(source));
   return path=>verificationCommandPreviews(configuration,path);
+}
+
+/** Only explicit host-approved categories count; command names carry no meaning. */
+export function verificationGateCommandMap(configuration:readonly VerificationConfiguration[],projectPath:string):Partial<Record<CodeGate,string[]>> {
+  const commands=configuration.filter(c=>pathKey(c.projectPath)===pathKey(projectPath));
+  return Object.fromEntries(CODE_GATES.flatMap(gate=>{
+    const ids=commands.filter(c=>c.categories?.includes(gate)).map(c=>c.id).sort();
+    return ids.length?[[gate,ids]]:[];
+  }));
 }

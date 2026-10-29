@@ -1,3 +1,5 @@
+import type {NumericSourceCheck} from '../shared/quality-progress.ts';
+import {generalEvidenceSnapshot,generalCheckerDigest,capturedCompletionBinding} from './quality-progress.ts';
 import {createHash} from 'node:crypto';
 import type {Run} from '../shared/types.ts';
 import type {HandoffPackage} from '../shared/handoff.ts';
@@ -8,7 +10,7 @@ import type {RpcPort} from './rpc.ts';
 import {AppError} from './errors.ts';
 import {containsCredential} from './privacy.ts';
 import {outboundDenial} from './providers/policy.ts';
-import {listDeliverables,previewDeliverable} from './deliverables.ts';
+import {listDeliverables,previewDeliverable,evidenceCheck} from './deliverables.ts';
 import {ClaudeCodeRun,claudeEnv,findClaude,type ClaudeOutcome} from './runtimes/claude-code.ts';
 import {nativeModelId,type NativeIdentity} from './runtimes/model-identity.ts';
 import {claudeReviewPrompt,parseClaudeReview} from './runtimes/claude-review.ts';
@@ -36,9 +38,10 @@ export function qualityRunEvidence(store:Store,run:Run):QualityModelEvidence{
 export async function qualityVerifyGeneral(store:Store,projects:Projects,context:QualityStepContext):Promise<QualityVerificationResult>{
   if(context.signal.aborted)fail('QUALITY_PROCESS_STOP_UNCONFIRMED');
   if(!context.sourceRun.projectId||context.sourceRun.workspaceId)fail('GENERAL_PROJECT_REQUIRED');
-  const project=projects.generalProject(context.sourceRun.projectId!),listed=listDeliverables(project.path,[]);
-  const digest=hash(listed.items.map(item=>({path:item.path,digest:item.sha256})));
-  if(context.artifact.id!==project.id||context.artifact.digest!==digest)fail('QUALITY_ARTIFACT_CHANGED');
+  const project=projects.generalProject(context.sourceRun.projectId!);
+  const snapshot=generalEvidenceSnapshot(store,context.sourceRun,()=>listDeliverables(project.path,[]),true);
+  const {listed,digest}=snapshot;
+  if(!digest||context.artifact.id!==snapshot.artifactId||context.artifact.digest!==digest)fail('QUALITY_ARTIFACT_CHANGED');
   const outputs=listed.items.filter(item=>item.role==='output');
   const failures:NonNullable<QualityVerificationResult['failures']>=[];
   if(!outputs.length)failures.push({reviewerId:'local-artifacts',criterion:null,status:'not_met',evidence:'결과물 파일이 없습니다.'});
@@ -46,16 +49,33 @@ export async function qualityVerifyGeneral(store:Store,projects:Projects,context
     if(!item.checks.nonEmpty||item.checks.format==='failed')failures.push({reviewerId:'local-artifacts',criterion:null,status:'not_met',evidence:`${item.path}: 빈 파일 또는 형식 검사 실패`});
     if(item.checks.evidence?.status==='needs_review')failures.push({reviewerId:'local-artifacts',criterion:null,status:'not_met',evidence:`${item.path}: 입력 자료에서 확인하지 못한 표 수치 ${item.checks.evidence.unmatched.join(', ')}`});
   }
+  const numericSource=outputs.map(item=>({path:item.path,check:(item.checks.evidence as NumericSourceCheck|undefined)??evidenceCheck(item.mediaType,'',[])}));
   const unsupported=listed.truncated||outputs.some(item=>item.checks.format==='unsupported');
   const result:QualityVerificationResult={status:failures.length?'failed':unsupported?'unknown':'passed',checkIds:[context.stepId],issue:failures.length?'QUALITY_ARTIFACT_CHECK_FAILED':unsupported?'QUALITY_ARTIFACT_CHECK_UNSUPPORTED':null,failures};
   store.db.exec('CREATE TABLE IF NOT EXISTS quality_artifact_checks(id TEXT PRIMARY KEY,loop_id TEXT NOT NULL,body TEXT NOT NULL)');
-  const body={id:context.stepId,loopId:context.loopId,sourceRunId:context.sourceRun.id,projectId:project.id,taskId:context.task.id,planningVersionId:context.version.id,artifactId:context.artifact.id,evidenceSource:'local',baselineDigest:context.version.contentHash,artifactDigest:digest,scope:'format_and_numeric_source_only',files:outputs.map(item=>({path:item.path,digest:item.sha256,checks:item.checks})),result};
+  const checkerDigest=generalCheckerDigest();
+  const completionBinding=capturedCompletionBinding({projectId:project.id,taskId:context.task.id,runId:context.sourceRun.id,planningVersionId:context.version.id,
+    planningContentHash:context.version.contentHash,acceptanceDigest:context.sourceRun.acceptanceDigest??null,artifactId:context.artifact.id,artifactDigest:digest},
+    {configDigest:checkerDigest,artifactScope:snapshot.space?'task_manifest':null,inputSnapshotDigest:snapshot.space?.inputDigest??null,
+     graphRevision:snapshot.reservation?String(snapshot.reservation.batch.graphRevision):null,
+     contractDigest:snapshot.reservation?hash(snapshot.reservation.batch.contractDigests):null});
+  const formatStatus=!outputs.length||outputs.some(i=>!i.checks.nonEmpty||i.checks.format==='failed')?'failed':unsupported?'unknown':'passed';
+  const body={checkerDigest,completionBinding,artifactScope:snapshot.artifactScope,numericSource,formatStatus,id:context.stepId,loopId:context.loopId,sourceRunId:context.sourceRun.id,projectId:project.id,taskId:context.task.id,planningVersionId:context.version.id,artifactId:context.artifact.id,evidenceSource:'local',baselineDigest:context.version.contentHash,artifactDigest:digest,scope:'format_and_numeric_source_only',files:outputs.map(item=>({path:item.path,digest:item.sha256,checks:item.checks})),result};
   const previous=store.db.prepare('SELECT body FROM quality_artifact_checks WHERE id=?').get(context.stepId);
   if(previous){
     // Accept the exact historical shape without upgrading or weakening its saved evidence.
     const {projectId:_,taskId:__,planningVersionId:___,artifactId:____,evidenceSource:_____,...legacy}=body;
-    if(String(previous.body)!==JSON.stringify(body)&&String(previous.body)!==JSON.stringify(legacy))fail('QUALITY_CHECK_REPLAY_MISMATCH');
-    return result;
+    const historical=(record:typeof body|typeof legacy)=>{
+      const {checkerDigest:_,completionBinding:__,artifactScope:___,numericSource:____,formatStatus:_____,...old}=record;
+      return {...old,files:old.files.map(file=>{
+        if(!file.checks.evidence)return file;
+        if(!listed.items.some(i=>i.role==='input'&&i.previewable)){const {evidence:_,...checks}=file.checks;return {...file,checks};}
+        const {results:_,inputPaths:__,...evidence}=file.checks.evidence as ReturnType<typeof evidenceCheck>;
+        return {...file,checks:{...file.checks,evidence}};
+      })};
+    };
+    if(![body,legacy,historical(body),historical(legacy)].some(candidate=>String(previous.body)===JSON.stringify(candidate)))fail('QUALITY_CHECK_REPLAY_MISMATCH');
+    return JSON.parse(String(previous.body)).result;
   }
   store.transaction(()=>{store.db.prepare('INSERT INTO quality_artifact_checks VALUES(?,?,?)').run(context.stepId,context.loopId,JSON.stringify(body));store.append('quality.artifact_check',context.sourceRun.id,{projectId:project.id,qualityLoopId:context.loopId,checkId:context.stepId,status:result.status});});
   return result;
@@ -76,7 +96,12 @@ export function createQualityNativePorts(options:QualityNativeOptions):QualitySe
   const {store,projects}=options;
   store.db.exec('CREATE TABLE IF NOT EXISTS quality_native_receipts(id TEXT PRIMARY KEY,body TEXT NOT NULL)');
   const receipt=(context:QualityStepContext,value:NonNullable<Awaited<ReturnType<NonNullable<QualityServicePorts['recover']>>>>)=>{
-    const body={loopId:context.loopId,sourceRunId:context.sourceRun.id,baselineDigest:context.version.contentHash,artifactDigest:context.artifact.digest,value};
+    const general=context.sourceRun.workspaceId?null:generalEvidenceSnapshot(store,context.sourceRun,()=>listDeliverables(projects.generalProject(context.sourceRun.projectId!).path,[]));
+    const completionBinding=capturedCompletionBinding({projectId:context.sourceRun.projectId??null,taskId:context.task.id,runId:context.sourceRun.id,
+      planningVersionId:context.version.id,planningContentHash:context.version.contentHash,acceptanceDigest:context.sourceRun.acceptanceDigest??null,
+      artifactId:context.artifact.id,artifactDigest:context.artifact.digest},{configDigest:generalCheckerDigest(),artifactScope:general?.space?'task_manifest':null,
+      graphRevision:general?.reservation?String(general.reservation.batch.graphRevision):null,contractDigest:general?.reservation?hash(general.reservation.batch.contractDigests):null,inputSnapshotDigest:general?.space?.inputDigest??null});
+    const body={id:context.stepId,completionBinding,artifactScope:general?.artifactScope??'workspace',checkerDigest:generalCheckerDigest(),loopId:context.loopId,sourceRunId:context.sourceRun.id,baselineDigest:context.version.contentHash,artifactDigest:context.artifact.digest,value};
     store.transaction(()=>{
       store.db.prepare('INSERT INTO quality_native_receipts VALUES(?,?)').run(context.stepId,JSON.stringify(body));
       store.append('quality.native_receipt',context.sourceRun.id,{qualityLoopId:context.loopId,stepId:context.stepId});
@@ -85,10 +110,12 @@ export function createQualityNativePorts(options:QualityNativeOptions):QualitySe
   const location=(run:Run)=>{
     if(run.workspaceId){const workspace=projects.writable(run.workspaceId);return {path:workspace.path,projectId:workspace.projectId};}
     if(!run.projectId)fail('QUALITY_PROJECT_REQUIRED');
-    const project=projects.generalProject(run.projectId!);return {path:project.path,projectId:project.id};
+    const project=projects.generalProject(run.projectId!);
+    const source=generalEvidenceSnapshot(store,run,()=>listDeliverables(project.path,[]));
+    return {path:source.space?.path??project.path,projectId:project.id};
   };
   const snapshot=(run:Run)=>{
-    const root=location(run);let files:{path:string;content:string}[],digest:string;
+    const root=location(run);let files:{path:string;content:string}[],digest:string,artifactId=run.workspaceId??root.projectId;
     if(run.workspaceId){
       const source=projects.snapshot(run.workspaceId);digest=source.sourceDigest;
       files=source.files.map(file=>{
@@ -98,7 +125,9 @@ export function createQualityNativePorts(options:QualityNativeOptions):QualitySe
         return {path:file.path,content};
       });
     }else{
-      const listed=listDeliverables(root.path,[]);
+      const source=generalEvidenceSnapshot(store,run,()=>listDeliverables(root.path,[])),listed=source.listed;
+      if(!source.digest)fail('QUALITY_ARTIFACT_UNAVAILABLE');
+      artifactId=source.artifactId;
       if(listed.truncated||!listed.items.some(item=>item.role==='output'))fail('QUALITY_ARTIFACT_UNAVAILABLE');
       files=listed.items.map(item=>{
         if(!item.previewable)fail('QUALITY_ARTIFACT_FORMAT_UNSUPPORTED');
@@ -107,11 +136,11 @@ export function createQualityNativePorts(options:QualityNativeOptions):QualitySe
         if(preview.truncated||createHash('sha256').update(preview.text).digest('hex')!==item.sha256)fail('QUALITY_ARTIFACT_CHANGED');
         return {path:item.path,content:preview.text};
       });
-      digest=hash(listed.items.map(item=>({path:item.path,digest:item.sha256})));
+      digest=source.digest!;
     }
     if(!files.length)fail('QUALITY_ARTIFACT_UNAVAILABLE');
     const text=JSON.stringify(files);outbound(text);
-    return {artifact:{id:run.workspaceId??root.projectId,digest},files,text,path:root.path};
+    return {artifact:{id:artifactId,digest},files,text,path:root.path};
   };
   const handoff=(context:QualityStepContext):HandoffPackage=>({
     projectId:context.task.projectId,taskId:context.task.id,sourceRunId:context.sourceRun.id,
@@ -128,12 +157,12 @@ export function createQualityNativePorts(options:QualityNativeOptions):QualitySe
       const row=store.db.prepare('SELECT body FROM quality_native_receipts WHERE id=?').get(step.id);
       if(row){
         const saved=JSON.parse(String(row.body));
-        if(saved.loopId!==context.loopId||saved.sourceRunId!==context.sourceRun.id||saved.baselineDigest!==context.version.contentHash||saved.artifactDigest!==context.artifact.digest)fail('QUALITY_RECEIPT_MISMATCH');
+        if(saved.checkerDigest!==generalCheckerDigest()||saved.loopId!==context.loopId||saved.sourceRunId!==context.sourceRun.id||saved.baselineDigest!==context.version.contentHash||saved.artifactDigest!==context.artifact.digest)fail('QUALITY_RECEIPT_MISMATCH');
         return saved.value;
       }
       if(step.kind==='verification'&&store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='quality_artifact_checks'").get()){
         const check=store.db.prepare('SELECT body FROM quality_artifact_checks WHERE id=?').get(step.id);
-        if(check){const saved=JSON.parse(String(check.body));if(saved.loopId!==context.loopId||saved.sourceRunId!==context.sourceRun.id||saved.baselineDigest!==context.version.contentHash||saved.artifactDigest!==context.artifact.digest)fail('QUALITY_RECEIPT_MISMATCH');return {result:saved.result,evidence:null};}
+        if(check){const saved=JSON.parse(String(check.body));if(saved.checkerDigest!==generalCheckerDigest()||saved.loopId!==context.loopId||saved.sourceRunId!==context.sourceRun.id||saved.baselineDigest!==context.version.contentHash||saved.artifactDigest!==context.artifact.digest)fail('QUALITY_RECEIPT_MISMATCH');return {result:saved.result,evidence:null};}
       }
       return await options.recover?.(step,context)??null;
     },
