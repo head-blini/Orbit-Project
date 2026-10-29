@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtempSync,mkdirSync,writeFileSync,readFileSync} from 'node:fs';
 import {join} from 'node:path';
-import {randomUUID} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {tmpdir} from './temp.ts';
 import {Store} from '../server/store.ts';
 import {Projects} from '../server/projects.ts';
@@ -12,7 +12,56 @@ import {repositoryIdentity} from '../server/repository-resource.ts';
 import {trustedGit} from '../server/git-process.ts';
 import {VerificationService} from '../server/verification-service.ts';
 import {MergeService} from '../server/merge-service.ts';
-import {IntegrationQueue} from '../server/integration-queue.ts';
+import {IntegrationQueue,type IntegrationItem,type IntegrationCompletionEvidence} from '../server/integration-queue.ts';
+import {CODE_GATES,GENERAL_GATES,type CompletionPolicy,type CompletionEvidence} from '../shared/task-completion.ts';
+import {completionPolicyDigest} from '../server/task-completion.ts';
+import {readVerificationConfiguration,verificationCommandPreviews,verificationGateCommandMap} from '../server/verification-configuration.ts';
+import type {QualityDimension} from '../shared/quality-progress.ts';
+
+const digest=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
+const dimension=(status:QualityDimension['status']='not_run',evidenceIds:string[]=[]):QualityDimension=>({status,evidenceIds,blockers:[],nextAction:null});
+// Native model/review observations are fixtures, never live provider evidence.
+function candidateEvidence(item:IntegrationItem,store:Store,policy:CompletionPolicy,commands:CompletionEvidence['commands']):IntegrationCompletionEvidence {
+ const reservation=new ParallelWorkerService(store).read(item.fence.reservationId);
+ const binding={projectId:item.projectId,taskId:reservation.attempt.taskId,runId:'run-producer',planningVersionId:reservation.batch.planningVersionId,
+  planningContentHash:item.approvedBaseline,acceptanceDigest:'acceptance',artifactId:item.id,artifactDigest:item.candidateDigest,
+  graphRevision:String(reservation.batch.graphRevision),contractDigest:digest(reservation.batch.contractDigests),policyDigest:completionPolicyDigest(policy),configDigest:item.configDigest,
+  artifactScope:item.space.kind==='code'?'workspace' as const:'task_manifest' as const,baseSha:item.target?.head??null,inputSnapshotDigest:item.space.inputDigest};
+ const model=(id:string)=>({providerId:'provider',modelId:id,sessionId:'session-'+id,runId:'run-'+id,source:'native_observed' as const,evidenceSource:'native' as const});
+ const evidence:CompletionEvidence={quality:{execution:{...dimension('completed'),evidenceSource:'native'},format:dimension(),codeVerification:dimension(),semantic:dimension(),independentReview:dimension(),repair:dimension(),revalidation:dimension(),userApproval:dimension(),evidence:[]},
+  producer:{binding:{...binding},model:model('producer')},bindings:{},checks:[],commands,loops:[],gateResults:[],approvals:[]};
+ const add=(id:string,kind:'verification_check'|'artifact_check'|'quality_loop',source:'local'|'native'='local')=>{
+  evidence.bindings[id]={...binding};evidence.quality.evidence.push({id,kind,evidenceSource:source,freshness:'current',recordedStatus:'passed',binding:{...binding},blockers:[]});
+ };
+ if(item.space.kind==='code'){
+  for(const row of store.db.prepare('SELECT id,body FROM integration_checks').all()){
+   const check=JSON.parse(String(row.body)),r=check.result;
+   if(check.integrationId!==item.id||check.sourceDigest!==item.candidateDigest||r?.baseSha!==item.target?.head)continue;
+   const id=String(row.id);add(id,'verification_check');
+   evidence.checks.push({id,requestId:id,runId:binding.runId,projectId:item.projectId,workspaceId:item.id,taskId:binding.taskId,planningVersionId:binding.planningVersionId,
+    planningContentHash:binding.planningContentHash,acceptanceDigest:binding.acceptanceDigest,commandId:check.commandId,configDigest:commands.find(c=>c.id===check.commandId)!.configDigest,
+    baseSha:r.baseSha,sourceDigest:r.sourceDigest,finishedDigest:r.finishedDigest,createdAt:r.startedAt,completedAt:new Date(Date.parse(r.startedAt)+r.durationMs).toISOString(),
+    execution:'completed',verdict:r.status,exitCode:r.exitCode,durationMs:r.durationMs,output:r.output,recoveredAt:null,evidenceSource:'local'});
+  }
+ }else{
+  for(const gate of ['artifact_format','numeric_source'] as const){const id=item.id+gate;add(id,'artifact_check');evidence.gateResults.push({gate,evidenceId:id,status:'passed'});}
+  const id=item.id+'review';add(id,'quality_loop','native');evidence.quality.semantic=dimension('passed',[id]);evidence.quality.independentReview=dimension('completed',[id]);
+  const artifact={id:item.id,digest:item.candidateDigest!},review={modelKey:'provider/reviewer',sessionId:'session-reviewer',baselineDigest:item.approvedBaseline,artifactDigest:item.candidateDigest!,criteria:[{criterion:'correct',status:'met' as const,evidence:'checked candidate'}],findings:[]};
+  evidence.loops.push({id,projectId:item.projectId,taskId:binding.taskId,sourceRunId:binding.runId,baseline:{id:binding.planningVersionId,digest:item.approvedBaseline,criteria:['correct']},producer:model('producer'),reviewers:[{id:'reviewer',providerId:'provider',modelId:'reviewer'}],recoveryRequired:false,
+   result:{status:'passed',issue:null,calls:1,repairs:0,artifact,rounds:[{number:1,artifact,reviews:[{reviewerId:'reviewer',result:review}],failures:[]}]},
+   steps:[{id:'review-step',index:1,kind:'review',state:'completed',requestDigest:'request',startedAt:'start',finishedAt:'finish',issue:null,evidence:model('reviewer'),result:review}],verification:{status:'passed',checkIds:[],issue:null}});
+ }
+ return {subject:{integrationId:item.id,candidateDigest:item.candidateDigest!,targetDigest:item.target?.head??item.generalTargetDigest},binding,evidence};
+}
+
+test('candidate commands alone cannot apply without a completion policy and evidence',async()=>{
+ const f=fixture();try{
+  const projects=new Projects(f.store,join(f.root,'managed'),[f.repo]);
+  const queue=new IntegrationQueue(f.store,projects,f.workers,f.spaces,f.verification,f.merge,()=>({approvedBaseline:f.policy.approvedBaseline,defaultBranch:'trunk',requiredChecks:['full']}));
+  const w=f.worker('a.txt','A'),q=queue.enqueue({requestId:randomUUID(),fence:w.r,targetBranch:'dev'});
+  await queue.drain();assert.equal(queue.get(q.id).status,'refused');assert.equal(queue.get(q.id).reason,'INTEGRATION_COMPLETION_POLICY_REQUIRED');assert.equal(f.git('rev-parse','HEAD'),f.base);
+ }finally{f.store.close();}
+});
 
 function fixture(kind:'code'|'general'='code',args=['-e','process.exit(0)']){
   const root=mkdtempSync(join(tmpdir(),'orbit-integration-')),repo=join(root,'repo');mkdirSync(repo);
@@ -21,10 +70,13 @@ function fixture(kind:'code'|'general'='code',args=['-e','process.exit(0)']){
   const store=new Store(join(root,'state.sqlite')),projects=new Projects(store,join(root,'managed'),[repo],join(root,'created'));
   const project=kind==='code'?projects.register(repo):projects.createProject({requestId:randomUUID(),name:'General',kind}).project;
   const base=kind==='code'?git('rev-parse','HEAD'):'0'.repeat(40),workers=new ParallelWorkerService(store),spaces=new WorkerSpaces(store,projects,workers);
-  const verification=new VerificationService(store,projects,[{projectPath:project.path,id:'full',label:'Full regression',executable:process.execPath,args,timeoutMs:10000}]);
+  const configuration=readVerificationConfiguration(JSON.stringify([{projectPath:project.path,id:'full',label:'Full regression',executable:process.execPath,args,timeoutMs:10000,categories:[...CODE_GATES]}]));
+  const verification=new VerificationService(store,projects,configuration);
   const merge=new MergeService(store,projects,verification,()=>false);
-  const policy={approvedBaseline:'a'.repeat(64),defaultBranch:'trunk',requiredChecks:['full']};
-  const makeQueue=()=>new IntegrationQueue(store,projects,workers,spaces,verification,merge,()=>policy);
+  const completionPolicy:CompletionPolicy={projectKind:kind,requiredGates:[...(kind==='code'?CODE_GATES:GENERAL_GATES)],gateCommandMap:verificationGateCommandMap(configuration,project.path),notApplicable:[],requireIndependentReview:kind==='general',dependencyRelease:'quality_passed'};
+  const policy={approvedBaseline:'a'.repeat(64),defaultBranch:'trunk',requiredChecks:['full'],completionPolicy};
+  const completion={read:(item:IntegrationItem):IntegrationCompletionEvidence|null=>candidateEvidence(item,store,policy.completionPolicy,verificationCommandPreviews(configuration,project.path))};
+  const makeQueue=()=>new IntegrationQueue(store,projects,workers,spaces,verification,merge,()=>policy,item=>completion.read(item));
   const queue=makeQueue();
   const worker=(file:string,content:string)=>{
     const attempt=randomUUID(),path=kind==='code'?file:join(generalAttemptPath(project.path,attempt),'output');
@@ -34,11 +86,11 @@ function fixture(kind:'code'|'general'='code',args=['-e','process.exit(0)']){
     workers.transition(r,'dispatched');workers.confirmTerminal(r,{kind:'terminal_confirmed',dispatchRequestId:r.attempt.dispatchRequestId,evidenceId:'terminated'});
     return {r,space,enqueue:(targetBranch='dev')=>queue.enqueue({requestId:randomUUID(),fence:r,targetBranch:kind==='code'?targetBranch:null})};
   };
-  return {root,repo,git,store,project,workers,spaces,verification,merge,policy,queue,makeQueue,worker,base};
+  return {root,repo,git,store,project,workers,spaces,verification,merge,policy,completion,queue,makeQueue,worker,base};
 }
 test('two workers integrate sequentially from their own base onto latest HEAD',async()=>{
  const f=fixture();try{const a=f.worker('a.txt','A\n'),b=f.worker('b.txt','B\n');const x=a.enqueue(),y=b.enqueue();await f.queue.drain();
- assert.equal(f.queue.get(x.id).status,'applied');assert.equal(f.queue.get(y.id).status,'applied');
+ assert.equal(f.queue.get(x.id).status,'applied',f.queue.get(x.id).reason??'');assert.equal(f.queue.get(y.id).status,'applied',f.queue.get(y.id).reason??'');
  assert.equal(readFileSync(join(f.repo,'a.txt'),'utf8'),'A\n');assert.equal(readFileSync(join(f.repo,'b.txt'),'utf8'),'B\n');
  assert.equal(f.workers.read(a.r.reservationId).state,'released');assert.equal(f.git('rev-parse','HEAD~2'),f.base);
  }finally{f.store.close();}
@@ -161,5 +213,73 @@ test('uncertain authoritative merge recovery retains queue and reservation',asyn
   f.merge.applyIntegration=(input,check)=>{original(input,check);throw new Error('receipt lost');};await f.queue.drain();
   f.merge.recover=()=>({...f.merge.record(q.id),status:'unknown',completionBasis:null});
   assert.equal(f.queue.reconcile(q.id,true).status,'blocked');assert.equal(f.workers.read(q.fence.reservationId).state,'terminal_confirmed');assert.equal(f.queue.active,true);
+ }finally{f.store.close();}
+});
+
+for(const defect of ['worker','missing','unmapped','mock','unknown','semantic','subject','producer','policy'] as const){
+ test(`candidate completion refuses ${defect} evidence before apply`,async()=>{
+  const f=fixture(defect==='semantic'?'general':'code');try{
+   if(defect==='unmapped')delete f.policy.completionPolicy.gateCommandMap.e2e;
+   const read=f.completion.read;
+   f.completion.read=item=>{
+    const value=read(item)!;
+    if(defect==='worker'){
+     value.binding.artifactId=item.space.workspaceId;
+     for(const b of Object.values(value.evidence.bindings))b.artifactId=item.space.workspaceId;
+     for(const c of value.evidence.checks)c.workspaceId=item.space.workspaceId!;
+     for(const e of value.evidence.quality.evidence)e.binding.artifactId=item.space.workspaceId;
+    }
+    if(defect==='missing')value.evidence.checks=[];
+    if(defect==='mock'||defect==='unknown')for(const e of value.evidence.quality.evidence)e.evidenceSource=defect;
+    if(defect==='semantic'){value.evidence.loops=[];value.evidence.quality.semantic=dimension();value.evidence.quality.independentReview=dimension();}
+    if(defect==='subject')value.subject.targetDigest='old-head';
+    if(defect==='producer')value.evidence.producer!.model.source='unknown';
+    if(defect==='policy')f.policy.completionPolicy.requireIndependentReview=true;
+    return value;
+   };
+   const q=f.worker('a.txt','A').enqueue();await f.queue.drain();
+   assert.equal(f.queue.get(q.id).status,'refused');
+   const reasons={worker:'INTEGRATION_COMPLETION_BINDING_MISMATCH',missing:'CQG_GATE_EVIDENCE_MISSING',unmapped:'CQG_GATE_COMMAND_MISSING',mock:'CQG_OBSERVED_EVIDENCE_REQUIRED',unknown:'CQG_OBSERVED_EVIDENCE_REQUIRED',semantic:'CQG_SEMANTIC_REVIEW_REQUIRED',subject:'INTEGRATION_COMPLETION_SUBJECT_MISMATCH',producer:'CQG_MODEL_OBSERVATION_REQUIRED',policy:'INTEGRATION_COMPLETION_BINDING_MISMATCH'};
+   assert.ok(f.queue.get(q.id).reason?.includes(reasons[defect]),f.queue.get(q.id).reason??'missing refusal reason');
+   if(defect==='semantic')assert.match(f.queue.get(q.id).reason!,/CQG_SEMANTIC_REVIEW_REQUIRED/);
+   else assert.equal(f.git('rev-parse','HEAD'),f.base);
+  }finally{f.store.close();}
+ });
+}
+test('a passed return without candidate check records cannot reuse supplied passes',async()=>{
+ const f=fixture();try{
+  const original=f.verification.verifyIntegration.bind(f.verification);
+  f.verification.verifyIntegration=async input=>{const result=await original(input),captured=f.completion.read(f.queue.get(input.id));f.completion.read=()=>captured;f.store.db.exec('DELETE FROM integration_checks');return result;};
+  const q=f.worker('a.txt','A').enqueue();await f.queue.drain();assert.equal(f.queue.get(q.id).status,'refused');assert.equal(f.git('rev-parse','HEAD'),f.base);
+ }finally{f.store.close();}
+});
+
+test('candidate evidence reader is required even when local commands pass',async()=>{
+ const f=fixture('general');try{
+  f.completion.read=()=>null;const q=f.worker('result.txt','result').enqueue();await f.queue.drain();
+  assert.equal(f.queue.get(q.id).status,'refused');assert.equal(f.queue.get(q.id).reason,'INTEGRATION_COMPLETION_EVIDENCE_REQUIRED');
+ }finally{f.store.close();}
+});
+for(const changed of ['candidate','target'] as const){
+ test(`general ${changed} hash movement rebuilds and obtains fresh candidate evidence`,async()=>{
+  const f=fixture('general');try{
+   const q=f.worker('result.txt','result').enqueue(),verify=f.verification.verifyIntegration.bind(f.verification);let calls=0;
+   f.verification.verifyIntegration=async input=>{
+    const result=await verify(input);
+    if(++calls===1){const path=changed==='candidate'?join(input.context.cwd,'output'):join(f.project.path,'output');mkdirSync(path,{recursive:true});writeFileSync(join(path,changed==='candidate'?'result.txt':'other.txt'),'changed');}
+    return result;
+   };
+   await f.queue.drain();assert.equal(f.queue.get(q.id).status,'applied',f.queue.get(q.id).reason??'');assert.equal(calls,2);assert.equal(f.queue.get(q.id).attempts,2);
+   assert.equal(readFileSync(join(f.project.path,'output/result.txt'),'utf8'),'result');
+  }finally{f.store.close();}
+ });
+}
+test('candidate movement while reading completion evidence rebuilds before apply',async()=>{
+ const f=fixture('general');try{
+  const read=f.completion.read;let reads=0;
+  f.completion.read=item=>{const result=read(item);if(++reads===1)writeFileSync(join(item.candidatePath!,'output/result.txt'),'changed during evidence read');return result;};
+  const q=f.worker('result.txt','result').enqueue();await f.queue.drain();
+  assert.equal(f.queue.get(q.id).status,'applied',f.queue.get(q.id).reason??'');assert.equal(f.queue.get(q.id).attempts,2);
+  assert.equal(readFileSync(join(f.project.path,'output/result.txt'),'utf8'),'result');
  }finally{f.store.close();}
 });
