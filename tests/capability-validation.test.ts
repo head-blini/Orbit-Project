@@ -58,17 +58,23 @@ test('tool evidence counts stay separate from execution and model history and re
   const r=discoverCapabilities({probe:null,codexReady:false},context),seq=store.lastSeq();
   const mock=enrichCapabilityValidation(r,store,{...context,records});
   assert.deepEqual(mock.tools!.totals,{keys:1,installed:1,permitted:1,invoked:{native:0,mock:1,unknown:2},verified:0});
-  records.push({key,grantId:grant.grantId,itemDigest:digest,evidenceSource:'native',invocationId:'invocation',approvedDigest:'approved',bindingDigest:'approved',nativeObserved:true,callCompleted:true},{key,grantId:'wrong',itemDigest:digest,evidenceSource:'native'},{key,grantId:grant.grantId,itemDigest:'b'.repeat(64),evidenceSource:'native'});
-  const toolsOnly=enrichCapabilityValidation(r,store,{...context,records});
-  assert.deepEqual(toolsOnly.tools!.totals,{keys:1,installed:1,permitted:1,invoked:{native:3,mock:1,unknown:2},verified:1});
+  const native:ToolInvocationRecord={key,grantId:grant.grantId,itemDigest:digest,evidenceSource:'native',invocationId:'invocation',approvedDigest:'approved',bindingDigest:'approved',nativeObserved:true,callCompleted:true};
+  records.push(native,{...native,grantId:'wrong'},{...native,itemDigest:'b'.repeat(64)});
+  // Supply a trusted consumed-grant snapshot; revocation still removes it from the reader.
+  const consumedContext={...context,permissions:{validFor:(...args:Parameters<ToolPermissionStore['validFor']>)=>{
+    const current=permissions.validFor(...args);
+    return current?{...current,state:'used' as const,consumedBy:{invocationId:'invocation',approvalDigest:'approved'}}:null;
+  }}};
+  const toolsOnly=enrichCapabilityValidation(r,store,{...consumedContext,records});
+  assert.deepEqual(toolsOnly.tools!.totals,{keys:1,installed:1,permitted:0,invoked:{native:3,mock:1,unknown:2},verified:1});
   for(const provider of toolsOnly.providers)for(const c of provider.capabilities)assert.deepEqual(c.validation,{nativeRuns:0,mockRuns:0,unknownRuns:0,lastRunId:null});
   assert.equal(store.lastSeq(),seq);assert.equal(r.tools!.totals.invoked.native,0);
   run(store,'native');run(store,'mock','claude-code');
-  const mixed=enrichCapabilityValidation(r,store,{...context,records});
+  const mixed=enrichCapabilityValidation(r,store,{...consumedContext,records});
   assert.deepEqual(mixed.tools,toolsOnly.tools);assert.equal(entry(mixed,'codex','execute.code').validation!.nativeRuns,1);
   assert.equal(entry(mixed,'claude-code','execute.general').validation!.mockRuns,1);assert.equal(entry(mixed,'codex','model.actual').validation!.nativeRuns,0);
   permissions.revoke(grant.grantId);
-  const revoked=enrichCapabilityValidation(r,store,{...context,records});
+  const revoked=enrichCapabilityValidation(r,store,{...consumedContext,records});
   assert.equal(revoked.tools!.totals.verified,0);assert.equal(entry(revoked,'codex','mcp').policy,'blocked');
  }finally{store.close();}
 });

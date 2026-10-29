@@ -15,8 +15,7 @@ export function toolInvocationVerified(record:ToolInvocationRecord,grant:ToolGra
     &&grant.grantId===record.grantId&&grant.itemDigest===record.itemDigest
     &&record.evidenceSource==='native'&&record.nativeObserved===true&&record.callCompleted===true
     &&!!record.invocationId&&!!record.approvedDigest&&record.bindingDigest===record.approvedDigest
-    &&((grant.state===undefined||grant.state==='active')&&!grant.consumedBy
-      ||grant.state==='used'&&grant.consumedBy?.invocationId===record.invocationId&&grant.consumedBy.approvalDigest===record.approvedDigest);
+    &&grant.state==='used'&&grant.consumedBy?.invocationId===record.invocationId&&grant.consumedBy.approvalDigest===record.approvedDigest;
 }
 
 /** Pure. installed!=permitted!=invoked!=verified; no state promotes another. 'local' evidence counts as unknown. */
