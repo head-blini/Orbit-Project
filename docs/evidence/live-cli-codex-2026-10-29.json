@@ -1,0 +1,1549 @@
+{
+  "kind": "live_provider_validation",
+  "startedAt": "2026-10-29T00:01:10.277Z",
+  "directory": "/private/tmp/orbit-phase4-RGJ0fb",
+  "provider": "codex",
+  "actualModel": "unknown",
+  "costUsd": null,
+  "remainingQuota": null,
+  "stage": "verified",
+  "success": true,
+  "readiness": {
+    "codex": {
+      "installation": {
+        "status": "found",
+        "version": "0.165.0"
+      },
+      "authentication": "confirmed",
+      "connection": "ready"
+    },
+    "claude": {
+      "installation": {
+        "status": "found",
+        "version": "2.1.312"
+      },
+      "authentication": {
+        "checkedAt": "2026-10-29T00:01:11.151Z",
+        "authentication": "subscription",
+        "source": "claude.auth.status",
+        "issue": null
+      }
+    },
+    "actualModel": "unknown",
+    "liveValidation": "approval_required",
+    "costUsd": null,
+    "remainingQuota": null
+  },
+  "ids": {
+    "projectId": "49cfa4db-38a6-4354-ba78-805fcb66cd43",
+    "workspaceId": "aa5cb65a-b220-4f75-852f-cfb2f151db6b",
+    "taskId": "249aca74-eb2a-4a1a-b898-a5c21a1d7c92",
+    "routeId": "24034532-9bab-4666-b71a-9106e623bcd1",
+    "executionId": "274693e2-ec0d-4e9e-a437-529e8e45ccf0",
+    "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+  },
+  "workspace": "/private/tmp/orbit-phase4-RGJ0fb/managed/aa5cb65a-b220-4f75-852f-cfb2f151db6b",
+  "duplicateBlocked": true,
+  "execution": {
+    "id": "274693e2-ec0d-4e9e-a437-529e8e45ccf0",
+    "requestId": "dd0ba79a-1846-4c7a-9da3-c74609826fd3",
+    "projectId": "49cfa4db-38a6-4354-ba78-805fcb66cd43",
+    "taskId": "249aca74-eb2a-4a1a-b898-a5c21a1d7c92",
+    "routeId": "24034532-9bab-4666-b71a-9106e623bcd1",
+    "runtimeId": "codex",
+    "createdAt": "2026-10-29T00:01:13.289Z",
+    "updatedAt": "2026-10-29T00:01:22.852Z",
+    "planDigest": "6c16d3e0e0c02aa7fa148a931ad250eaee07f24c9448c97c5ef29a14ce56e28f",
+    "bindingDigest": "8fbdeb42ab86699e4e0120a3d2f51aac8e298b2c6b658fe4f891c00a1d042737",
+    "dispatchRequestId": "acc7a3d7-cbf2-4f76-b057-185ae4000c5a",
+    "workspaceId": "aa5cb65a-b220-4f75-852f-cfb2f151db6b",
+    "expectedAcceptanceDigest": null,
+    "baseline": {
+      "planningVersionId": "0435eee6-e753-40f5-8b35-f3cb0ac9abcc",
+      "planningContentHash": "2abeb2ea4deacb98b43fdc9f03f03051de06111f7bd4e0d58a14745601a60453"
+    },
+    "preferencesRevision": 0,
+    "adapter": {
+      "runtimeId": "codex",
+      "adapterId": "orbit.codex.task.v1",
+      "revision": 1,
+      "version": "0.165.0",
+      "compatible": true,
+      "issue": null,
+      "capabilities": [
+        "execute.code",
+        "status",
+        "result",
+        "interrupt"
+      ]
+    },
+    "status": "quality_blocked",
+    "issue": null,
+    "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144",
+    "qualityLoopId": "e9652e88-674e-4eb7-a86e-81bcc40365f6",
+    "recoveryRequired": false,
+    "approvedAt": "2026-10-29T00:01:13.292Z",
+    "executionScope": "approved_task",
+    "validationSource": "runtime_evidence_required",
+    "models": {
+      "selectedModelId": null,
+      "requestedModelId": null,
+      "serverModelId": "gpt-6-astra",
+      "actualModelId": "unknown",
+      "source": "unknown"
+    },
+    "quality": {
+      "projectId": "49cfa4db-38a6-4354-ba78-805fcb66cd43",
+      "sourceRunId": "7cdbdb00-80c7-4477-8cab-5845c638f144",
+      "taskId": "249aca74-eb2a-4a1a-b898-a5c21a1d7c92",
+      "baseline": {
+        "id": "0435eee6-e753-40f5-8b35-f3cb0ac9abcc",
+        "digest": "2abeb2ea4deacb98b43fdc9f03f03051de06111f7bd4e0d58a14745601a60453",
+        "criteria": [
+          "result.txt contains exactly ORBIT_NATIVE_SMOKE followed by a newline."
+        ]
+      },
+      "version": {
+        "id": "0435eee6-e753-40f5-8b35-f3cb0ac9abcc",
+        "projectId": "49cfa4db-38a6-4354-ba78-805fcb66cd43",
+        "revision": 1,
+        "contentHash": "2abeb2ea4deacb98b43fdc9f03f03051de06111f7bd4e0d58a14745601a60453",
+        "state": "approved",
+        "draft": {
+          "schemaVersion": "1.0",
+          "title": "Orbit native smoke",
+          "goal": "Create one harmless local file",
+          "requirements": [
+            {
+              "label": "R1",
+              "description": "Create result.txt in the current worktree containing exactly ORBIT_NATIVE_SMOKE followed by a newline. Use apply_patch only. Do not modify any other file.",
+              "acceptanceCriteria": [
+                "result.txt contains exactly ORBIT_NATIVE_SMOKE followed by a newline."
+              ]
+            }
+          ],
+          "constraints": [
+            "Only current worktree. No shell, network, installation, credentials, MCP, skill or hook calls. Do not commit."
+          ],
+          "openQuestions": [],
+          "source": "manual"
+        },
+        "lineageId": "0435eee6-e753-40f5-8b35-f3cb0ac9abcc",
+        "createdAt": "2026-10-29T00:01:13.280Z",
+        "approvedAt": "2026-10-29T00:01:13.281Z",
+        "approvedBy": "local-user"
+      },
+      "task": {
+        "title": "R1: Create result.txt in the current worktree containing exactly ORBIT_NATIVE_SMOKE followed by a newline. Use apply_patch only. Do not modify any other file.",
+        "description": "Create result.txt in the current worktree containing exactly ORBIT_NATIVE_SMOKE followed by a newline. Use apply_patch only. Do not modify any other file.",
+        "acceptanceCriteria": [
+          "result.txt contains exactly ORBIT_NATIVE_SMOKE followed by a newline."
+        ],
+        "planningVersionId": "0435eee6-e753-40f5-8b35-f3cb0ac9abcc",
+        "requirementLabels": [
+          "R1"
+        ],
+        "id": "249aca74-eb2a-4a1a-b898-a5c21a1d7c92",
+        "projectId": "49cfa4db-38a6-4354-ba78-805fcb66cd43",
+        "state": "draft",
+        "verification": "not_run",
+        "createdAt": "2026-10-29T00:01:13.283Z"
+      },
+      "artifact": {
+        "id": "aa5cb65a-b220-4f75-852f-cfb2f151db6b",
+        "digest": "89712c5717455374abacfda0901c8fdb25c5dfe2082a9ac5b0c7828d78c9a6ed"
+      },
+      "producer": {
+        "providerId": "openai",
+        "modelId": null,
+        "sessionId": "01a184f5-f192-7c31-b90d-2e646de31d08",
+        "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144",
+        "executionId": "01a184f5-f316-7873-82db-c534e0637301",
+        "source": "unknown",
+        "codex": {
+          "selectedModelId": null,
+          "requestedModelId": null,
+          "serverModelId": "gpt-6-astra",
+          "serverProviderId": "openai",
+          "serverSource": "thread/start",
+          "actualModelId": "unknown",
+          "actualModelEvidence": "unavailable",
+          "threadId": "01a184f5-f192-7c31-b90d-2e646de31d08",
+          "nativeSessionId": "01a184f5-f192-7c31-b90d-2e646de31d08",
+          "turnId": "01a184f5-f316-7873-82db-c534e0637301",
+          "status": "completed",
+          "modelChanged": false,
+          "observationIncomplete": false,
+          "resumed": false,
+          "observations": [
+            {
+              "source": "thread/start",
+              "semantics": "configuration",
+              "modelId": "gpt-6-astra",
+              "providerId": "openai",
+              "turnId": null,
+              "observedAt": 1793232073277
+            },
+            {
+              "source": "turn/start",
+              "semantics": "request",
+              "modelId": null,
+              "providerId": null,
+              "turnId": null,
+              "observedAt": 1793232073486
+            },
+            {
+              "source": "turn/started",
+              "semantics": "lifecycle",
+              "modelId": null,
+              "providerId": null,
+              "turnId": "01a184f5-f316-7873-82db-c534e0637301",
+              "observedAt": 1793232073787
+            },
+            {
+              "source": "turn/completed",
+              "semantics": "lifecycle",
+              "modelId": null,
+              "providerId": null,
+              "turnId": "01a184f5-f316-7873-82db-c534e0637301",
+              "observedAt": 1793232081612
+            }
+          ]
+        },
+        "evidenceSource": "native"
+      },
+      "reviewers": [
+        {
+          "id": "independence-gate",
+          "providerId": "openai",
+          "modelId": "unverified-review-model"
+        }
+      ],
+      "limits": {
+        "maxCalls": 1,
+        "maxRepairs": 0,
+        "timeoutMs": 1000
+      },
+      "previewDigest": "3ecf363fee4e9dc5e9f8b2fc2f8b080dd9064301c0e0e657278e776732d93003",
+      "id": "e9652e88-674e-4eb7-a86e-81bcc40365f6",
+      "requestId": "713bc664-7d03-4a3b-8cd8-e0a827efa806",
+      "createdAt": "2026-10-29T00:01:22.852Z",
+      "updatedAt": "2026-10-29T00:01:22.852Z",
+      "recoveryRequired": false,
+      "result": {
+        "status": "blocked",
+        "issue": "QUALITY_PRODUCER_MODEL_UNKNOWN",
+        "calls": 0,
+        "repairs": 0,
+        "rounds": [],
+        "artifact": {
+          "id": "aa5cb65a-b220-4f75-852f-cfb2f151db6b",
+          "digest": "89712c5717455374abacfda0901c8fdb25c5dfe2082a9ac5b0c7828d78c9a6ed"
+        }
+      },
+      "steps": [],
+      "verification": {
+        "status": "unknown",
+        "checkIds": [],
+        "issue": "QUALITY_VERIFICATION_NOT_RUN"
+      }
+    },
+    "providerEvidence": {
+      "source": "native",
+      "interface": "codex.app_server",
+      "executionObserved": true,
+      "responseDigest": "72c73308756e5c989d8634f7947b01570b033fef10739d99575de04e0c0497a5",
+      "quality": "blocked",
+      "livePipelineVerified": false,
+      "costUsd": null,
+      "remainingQuota": null
+    }
+  },
+  "run": {
+    "id": "7cdbdb00-80c7-4477-8cab-5845c638f144",
+    "requestId": "acc7a3d7-cbf2-4f76-b057-185ae4000c5a",
+    "turnId": "01a184f5-f316-7873-82db-c534e0637301",
+    "prompt": "Implement the saved task below within the selected isolated workspace. Follow every plan constraint. Report verification honestly; an agent response is not a passed check.\n{\n  \"taskId\": \"249aca74-eb2a-4a1a-b898-a5c21a1d7c92\",\n  \"planningVersionId\": \"0435eee6-e753-40f5-8b35-f3cb0ac9abcc\",\n  \"contentHash\": \"2abeb2ea4deacb98b43fdc9f03f03051de06111f7bd4e0d58a14745601a60453\",\n  \"title\": \"Orbit native smoke\",\n  \"goal\": \"Create one harmless local file\",\n  \"requirements\": [\n    {\n      \"label\": \"R1\",\n      \"description\": \"Create result.txt in the current worktree containing exactly ORBIT_NATIVE_SMOKE followed by a newline. Use apply_patch only. Do not modify any other file.\",\n      \"acceptanceCriteria\": [\n        \"result.txt contains exactly ORBIT_NATIVE_SMOKE followed by a newline.\"\n      ]\n    }\n  ],\n  \"constraints\": [\n    \"Only current worktree. No shell, network, installation, credentials, MCP, skill or hook calls. Do not commit.\"\n  ],\n  \"decisions\": []\n}",
+    "response": "I’ll use apply_patch to create only `result.txt` with the required text and newline.\n\n\nCreated `result.txt` using apply_patch with exactly `ORBIT_NATIVE_SMOKE` followed by a newline. No other files modified.\n\nPatch completed; no independent readback or checks were run.",
+    "execution": "completed",
+    "verification": "not_run",
+    "createdAt": "2026-10-29T00:01:13.485Z",
+    "updatedAt": "2026-10-29T00:01:21.612Z",
+    "workspaceId": "aa5cb65a-b220-4f75-852f-cfb2f151db6b",
+    "planningVersionId": "0435eee6-e753-40f5-8b35-f3cb0ac9abcc",
+    "planningContentHash": "2abeb2ea4deacb98b43fdc9f03f03051de06111f7bd4e0d58a14745601a60453",
+    "requirementLabels": [
+      "R1"
+    ],
+    "taskId": "249aca74-eb2a-4a1a-b898-a5c21a1d7c92"
+  },
+  "file": {
+    "exists": true,
+    "exact": true,
+    "sha256": "29519dcfb3a2b7c87f49961d2cafdcc08935529695d58a90d759b12d4b0b691a"
+  },
+  "worktreeOnlyResultFile": true,
+  "progressTask": {
+    "id": "249aca74-eb2a-4a1a-b898-a5c21a1d7c92",
+    "title": "R1: Create result.txt in the current worktree containing exactly ORBIT_NATIVE_SMOKE followed by a newline. Use apply_patch only. Do not modify any other file.",
+    "requirementLabels": [
+      "R1"
+    ],
+    "stage": "response_unverified",
+    "assignee": "codex",
+    "planCurrent": true,
+    "latestRunId": "7cdbdb00-80c7-4477-8cab-5845c638f144",
+    "startedAt": "2026-10-29T00:01:13.485Z",
+    "lastObservedAt": "2026-10-29T00:01:22.852Z",
+    "verification": "not_run",
+    "criteria": {
+      "total": 1,
+      "verified": 0
+    },
+    "runs": [
+      {
+        "id": "7cdbdb00-80c7-4477-8cab-5845c638f144",
+        "assignee": "codex",
+        "execution": "completed",
+        "startedAt": "2026-10-29T00:01:13.485Z",
+        "lastObservedAt": "2026-10-29T00:01:22.852Z",
+        "verification": "not_run",
+        "checks": 0,
+        "planningVersionId": "0435eee6-e753-40f5-8b35-f3cb0ac9abcc",
+        "lastActivity": null,
+        "modelAttribution": {
+          "selectedModelId": null,
+          "requestedModelId": null,
+          "serverModelId": "gpt-6-astra",
+          "serverProviderId": "openai",
+          "serverSource": "thread/start",
+          "actualModelId": "unknown",
+          "actualModelEvidence": "unavailable",
+          "threadId": "01a184f5-f192-7c31-b90d-2e646de31d08",
+          "nativeSessionId": "01a184f5-f192-7c31-b90d-2e646de31d08",
+          "turnId": "01a184f5-f316-7873-82db-c534e0637301",
+          "status": "completed",
+          "modelChanged": false,
+          "observationIncomplete": false,
+          "resumed": false,
+          "observations": [
+            {
+              "source": "thread/start",
+              "semantics": "configuration",
+              "modelId": "gpt-6-astra",
+              "providerId": "openai",
+              "turnId": null,
+              "observedAt": 1793232073277
+            },
+            {
+              "source": "turn/start",
+              "semantics": "request",
+              "modelId": null,
+              "providerId": null,
+              "turnId": null,
+              "observedAt": 1793232073486
+            },
+            {
+              "source": "turn/started",
+              "semantics": "lifecycle",
+              "modelId": null,
+              "providerId": null,
+              "turnId": "01a184f5-f316-7873-82db-c534e0637301",
+              "observedAt": 1793232073787
+            },
+            {
+              "source": "turn/completed",
+              "semantics": "lifecycle",
+              "modelId": null,
+              "providerId": null,
+              "turnId": "01a184f5-f316-7873-82db-c534e0637301",
+              "observedAt": 1793232081612
+            }
+          ]
+        },
+        "quality": {
+          "execution": {
+            "status": "completed",
+            "evidenceIds": [],
+            "blockers": [],
+            "nextAction": null,
+            "evidenceSource": "native"
+          },
+          "format": {
+            "status": "not_run",
+            "evidenceIds": [],
+            "blockers": [
+              "QUALITY_EVIDENCE_MISSING"
+            ],
+            "nextAction": "verify_artifacts"
+          },
+          "codeVerification": {
+            "status": "not_run",
+            "evidenceIds": [],
+            "blockers": [
+              "QUALITY_EVIDENCE_MISSING"
+            ],
+            "nextAction": "verify_code"
+          },
+          "semantic": {
+            "status": "unknown",
+            "evidenceIds": [
+              "e9652e88-674e-4eb7-a86e-81bcc40365f6"
+            ],
+            "blockers": [
+              "QUALITY_ARTIFACT_UNAVAILABLE",
+              "QUALITY_PRODUCER_MODEL_UNKNOWN",
+              "QUALITY_PRODUCER_MODEL_UNKNOWN"
+            ],
+            "nextAction": "run_quality_review"
+          },
+          "independentReview": {
+            "status": "unknown",
+            "evidenceIds": [
+              "e9652e88-674e-4eb7-a86e-81bcc40365f6"
+            ],
+            "blockers": [
+              "QUALITY_ARTIFACT_UNAVAILABLE",
+              "QUALITY_PRODUCER_MODEL_UNKNOWN",
+              "QUALITY_PRODUCER_MODEL_UNKNOWN"
+            ],
+            "nextAction": "run_independent_review"
+          },
+          "repair": {
+            "status": "not_run",
+            "evidenceIds": [],
+            "blockers": [],
+            "nextAction": null
+          },
+          "revalidation": {
+            "status": "not_run",
+            "evidenceIds": [],
+            "blockers": [],
+            "nextAction": null
+          },
+          "userApproval": {
+            "status": "not_run",
+            "evidenceIds": [],
+            "blockers": [
+              "QUALITY_APPROVAL_MISSING"
+            ],
+            "nextAction": "request_user_approval"
+          },
+          "evidence": [
+            {
+              "id": "e9652e88-674e-4eb7-a86e-81bcc40365f6",
+              "kind": "quality_loop",
+              "evidenceSource": "unknown",
+              "freshness": "unavailable",
+              "recordedStatus": "blocked",
+              "blockers": [
+                "QUALITY_ARTIFACT_UNAVAILABLE",
+                "QUALITY_PRODUCER_MODEL_UNKNOWN",
+                "QUALITY_PRODUCER_MODEL_UNKNOWN"
+              ],
+              "binding": {
+                "projectId": "49cfa4db-38a6-4354-ba78-805fcb66cd43",
+                "taskId": "249aca74-eb2a-4a1a-b898-a5c21a1d7c92",
+                "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144",
+                "planningVersionId": "0435eee6-e753-40f5-8b35-f3cb0ac9abcc",
+                "planningContentHash": "2abeb2ea4deacb98b43fdc9f03f03051de06111f7bd4e0d58a14745601a60453",
+                "acceptanceDigest": null,
+                "artifactId": "aa5cb65a-b220-4f75-852f-cfb2f151db6b",
+                "artifactDigest": "89712c5717455374abacfda0901c8fdb25c5dfe2082a9ac5b0c7828d78c9a6ed"
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "runsTotal": 1,
+    "qualityLoops": [
+      {
+        "projectId": "49cfa4db-38a6-4354-ba78-805fcb66cd43",
+        "sourceRunId": "7cdbdb00-80c7-4477-8cab-5845c638f144",
+        "taskId": "249aca74-eb2a-4a1a-b898-a5c21a1d7c92",
+        "baseline": {
+          "id": "0435eee6-e753-40f5-8b35-f3cb0ac9abcc",
+          "digest": "2abeb2ea4deacb98b43fdc9f03f03051de06111f7bd4e0d58a14745601a60453",
+          "criteria": [
+            "result.txt contains exactly ORBIT_NATIVE_SMOKE followed by a newline."
+          ]
+        },
+        "version": {
+          "id": "0435eee6-e753-40f5-8b35-f3cb0ac9abcc",
+          "projectId": "49cfa4db-38a6-4354-ba78-805fcb66cd43",
+          "revision": 1,
+          "contentHash": "2abeb2ea4deacb98b43fdc9f03f03051de06111f7bd4e0d58a14745601a60453",
+          "state": "approved",
+          "draft": {
+            "schemaVersion": "1.0",
+            "title": "Orbit native smoke",
+            "goal": "Create one harmless local file",
+            "requirements": [
+              {
+                "label": "R1",
+                "description": "Create result.txt in the current worktree containing exactly ORBIT_NATIVE_SMOKE followed by a newline. Use apply_patch only. Do not modify any other file.",
+                "acceptanceCriteria": [
+                  "result.txt contains exactly ORBIT_NATIVE_SMOKE followed by a newline."
+                ]
+              }
+            ],
+            "constraints": [
+              "Only current worktree. No shell, network, installation, credentials, MCP, skill or hook calls. Do not commit."
+            ],
+            "openQuestions": [],
+            "source": "manual"
+          },
+          "lineageId": "0435eee6-e753-40f5-8b35-f3cb0ac9abcc",
+          "createdAt": "2026-10-29T00:01:13.280Z",
+          "approvedAt": "2026-10-29T00:01:13.281Z",
+          "approvedBy": "local-user"
+        },
+        "task": {
+          "title": "R1: Create result.txt in the current worktree containing exactly ORBIT_NATIVE_SMOKE followed by a newline. Use apply_patch only. Do not modify any other file.",
+          "description": "Create result.txt in the current worktree containing exactly ORBIT_NATIVE_SMOKE followed by a newline. Use apply_patch only. Do not modify any other file.",
+          "acceptanceCriteria": [
+            "result.txt contains exactly ORBIT_NATIVE_SMOKE followed by a newline."
+          ],
+          "planningVersionId": "0435eee6-e753-40f5-8b35-f3cb0ac9abcc",
+          "requirementLabels": [
+            "R1"
+          ],
+          "id": "249aca74-eb2a-4a1a-b898-a5c21a1d7c92",
+          "projectId": "49cfa4db-38a6-4354-ba78-805fcb66cd43",
+          "state": "draft",
+          "verification": "not_run",
+          "createdAt": "2026-10-29T00:01:13.283Z"
+        },
+        "artifact": {
+          "id": "aa5cb65a-b220-4f75-852f-cfb2f151db6b",
+          "digest": "89712c5717455374abacfda0901c8fdb25c5dfe2082a9ac5b0c7828d78c9a6ed"
+        },
+        "producer": {
+          "providerId": "openai",
+          "modelId": null,
+          "sessionId": "01a184f5-f192-7c31-b90d-2e646de31d08",
+          "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144",
+          "executionId": "01a184f5-f316-7873-82db-c534e0637301",
+          "source": "unknown",
+          "codex": {
+            "selectedModelId": null,
+            "requestedModelId": null,
+            "serverModelId": "gpt-6-astra",
+            "serverProviderId": "openai",
+            "serverSource": "thread/start",
+            "actualModelId": "unknown",
+            "actualModelEvidence": "unavailable",
+            "threadId": "01a184f5-f192-7c31-b90d-2e646de31d08",
+            "nativeSessionId": "01a184f5-f192-7c31-b90d-2e646de31d08",
+            "turnId": "01a184f5-f316-7873-82db-c534e0637301",
+            "status": "completed",
+            "modelChanged": false,
+            "observationIncomplete": false,
+            "resumed": false,
+            "observations": [
+              {
+                "source": "thread/start",
+                "semantics": "configuration",
+                "modelId": "gpt-6-astra",
+                "providerId": "openai",
+                "turnId": null,
+                "observedAt": 1793232073277
+              },
+              {
+                "source": "turn/start",
+                "semantics": "request",
+                "modelId": null,
+                "providerId": null,
+                "turnId": null,
+                "observedAt": 1793232073486
+              },
+              {
+                "source": "turn/started",
+                "semantics": "lifecycle",
+                "modelId": null,
+                "providerId": null,
+                "turnId": "01a184f5-f316-7873-82db-c534e0637301",
+                "observedAt": 1793232073787
+              },
+              {
+                "source": "turn/completed",
+                "semantics": "lifecycle",
+                "modelId": null,
+                "providerId": null,
+                "turnId": "01a184f5-f316-7873-82db-c534e0637301",
+                "observedAt": 1793232081612
+              }
+            ]
+          },
+          "evidenceSource": "native"
+        },
+        "reviewers": [
+          {
+            "id": "independence-gate",
+            "providerId": "openai",
+            "modelId": "unverified-review-model"
+          }
+        ],
+        "limits": {
+          "maxCalls": 1,
+          "maxRepairs": 0,
+          "timeoutMs": 1000
+        },
+        "previewDigest": "3ecf363fee4e9dc5e9f8b2fc2f8b080dd9064301c0e0e657278e776732d93003",
+        "id": "e9652e88-674e-4eb7-a86e-81bcc40365f6",
+        "requestId": "713bc664-7d03-4a3b-8cd8-e0a827efa806",
+        "createdAt": "2026-10-29T00:01:22.852Z",
+        "updatedAt": "2026-10-29T00:01:22.852Z",
+        "recoveryRequired": false,
+        "result": {
+          "status": "blocked",
+          "issue": "QUALITY_PRODUCER_MODEL_UNKNOWN",
+          "calls": 0,
+          "repairs": 0,
+          "rounds": [],
+          "artifact": {
+            "id": "aa5cb65a-b220-4f75-852f-cfb2f151db6b",
+            "digest": "89712c5717455374abacfda0901c8fdb25c5dfe2082a9ac5b0c7828d78c9a6ed"
+          }
+        },
+        "steps": [],
+        "verification": {
+          "status": "unknown",
+          "checkIds": [],
+          "issue": "QUALITY_VERIFICATION_NOT_RUN"
+        }
+      }
+    ],
+    "capabilityRoutes": [
+      {
+        "id": "24034532-9bab-4666-b71a-9106e623bcd1",
+        "requestId": "6bd24f54-808e-4e74-8239-2f14347623a0",
+        "projectId": "49cfa4db-38a6-4354-ba78-805fcb66cd43",
+        "taskId": "249aca74-eb2a-4a1a-b898-a5c21a1d7c92",
+        "createdAt": "2026-10-29T00:01:13.287Z",
+        "intent": "execution",
+        "status": "recommended",
+        "runtimeId": "codex",
+        "capabilityId": "execute.code",
+        "reasons": [
+          "PROJECT_SELECTION_PRESERVED",
+          "EXISTING_ADAPTER_ONLY",
+          "EXECUTION_PREFLIGHT_REQUIRED"
+        ],
+        "baseline": {
+          "planningVersionId": "0435eee6-e753-40f5-8b35-f3cb0ac9abcc",
+          "planningContentHash": "2abeb2ea4deacb98b43fdc9f03f03051de06111f7bd4e0d58a14745601a60453"
+        },
+        "preferencesRevision": 0,
+        "registryDigest": "dbf5d34d257ca84754c4cee81434a8e906a2a572632b3f8988c4f309bf2283b3",
+        "textDigest": "3314265fd25355db9f6e7fc961c270982aedd1ead7dc7df75362f5a843ff6418",
+        "executionAuthorized": false,
+        "actualModel": "unknown"
+      }
+    ],
+    "capabilityExecutions": [
+      {
+        "id": "274693e2-ec0d-4e9e-a437-529e8e45ccf0",
+        "requestId": "dd0ba79a-1846-4c7a-9da3-c74609826fd3",
+        "projectId": "49cfa4db-38a6-4354-ba78-805fcb66cd43",
+        "taskId": "249aca74-eb2a-4a1a-b898-a5c21a1d7c92",
+        "routeId": "24034532-9bab-4666-b71a-9106e623bcd1",
+        "runtimeId": "codex",
+        "createdAt": "2026-10-29T00:01:13.289Z",
+        "updatedAt": "2026-10-29T00:01:22.852Z",
+        "planDigest": "6c16d3e0e0c02aa7fa148a931ad250eaee07f24c9448c97c5ef29a14ce56e28f",
+        "bindingDigest": "8fbdeb42ab86699e4e0120a3d2f51aac8e298b2c6b658fe4f891c00a1d042737",
+        "dispatchRequestId": "acc7a3d7-cbf2-4f76-b057-185ae4000c5a",
+        "workspaceId": "aa5cb65a-b220-4f75-852f-cfb2f151db6b",
+        "expectedAcceptanceDigest": null,
+        "baseline": {
+          "planningVersionId": "0435eee6-e753-40f5-8b35-f3cb0ac9abcc",
+          "planningContentHash": "2abeb2ea4deacb98b43fdc9f03f03051de06111f7bd4e0d58a14745601a60453"
+        },
+        "preferencesRevision": 0,
+        "adapter": {
+          "runtimeId": "codex",
+          "adapterId": "orbit.codex.task.v1",
+          "revision": 1,
+          "version": "0.165.0",
+          "compatible": true,
+          "issue": null,
+          "capabilities": [
+            "execute.code",
+            "status",
+            "result",
+            "interrupt"
+          ]
+        },
+        "status": "quality_blocked",
+        "issue": null,
+        "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144",
+        "qualityLoopId": "e9652e88-674e-4eb7-a86e-81bcc40365f6",
+        "recoveryRequired": false,
+        "approvedAt": "2026-10-29T00:01:13.292Z",
+        "executionScope": "approved_task",
+        "validationSource": "runtime_evidence_required",
+        "models": {
+          "selectedModelId": null,
+          "requestedModelId": null,
+          "serverModelId": "gpt-6-astra",
+          "actualModelId": "unknown",
+          "source": "unknown"
+        },
+        "quality": {
+          "projectId": "49cfa4db-38a6-4354-ba78-805fcb66cd43",
+          "sourceRunId": "7cdbdb00-80c7-4477-8cab-5845c638f144",
+          "taskId": "249aca74-eb2a-4a1a-b898-a5c21a1d7c92",
+          "baseline": {
+            "id": "0435eee6-e753-40f5-8b35-f3cb0ac9abcc",
+            "digest": "2abeb2ea4deacb98b43fdc9f03f03051de06111f7bd4e0d58a14745601a60453",
+            "criteria": [
+              "result.txt contains exactly ORBIT_NATIVE_SMOKE followed by a newline."
+            ]
+          },
+          "version": {
+            "id": "0435eee6-e753-40f5-8b35-f3cb0ac9abcc",
+            "projectId": "49cfa4db-38a6-4354-ba78-805fcb66cd43",
+            "revision": 1,
+            "contentHash": "2abeb2ea4deacb98b43fdc9f03f03051de06111f7bd4e0d58a14745601a60453",
+            "state": "approved",
+            "draft": {
+              "schemaVersion": "1.0",
+              "title": "Orbit native smoke",
+              "goal": "Create one harmless local file",
+              "requirements": [
+                {
+                  "label": "R1",
+                  "description": "Create result.txt in the current worktree containing exactly ORBIT_NATIVE_SMOKE followed by a newline. Use apply_patch only. Do not modify any other file.",
+                  "acceptanceCriteria": [
+                    "result.txt contains exactly ORBIT_NATIVE_SMOKE followed by a newline."
+                  ]
+                }
+              ],
+              "constraints": [
+                "Only current worktree. No shell, network, installation, credentials, MCP, skill or hook calls. Do not commit."
+              ],
+              "openQuestions": [],
+              "source": "manual"
+            },
+            "lineageId": "0435eee6-e753-40f5-8b35-f3cb0ac9abcc",
+            "createdAt": "2026-10-29T00:01:13.280Z",
+            "approvedAt": "2026-10-29T00:01:13.281Z",
+            "approvedBy": "local-user"
+          },
+          "task": {
+            "title": "R1: Create result.txt in the current worktree containing exactly ORBIT_NATIVE_SMOKE followed by a newline. Use apply_patch only. Do not modify any other file.",
+            "description": "Create result.txt in the current worktree containing exactly ORBIT_NATIVE_SMOKE followed by a newline. Use apply_patch only. Do not modify any other file.",
+            "acceptanceCriteria": [
+              "result.txt contains exactly ORBIT_NATIVE_SMOKE followed by a newline."
+            ],
+            "planningVersionId": "0435eee6-e753-40f5-8b35-f3cb0ac9abcc",
+            "requirementLabels": [
+              "R1"
+            ],
+            "id": "249aca74-eb2a-4a1a-b898-a5c21a1d7c92",
+            "projectId": "49cfa4db-38a6-4354-ba78-805fcb66cd43",
+            "state": "draft",
+            "verification": "not_run",
+            "createdAt": "2026-10-29T00:01:13.283Z"
+          },
+          "artifact": {
+            "id": "aa5cb65a-b220-4f75-852f-cfb2f151db6b",
+            "digest": "89712c5717455374abacfda0901c8fdb25c5dfe2082a9ac5b0c7828d78c9a6ed"
+          },
+          "producer": {
+            "providerId": "openai",
+            "modelId": null,
+            "sessionId": "01a184f5-f192-7c31-b90d-2e646de31d08",
+            "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144",
+            "executionId": "01a184f5-f316-7873-82db-c534e0637301",
+            "source": "unknown",
+            "codex": {
+              "selectedModelId": null,
+              "requestedModelId": null,
+              "serverModelId": "gpt-6-astra",
+              "serverProviderId": "openai",
+              "serverSource": "thread/start",
+              "actualModelId": "unknown",
+              "actualModelEvidence": "unavailable",
+              "threadId": "01a184f5-f192-7c31-b90d-2e646de31d08",
+              "nativeSessionId": "01a184f5-f192-7c31-b90d-2e646de31d08",
+              "turnId": "01a184f5-f316-7873-82db-c534e0637301",
+              "status": "completed",
+              "modelChanged": false,
+              "observationIncomplete": false,
+              "resumed": false,
+              "observations": [
+                {
+                  "source": "thread/start",
+                  "semantics": "configuration",
+                  "modelId": "gpt-6-astra",
+                  "providerId": "openai",
+                  "turnId": null,
+                  "observedAt": 1793232073277
+                },
+                {
+                  "source": "turn/start",
+                  "semantics": "request",
+                  "modelId": null,
+                  "providerId": null,
+                  "turnId": null,
+                  "observedAt": 1793232073486
+                },
+                {
+                  "source": "turn/started",
+                  "semantics": "lifecycle",
+                  "modelId": null,
+                  "providerId": null,
+                  "turnId": "01a184f5-f316-7873-82db-c534e0637301",
+                  "observedAt": 1793232073787
+                },
+                {
+                  "source": "turn/completed",
+                  "semantics": "lifecycle",
+                  "modelId": null,
+                  "providerId": null,
+                  "turnId": "01a184f5-f316-7873-82db-c534e0637301",
+                  "observedAt": 1793232081612
+                }
+              ]
+            },
+            "evidenceSource": "native"
+          },
+          "reviewers": [
+            {
+              "id": "independence-gate",
+              "providerId": "openai",
+              "modelId": "unverified-review-model"
+            }
+          ],
+          "limits": {
+            "maxCalls": 1,
+            "maxRepairs": 0,
+            "timeoutMs": 1000
+          },
+          "previewDigest": "3ecf363fee4e9dc5e9f8b2fc2f8b080dd9064301c0e0e657278e776732d93003",
+          "id": "e9652e88-674e-4eb7-a86e-81bcc40365f6",
+          "requestId": "713bc664-7d03-4a3b-8cd8-e0a827efa806",
+          "createdAt": "2026-10-29T00:01:22.852Z",
+          "updatedAt": "2026-10-29T00:01:22.852Z",
+          "recoveryRequired": false,
+          "result": {
+            "status": "blocked",
+            "issue": "QUALITY_PRODUCER_MODEL_UNKNOWN",
+            "calls": 0,
+            "repairs": 0,
+            "rounds": [],
+            "artifact": {
+              "id": "aa5cb65a-b220-4f75-852f-cfb2f151db6b",
+              "digest": "89712c5717455374abacfda0901c8fdb25c5dfe2082a9ac5b0c7828d78c9a6ed"
+            }
+          },
+          "steps": [],
+          "verification": {
+            "status": "unknown",
+            "checkIds": [],
+            "issue": "QUALITY_VERIFICATION_NOT_RUN"
+          }
+        },
+        "providerEvidence": {
+          "source": "native",
+          "interface": "codex.app_server",
+          "executionObserved": true,
+          "responseDigest": "72c73308756e5c989d8634f7947b01570b033fef10739d99575de04e0c0497a5",
+          "quality": "blocked",
+          "livePipelineVerified": false,
+          "costUsd": null,
+          "remainingQuota": null
+        }
+      }
+    ],
+    "quality": {
+      "execution": {
+        "status": "completed",
+        "evidenceIds": [],
+        "blockers": [],
+        "nextAction": null,
+        "evidenceSource": "native"
+      },
+      "format": {
+        "status": "not_run",
+        "evidenceIds": [],
+        "blockers": [
+          "QUALITY_EVIDENCE_MISSING"
+        ],
+        "nextAction": "verify_artifacts"
+      },
+      "codeVerification": {
+        "status": "not_run",
+        "evidenceIds": [],
+        "blockers": [
+          "QUALITY_EVIDENCE_MISSING"
+        ],
+        "nextAction": "verify_code"
+      },
+      "semantic": {
+        "status": "unknown",
+        "evidenceIds": [
+          "e9652e88-674e-4eb7-a86e-81bcc40365f6"
+        ],
+        "blockers": [
+          "QUALITY_ARTIFACT_UNAVAILABLE",
+          "QUALITY_PRODUCER_MODEL_UNKNOWN",
+          "QUALITY_PRODUCER_MODEL_UNKNOWN"
+        ],
+        "nextAction": "run_quality_review"
+      },
+      "independentReview": {
+        "status": "unknown",
+        "evidenceIds": [
+          "e9652e88-674e-4eb7-a86e-81bcc40365f6"
+        ],
+        "blockers": [
+          "QUALITY_ARTIFACT_UNAVAILABLE",
+          "QUALITY_PRODUCER_MODEL_UNKNOWN",
+          "QUALITY_PRODUCER_MODEL_UNKNOWN"
+        ],
+        "nextAction": "run_independent_review"
+      },
+      "repair": {
+        "status": "not_run",
+        "evidenceIds": [],
+        "blockers": [],
+        "nextAction": null
+      },
+      "revalidation": {
+        "status": "not_run",
+        "evidenceIds": [],
+        "blockers": [],
+        "nextAction": null
+      },
+      "userApproval": {
+        "status": "not_run",
+        "evidenceIds": [],
+        "blockers": [
+          "QUALITY_APPROVAL_MISSING"
+        ],
+        "nextAction": "request_user_approval"
+      },
+      "evidence": [
+        {
+          "id": "e9652e88-674e-4eb7-a86e-81bcc40365f6",
+          "kind": "quality_loop",
+          "evidenceSource": "unknown",
+          "freshness": "unavailable",
+          "recordedStatus": "blocked",
+          "blockers": [
+            "QUALITY_ARTIFACT_UNAVAILABLE",
+            "QUALITY_PRODUCER_MODEL_UNKNOWN",
+            "QUALITY_PRODUCER_MODEL_UNKNOWN"
+          ],
+          "binding": {
+            "projectId": "49cfa4db-38a6-4354-ba78-805fcb66cd43",
+            "taskId": "249aca74-eb2a-4a1a-b898-a5c21a1d7c92",
+            "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144",
+            "planningVersionId": "0435eee6-e753-40f5-8b35-f3cb0ac9abcc",
+            "planningContentHash": "2abeb2ea4deacb98b43fdc9f03f03051de06111f7bd4e0d58a14745601a60453",
+            "acceptanceDigest": null,
+            "artifactId": "aa5cb65a-b220-4f75-852f-cfb2f151db6b",
+            "artifactDigest": "89712c5717455374abacfda0901c8fdb25c5dfe2082a9ac5b0c7828d78c9a6ed"
+          }
+        }
+      ]
+    }
+  },
+  "sourceUnchanged": true,
+  "httpGetReadOnly": true,
+  "pipelineChecksPassed": true,
+  "durationMs": 12469,
+  "finishedAt": "2026-10-29T00:01:23.308Z",
+  "events": [
+    {
+      "seq": 1,
+      "at": "2026-10-29T00:01:10.409Z",
+      "kind": "project.registered",
+      "runId": null
+    },
+    {
+      "seq": 2,
+      "at": "2026-10-29T00:01:10.523Z",
+      "kind": "workspace.creating",
+      "runId": null
+    },
+    {
+      "seq": 3,
+      "at": "2026-10-29T00:01:10.593Z",
+      "kind": "workspace.ready",
+      "runId": null
+    },
+    {
+      "seq": 4,
+      "at": "2026-10-29T00:01:11.060Z",
+      "kind": "provider.status",
+      "runId": null
+    },
+    {
+      "seq": 5,
+      "at": "2026-10-29T00:01:11.060Z",
+      "kind": "workspace.selected",
+      "runId": null
+    },
+    {
+      "seq": 6,
+      "at": "2026-10-29T00:01:11.390Z",
+      "kind": "provider.status",
+      "runId": null
+    },
+    {
+      "seq": 7,
+      "at": "2026-10-29T00:01:11.601Z",
+      "kind": "native.connection.intent",
+      "runId": null
+    },
+    {
+      "seq": 8,
+      "at": "2026-10-29T00:01:11.604Z",
+      "kind": "native.process.observed",
+      "runId": null
+    },
+    {
+      "seq": 9,
+      "at": "2026-10-29T00:01:11.604Z",
+      "kind": "native.process.observed",
+      "runId": null
+    },
+    {
+      "seq": 10,
+      "at": "2026-10-29T00:01:13.258Z",
+      "kind": "native.connection.session",
+      "runId": null
+    },
+    {
+      "seq": 11,
+      "at": "2026-10-29T00:01:13.277Z",
+      "kind": "provider.status",
+      "runId": null
+    },
+    {
+      "seq": 12,
+      "at": "2026-10-29T00:01:13.277Z",
+      "kind": "session.created",
+      "runId": null
+    },
+    {
+      "seq": 13,
+      "at": "2026-10-29T00:01:13.280Z",
+      "kind": "planning.created",
+      "runId": null
+    },
+    {
+      "seq": 14,
+      "at": "2026-10-29T00:01:13.281Z",
+      "kind": "planning.approved",
+      "runId": null
+    },
+    {
+      "seq": 15,
+      "at": "2026-10-29T00:01:13.283Z",
+      "kind": "planning.tasks_created",
+      "runId": null
+    },
+    {
+      "seq": 16,
+      "at": "2026-10-29T00:01:13.287Z",
+      "kind": "capability.route",
+      "runId": null
+    },
+    {
+      "seq": 17,
+      "at": "2026-10-29T00:01:13.289Z",
+      "kind": "capability.plan",
+      "runId": null
+    },
+    {
+      "seq": 18,
+      "at": "2026-10-29T00:01:13.292Z",
+      "kind": "capability.execution",
+      "runId": null
+    },
+    {
+      "seq": 19,
+      "at": "2026-10-29T00:01:13.485Z",
+      "kind": "run.created",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 20,
+      "at": "2026-10-29T00:01:13.486Z",
+      "kind": "run.model_attribution",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 21,
+      "at": "2026-10-29T00:01:13.486Z",
+      "kind": "run.runtime_source",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 22,
+      "at": "2026-10-29T00:01:13.502Z",
+      "kind": "run.model_attribution",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 23,
+      "at": "2026-10-29T00:01:13.502Z",
+      "kind": "run.accepted",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 24,
+      "at": "2026-10-29T00:01:13.503Z",
+      "kind": "capability.execution",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 25,
+      "at": "2026-10-29T00:01:13.787Z",
+      "kind": "run.model_attribution",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 26,
+      "at": "2026-10-29T00:01:13.787Z",
+      "kind": "run.started",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 27,
+      "at": "2026-10-29T00:01:16.864Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 28,
+      "at": "2026-10-29T00:01:16.866Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 29,
+      "at": "2026-10-29T00:01:16.867Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 30,
+      "at": "2026-10-29T00:01:16.867Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 31,
+      "at": "2026-10-29T00:01:16.867Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 32,
+      "at": "2026-10-29T00:01:16.867Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 33,
+      "at": "2026-10-29T00:01:16.867Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 34,
+      "at": "2026-10-29T00:01:16.867Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 35,
+      "at": "2026-10-29T00:01:17.065Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 36,
+      "at": "2026-10-29T00:01:17.066Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 37,
+      "at": "2026-10-29T00:01:17.066Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 38,
+      "at": "2026-10-29T00:01:17.066Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 39,
+      "at": "2026-10-29T00:01:17.066Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 40,
+      "at": "2026-10-29T00:01:17.066Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 41,
+      "at": "2026-10-29T00:01:17.067Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 42,
+      "at": "2026-10-29T00:01:17.067Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 43,
+      "at": "2026-10-29T00:01:17.067Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 44,
+      "at": "2026-10-29T00:01:17.067Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 45,
+      "at": "2026-10-29T00:01:17.067Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 46,
+      "at": "2026-10-29T00:01:17.268Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 47,
+      "at": "2026-10-29T00:01:18.493Z",
+      "kind": "workspace.changed",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 48,
+      "at": "2026-10-29T00:01:20.519Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 49,
+      "at": "2026-10-29T00:01:20.520Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 50,
+      "at": "2026-10-29T00:01:20.520Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 51,
+      "at": "2026-10-29T00:01:20.520Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 52,
+      "at": "2026-10-29T00:01:20.520Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 53,
+      "at": "2026-10-29T00:01:20.520Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 54,
+      "at": "2026-10-29T00:01:20.855Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 55,
+      "at": "2026-10-29T00:01:20.855Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 56,
+      "at": "2026-10-29T00:01:20.855Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 57,
+      "at": "2026-10-29T00:01:20.856Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 58,
+      "at": "2026-10-29T00:01:20.856Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 59,
+      "at": "2026-10-29T00:01:20.856Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 60,
+      "at": "2026-10-29T00:01:20.856Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 61,
+      "at": "2026-10-29T00:01:20.856Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 62,
+      "at": "2026-10-29T00:01:20.857Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 63,
+      "at": "2026-10-29T00:01:20.857Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 64,
+      "at": "2026-10-29T00:01:20.857Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 65,
+      "at": "2026-10-29T00:01:20.857Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 66,
+      "at": "2026-10-29T00:01:20.857Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 67,
+      "at": "2026-10-29T00:01:20.857Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 68,
+      "at": "2026-10-29T00:01:20.858Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 69,
+      "at": "2026-10-29T00:01:20.858Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 70,
+      "at": "2026-10-29T00:01:21.257Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 71,
+      "at": "2026-10-29T00:01:21.257Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 72,
+      "at": "2026-10-29T00:01:21.258Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 73,
+      "at": "2026-10-29T00:01:21.258Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 74,
+      "at": "2026-10-29T00:01:21.258Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 75,
+      "at": "2026-10-29T00:01:21.322Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 76,
+      "at": "2026-10-29T00:01:21.323Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 77,
+      "at": "2026-10-29T00:01:21.323Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 78,
+      "at": "2026-10-29T00:01:21.324Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 79,
+      "at": "2026-10-29T00:01:21.448Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 80,
+      "at": "2026-10-29T00:01:21.448Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 81,
+      "at": "2026-10-29T00:01:21.448Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 82,
+      "at": "2026-10-29T00:01:21.449Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 83,
+      "at": "2026-10-29T00:01:21.449Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 84,
+      "at": "2026-10-29T00:01:21.449Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 85,
+      "at": "2026-10-29T00:01:21.449Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 86,
+      "at": "2026-10-29T00:01:21.449Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 87,
+      "at": "2026-10-29T00:01:21.581Z",
+      "kind": "message.updated",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 88,
+      "at": "2026-10-29T00:01:21.612Z",
+      "kind": "run.model_attribution",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 89,
+      "at": "2026-10-29T00:01:21.613Z",
+      "kind": "run.completed",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 90,
+      "at": "2026-10-29T00:01:21.613Z",
+      "kind": "run.model_attribution",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 91,
+      "at": "2026-10-29T00:01:22.852Z",
+      "kind": "quality.created",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 92,
+      "at": "2026-10-29T00:01:22.852Z",
+      "kind": "capability.execution",
+      "runId": "7cdbdb00-80c7-4477-8cab-5845c638f144"
+    },
+    {
+      "seq": 93,
+      "at": "2026-10-29T00:01:23.334Z",
+      "kind": "native.process.observed",
+      "runId": null
+    },
+    {
+      "seq": 94,
+      "at": "2026-10-29T00:01:23.334Z",
+      "kind": "native.transport.closed",
+      "runId": null
+    },
+    {
+      "seq": 95,
+      "at": "2026-10-29T00:01:23.334Z",
+      "kind": "native.connection.recorded",
+      "runId": null
+    }
+  ],
+  "runCount": 1,
+  "restart": {
+    "scope": "Store reopen only; full HTTP restart requires separate offline proof",
+    "runCount": 1,
+    "status": "quality_blocked",
+    "providerEvidence": {
+      "source": "native",
+      "interface": "codex.app_server",
+      "executionObserved": true,
+      "responseDigest": "72c73308756e5c989d8634f7947b01570b033fef10739d99575de04e0c0497a5",
+      "quality": "blocked",
+      "livePipelineVerified": false,
+      "costUsd": null,
+      "remainingQuota": null
+    }
+  }
+}

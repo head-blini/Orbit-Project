@@ -1,3 +1,11 @@
+# QG 통합 · LIVE-CLI 재개 상태 (2026-10-29 · Claude Code 오케스트레이터)
+
+- 승인: `ORBIT-SCOPE-EXTENSION-2026-10-29.md`, `ORBIT-UNIFIED-BACKLOG-2026-10-29.md`. 오케스트레이션 체크포인트: `.local/orchestrator/STATE.md` (gitignored), Codex 위임 Skill `.claude/skills/codex/`.
+- INT-QG: `claude/qg-integration`을 `codex/orbit-mac-handoff-2026-10-26`에 fast-forward (`9dda330..fecf6ff`). QG-UI-01 `b5cf0bc`, QG-01 `e5d6454`, merge `57b58c1`, 서버 품질 차원 하향 전용 연결 `fecf6ff`. 사용자 미커밋 `AGENTS.md`/`CLAUDE.md` 보존.
+- 검증(현재 브랜치, 이 세션 실행): Node24.22.1 `npm run verify` exit0, **1411 tests /1409 pass /0 fail /2 skip**, 타입·빌드 통과. 병합 코드 Mock headless Chrome 화면 검사 통과(정상·차단·Mock·unknown·stale·기록 없음·코드 프로젝트).
+- LIVE-CLI: Codex `execute.code` 1회, Claude `execute.general` 1회 실제 Orbit Runtime E2E 성공. [결과](ORBIT-LIVE-CLI-2026-10-29.md). Codex actual model unknown 유지, Claude `claude-opus-5-5` native_observed. Reviewer 호출 0회. 품질 통과로 승격하지 않음.
+- 다음: CORE-LIVE (일반 작업 프롬프트의 `task-<id>.md` 지시와 승인 요구사항 충돌, Codex 모델 관측, 전체 HTTP 재시작 증명). 추가 실호출은 별도 승인. Push·main 병합·배포 없음.
+
 # Phase 5 재개 상태 (2026-10-28)
 
 - 기준 `0433529512fce809ecf213ece2471b785df63194`. [Phase5 구현·검증](ORBIT-CAPABILITY-PHASE5-2026-10-28.md), [공식 기능 행렬](ORBIT-CAPABILITY-PHASE5-CONTRACTS.md), [실제 증거](evidence/phase5-provider-validation-2026-10-28.json).

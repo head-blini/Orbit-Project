@@ -1,0 +1,370 @@
+{
+  "kind": "live_provider_validation",
+  "startedAt": "2026-10-29T00:01:36.796Z",
+  "directory": "/private/tmp/orbit-live-claude-oJWW76",
+  "provider": "claude-code",
+  "capability": "execute.general",
+  "costUsd": null,
+  "remainingQuota": null,
+  "stage": "verified",
+  "success": true,
+  "readiness": {
+    "codex": {
+      "installation": {
+        "status": "found",
+        "version": "0.165.0"
+      },
+      "authentication": "unknown",
+      "connection": "disconnected"
+    },
+    "claude": {
+      "installation": {
+        "status": "found",
+        "version": "2.1.312"
+      },
+      "authentication": {
+        "checkedAt": "2026-10-29T00:01:36.917Z",
+        "authentication": "subscription",
+        "source": "claude.auth.status",
+        "issue": null
+      }
+    },
+    "actualModel": "unknown",
+    "liveValidation": "approval_required",
+    "costUsd": null,
+    "remainingQuota": null
+  },
+  "route": {
+    "status": "recommended",
+    "capabilityId": "execute.general",
+    "runtimeId": "claude-code"
+  },
+  "ids": {
+    "projectId": "decf28ce-4ef0-4e84-962f-fa470d569041",
+    "taskId": "08187297-0ede-4a5e-bf11-17f577f6965c",
+    "routeId": "b5243435-e35e-48d3-9c87-0ea5f784f269",
+    "executionId": "40b4b829-57bd-49ca-9771-4c62122cea74",
+    "planDigest": "7e0a258da001f77abf55f4d8e382e227e65ec05cc593c7ca813f46facd8c808f",
+    "runId": "8b269460-445a-4341-9640-a38cbb3ea54c"
+  },
+  "duplicateBlocked": true,
+  "execution": {
+    "id": "40b4b829-57bd-49ca-9771-4c62122cea74",
+    "requestId": "8b24ee6c-e7f2-4f33-9736-0228e9a04ac8",
+    "projectId": "decf28ce-4ef0-4e84-962f-fa470d569041",
+    "taskId": "08187297-0ede-4a5e-bf11-17f577f6965c",
+    "routeId": "b5243435-e35e-48d3-9c87-0ea5f784f269",
+    "runtimeId": "claude-code",
+    "createdAt": "2026-10-29T00:01:37.112Z",
+    "updatedAt": "2026-10-29T00:01:37.118Z",
+    "planDigest": "7e0a258da001f77abf55f4d8e382e227e65ec05cc593c7ca813f46facd8c808f",
+    "bindingDigest": "3dff77d4c8ab704e3668d6f3223b5e3ed3ec65f61d6ab43d929c01b3cda8ff0e",
+    "dispatchRequestId": "70c0bd57-cd8d-470c-b248-dd7246f0e850",
+    "workspaceId": null,
+    "expectedAcceptanceDigest": null,
+    "baseline": {
+      "planningVersionId": "51457f54-1605-432b-841f-3f44d93408be",
+      "planningContentHash": "60f2479ce2d3ede327dd4532bc1b5a8e346c5f00e7f364c2030d3908db91cb3c"
+    },
+    "preferencesRevision": 0,
+    "adapter": {
+      "runtimeId": "claude-code",
+      "adapterId": "orbit.claude-code.task.v1",
+      "revision": 1,
+      "version": "2.1.312",
+      "compatible": true,
+      "issue": null,
+      "capabilities": [
+        "execute.general",
+        "status",
+        "result",
+        "interrupt"
+      ]
+    },
+    "status": "execution_completed",
+    "issue": null,
+    "runId": "8b269460-445a-4341-9640-a38cbb3ea54c",
+    "qualityLoopId": null,
+    "recoveryRequired": false,
+    "approvedAt": "2026-10-29T00:01:37.115Z",
+    "executionScope": "approved_task",
+    "validationSource": "runtime_evidence_required",
+    "models": {
+      "selectedModelId": null,
+      "requestedModelId": null,
+      "serverModelId": "claude-opus-5-5",
+      "actualModelId": "claude-opus-5-5",
+      "source": "native_observed"
+    },
+    "quality": null,
+    "providerEvidence": {
+      "source": "native",
+      "interface": "claude.print",
+      "executionObserved": true,
+      "responseDigest": "ea928d7fb01503eb8e66bb1b13d26ec01889b57ff7ec5e385caa6f80fb9a2dc2",
+      "quality": "not_started",
+      "livePipelineVerified": false,
+      "costUsd": null,
+      "remainingQuota": null
+    }
+  },
+  "run": {
+    "id": "8b269460-445a-4341-9640-a38cbb3ea54c",
+    "requestId": "70c0bd57-cd8d-470c-b248-dd7246f0e850",
+    "turnId": null,
+    "prompt": "작업: R1: Create result.txt in the current project directory containing exactly ORBIT_CLAUDE_GENERAL_SMOKE followed by a newline. Do not create or modify any other file.\n프로젝트 목표: Create one harmless local text file\n승인 기준: 51457f54-1605-432b-841f-3f44d93408be r1 · 60f2479ce2d3\n완료 조건:\n- result.txt contains exactly ORBIT_CLAUDE_GENERAL_SMOKE followed by a newline.\n제약:\n- Only the current project directory. No shell, network, installation, credentials, MCP, skill, hook or subagent calls.\n하지 않을 것:\n- (없음)\n승인된 결정과 이유:\n- (없음)\n결과물은 현재 폴더의 task-08187297.md 파일로 작성하세요. 다른 위치에 쓰지 마세요.\n승인 기준을 바꾸지 마세요. 기준과 충돌하거나 정보가 부족하면 결과물에 미해결 사항으로 적으세요.\n완료를 선언해도 검증은 Orbit이 완료 조건으로 따로 수행합니다.",
+    "response": "`result.txt`를 만들었고, 내용은 `ORBIT_CLAUDE_GENERAL_SMOKE` 한 줄과 줄바꿈입니다. 폴더에는 원래 `README.md`만 있었고, 이 파일은 건드리지 않았습니다.\n\n**미해결 사항:** 요청하신 `task-08187297.md`는 만들지 않았습니다. 작업 R1에 \"다른 파일은 만들거나 수정하지 말 것\"이라는 제약이 있는데, 결과물을 `task-08187297.md`로 작성하라는 지시와 서로 맞지 않습니다. 승인 기준을 지키는 쪽을 택했고, 이 보고 내용은 여기 응답에만 남깁니다. `task-08187297.md`가 꼭 필요하시면 말씀해 주세요. 바로 작성하겠습니다.",
+    "execution": "completed",
+    "verification": "not_run",
+    "createdAt": "2026-10-29T00:01:37.117Z",
+    "updatedAt": "2026-10-29T00:01:51.265Z",
+    "runtime": "claude-code",
+    "projectId": "decf28ce-4ef0-4e84-962f-fa470d569041",
+    "taskId": "08187297-0ede-4a5e-bf11-17f577f6965c",
+    "planningVersionId": "51457f54-1605-432b-841f-3f44d93408be",
+    "planningContentHash": "60f2479ce2d3ede327dd4532bc1b5a8e346c5f00e7f364c2030d3908db91cb3c",
+    "requirementLabels": [
+      "R1"
+    ]
+  },
+  "file": {
+    "exists": true,
+    "exact": true,
+    "sha256": "81e8eb3f369b296319602a0e2cf37e35e9bca307978496afc21f5c23d32faab3"
+  },
+  "projectFiles": [
+    "README.md",
+    "result.txt"
+  ],
+  "qualityPreview": {
+    "producer": {
+      "providerId": "anthropic",
+      "modelId": "claude-opus-5-5",
+      "sessionId": "af82ae4b-0e89-4c9f-81c0-fc1e7177653a",
+      "runId": "8b269460-445a-4341-9640-a38cbb3ea54c",
+      "executionId": null,
+      "source": "native_observed",
+      "evidenceSource": "native"
+    },
+    "previewDigest": "3e9854ac9157b2a15ce700b00f27b23daa9099e4fa4ad96eced51629c6366305"
+  },
+  "progressTask": {
+    "stage": "response_unverified",
+    "quality": {
+      "execution": {
+        "status": "completed",
+        "evidenceIds": [],
+        "blockers": [],
+        "nextAction": null,
+        "evidenceSource": "native"
+      },
+      "format": {
+        "status": "not_run",
+        "evidenceIds": [],
+        "blockers": [
+          "QUALITY_EVIDENCE_MISSING"
+        ],
+        "nextAction": "verify_artifacts"
+      },
+      "codeVerification": {
+        "status": "not_run",
+        "evidenceIds": [],
+        "blockers": [
+          "QUALITY_EVIDENCE_MISSING"
+        ],
+        "nextAction": "verify_code"
+      },
+      "semantic": {
+        "status": "not_run",
+        "evidenceIds": [],
+        "blockers": [
+          "QUALITY_EVIDENCE_MISSING"
+        ],
+        "nextAction": "run_quality_review"
+      },
+      "independentReview": {
+        "status": "not_run",
+        "evidenceIds": [],
+        "blockers": [
+          "QUALITY_EVIDENCE_MISSING"
+        ],
+        "nextAction": "run_independent_review"
+      },
+      "repair": {
+        "status": "not_run",
+        "evidenceIds": [],
+        "blockers": [],
+        "nextAction": null
+      },
+      "revalidation": {
+        "status": "not_run",
+        "evidenceIds": [],
+        "blockers": [],
+        "nextAction": null
+      },
+      "userApproval": {
+        "status": "not_run",
+        "evidenceIds": [],
+        "blockers": [
+          "QUALITY_APPROVAL_MISSING"
+        ],
+        "nextAction": "request_user_approval"
+      },
+      "evidence": []
+    }
+  },
+  "httpGetReadOnly": true,
+  "pipelineChecksPassed": true,
+  "durationMs": 14811,
+  "finishedAt": "2026-10-29T00:01:51.676Z",
+  "runCount": 1,
+  "events": [
+    {
+      "seq": 1,
+      "at": "2026-10-29T00:01:36.878Z",
+      "kind": "project.creation.intent",
+      "runId": null
+    },
+    {
+      "seq": 2,
+      "at": "2026-10-29T00:01:36.879Z",
+      "kind": "project.registered",
+      "runId": null
+    },
+    {
+      "seq": 3,
+      "at": "2026-10-29T00:01:36.879Z",
+      "kind": "project.creation.ready",
+      "runId": null
+    },
+    {
+      "seq": 4,
+      "at": "2026-10-29T00:01:37.100Z",
+      "kind": "planning.created",
+      "runId": null
+    },
+    {
+      "seq": 5,
+      "at": "2026-10-29T00:01:37.102Z",
+      "kind": "planning.approved",
+      "runId": null
+    },
+    {
+      "seq": 6,
+      "at": "2026-10-29T00:01:37.103Z",
+      "kind": "planning.tasks_created",
+      "runId": null
+    },
+    {
+      "seq": 7,
+      "at": "2026-10-29T00:01:37.109Z",
+      "kind": "capability.route",
+      "runId": null
+    },
+    {
+      "seq": 8,
+      "at": "2026-10-29T00:01:37.112Z",
+      "kind": "capability.plan",
+      "runId": null
+    },
+    {
+      "seq": 9,
+      "at": "2026-10-29T00:01:37.115Z",
+      "kind": "capability.execution",
+      "runId": null
+    },
+    {
+      "seq": 10,
+      "at": "2026-10-29T00:01:37.117Z",
+      "kind": "run.created",
+      "runId": "8b269460-445a-4341-9640-a38cbb3ea54c"
+    },
+    {
+      "seq": 11,
+      "at": "2026-10-29T00:01:37.117Z",
+      "kind": "run.runtime_source",
+      "runId": "8b269460-445a-4341-9640-a38cbb3ea54c"
+    },
+    {
+      "seq": 12,
+      "at": "2026-10-29T00:01:37.118Z",
+      "kind": "capability.execution",
+      "runId": "8b269460-445a-4341-9640-a38cbb3ea54c"
+    },
+    {
+      "seq": 13,
+      "at": "2026-10-29T00:01:37.642Z",
+      "kind": "run.model_configuration",
+      "runId": "8b269460-445a-4341-9640-a38cbb3ea54c"
+    },
+    {
+      "seq": 14,
+      "at": "2026-10-29T00:01:37.643Z",
+      "kind": "run.started",
+      "runId": "8b269460-445a-4341-9640-a38cbb3ea54c"
+    },
+    {
+      "seq": 15,
+      "at": "2026-10-29T00:01:43.869Z",
+      "kind": "claude.tool",
+      "runId": "8b269460-445a-4341-9640-a38cbb3ea54c"
+    },
+    {
+      "seq": 16,
+      "at": "2026-10-29T00:01:43.886Z",
+      "kind": "claude.quota",
+      "runId": "8b269460-445a-4341-9640-a38cbb3ea54c"
+    },
+    {
+      "seq": 17,
+      "at": "2026-10-29T00:01:45.983Z",
+      "kind": "claude.tool",
+      "runId": "8b269460-445a-4341-9640-a38cbb3ea54c"
+    },
+    {
+      "seq": 18,
+      "at": "2026-10-29T00:01:50.343Z",
+      "kind": "message.updated",
+      "runId": "8b269460-445a-4341-9640-a38cbb3ea54c"
+    },
+    {
+      "seq": 19,
+      "at": "2026-10-29T00:01:50.344Z",
+      "kind": "claude.quota",
+      "runId": "8b269460-445a-4341-9640-a38cbb3ea54c"
+    },
+    {
+      "seq": 20,
+      "at": "2026-10-29T00:01:51.265Z",
+      "kind": "run.runtime_outcome",
+      "runId": "8b269460-445a-4341-9640-a38cbb3ea54c"
+    },
+    {
+      "seq": 21,
+      "at": "2026-10-29T00:01:51.265Z",
+      "kind": "run.identity",
+      "runId": "8b269460-445a-4341-9640-a38cbb3ea54c"
+    },
+    {
+      "seq": 22,
+      "at": "2026-10-29T00:01:51.265Z",
+      "kind": "run.completed",
+      "runId": "8b269460-445a-4341-9640-a38cbb3ea54c"
+    }
+  ],
+  "restart": {
+    "scope": "Store reopen only",
+    "runCount": 1,
+    "status": "execution_completed",
+    "providerEvidence": {
+      "source": "native",
+      "interface": "claude.print",
+      "executionObserved": true,
+      "responseDigest": "ea928d7fb01503eb8e66bb1b13d26ec01889b57ff7ec5e385caa6f80fb9a2dc2",
+      "quality": "not_started",
+      "livePipelineVerified": false,
+      "costUsd": null,
+      "remainingQuota": null
+    }
+  }
+}
