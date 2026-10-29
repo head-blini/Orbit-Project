@@ -8,6 +8,7 @@ import {AppError} from './errors.ts';
 import type {PlanningVersion,SavedTask} from '../shared/parallel.ts';
 import type {TrackedGoal,TrackedGoalView,CreateTrackedGoalInput,SetTrackingStateInput,GoalEvidenceReference} from '../shared/goals.ts';
 import type {Run} from '../shared/types.ts';
+import {lostUnresolved} from './claude-task-service.ts';
 
 const hash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const identifier=(v:unknown):v is string=>typeof v==='string'&&/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(v);
@@ -141,10 +142,10 @@ export class GoalService {
         return {taskId:task.id,runId:current?.latestRunId??null,verifiedDone,completion};
       });
       const verifiedDone=taskCompletions.length>0&&taskCompletions.every(t=>t.verifiedDone)
-        &&plan.draft.requirements.length>0&&plan.draft.requirements.every(r=>linkedTasks.some(t=>t.requirementLabels.includes(r.label)))&&!recoveryRequired&&!runs.some(r=>r.execution==='lost');
+        &&plan.draft.requirements.length>0&&plan.draft.requirements.every(r=>linkedTasks.some(t=>t.requirementLabels.includes(r.label)))&&!recoveryRequired&&!runs.some(r=>lostUnresolved(this.store,r));
       const runIds=new Set(runs.map(run=>run.id));
       const deliverables=artifacts.filter(a=>a.taskId&&taskIds.has(a.taskId)&&a.runId&&runIds.has(a.runId));
-      const blockers=verifiedDone?[]:['ACCEPTANCE_NOT_QUALIFIED'];if(!planCurrent)blockers.push('PLAN_NOT_CURRENT');if(runs.some(r=>r.execution==='lost'))blockers.push('RUN_RECOVERY_UNRESOLVED');
+      const blockers=verifiedDone?[]:['ACCEPTANCE_NOT_QUALIFIED'];if(!planCurrent)blockers.push('PLAN_NOT_CURRENT');if(runs.some(r=>lostUnresolved(this.store,r)))blockers.push('RUN_RECOVERY_UNRESOLVED');
       if(recoveryRequired)blockers.push('EVIDENCE_RECOVERY_UNRESOLVED');
       return {goal,title:plan.draft.title,objective:plan.draft.goal,planCurrent,blockers,verifiedDone,taskCompletions,deliverables,
         evidenceScope:'기존 기록은 참고 증거입니다. 현재 소스·승인된 수용 테스트·실행 환경의 자격 검증을 뜻하지 않습니다. 요구사항별 최대 100개 참조를 표시합니다.',

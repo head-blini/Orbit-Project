@@ -189,6 +189,8 @@ export class ClaudeCodeRun {
       });
     });
   }
+  /** True while a spawned child is held without an observed close, including after an unobserved-exit outcome. */
+  owned():boolean{return this.child!==null;}
   /** Sends an interrupt. Confirmation comes only from the observed process exit. */
   interrupt():'requested'|'not_running'{
     if(this.preflighting){this.interruptRequested=true;return 'requested';}
