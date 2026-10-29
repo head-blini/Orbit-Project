@@ -224,15 +224,16 @@ test('graceful close requests interruption, waits for exit and does not let Code
   }finally{await f.close();}
 });
 
-test('Claude loss quarantines only its task while the legacy Codex recovery barrier remains intact',async()=>{
+test('Claude loss blocks other tasks in the same project folder while the legacy Codex recovery barrier remains intact',async()=>{
   const f=claudeFixture();try{
     const {task}=f.plan(),run=await f.controller.submitTask(f.project.id,task.id,{requestId:randomUUID()});
     f.runners[0].finish(outcome('unknown'));await tick();assert.equal(f.store.getRun(run.id)!.execution,'lost');
     assert.doesNotThrow(()=>f.controller.assertExecutionAvailable());
     assert.equal(f.controller.snapshot().soloRecoveryRequired,false);
     await assert.rejects(f.controller.submitTask(f.project.id,task.id,{requestId:randomUUID()}),error('SOLO_RECOVERY_REQUIRED'));
-    const other=f.plan();const second=await f.controller.submitTask(f.project.id,other.task.id,{requestId:randomUUID()});
-    assert.equal(second.execution,'starting');assert.equal(f.runners.length,2);
+    const other=f.plan();
+    await assert.rejects(f.controller.submitTask(f.project.id,other.task.id,{requestId:randomUUID()}),error('SOLO_RECOVERY_REQUIRED'));
+    assert.equal(f.runners.length,1);
     const legacy=f.store.createRun(randomUUID(),'fixture','legacy');f.store.updateRun(legacy.id,{execution:'lost'},'run.lost');
     assert.throws(()=>f.controller.assertExecutionAvailable(),error('SOLO_RECOVERY_REQUIRED'));
     assert.equal(f.controller.snapshot().soloRecoveryRequired,true);

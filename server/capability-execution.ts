@@ -1,3 +1,4 @@
+import {assertWorkerOwnership,type WorkerDispatchContext} from './worker-scheduler.ts';
 import {providerExecutionEvidence} from './provider-evidence.ts';
 import {createHash,randomUUID} from 'node:crypto';
 import type {Store} from './store.ts';
@@ -64,7 +65,7 @@ export class CapabilityExecutionService {
  }
  records(projectId:string){this.routing.records(projectId);return this.store.db.prepare('SELECT id FROM capability_executions WHERE project_id=? ORDER BY rowid DESC LIMIT 200').all(projectId).map(row=>this.record(projectId,String(row.id)));}
  record(projectId:string,id:string){return readCapabilityExecution(this.store,projectId,id);}
- private binding(projectId:string,input:CapabilityPlanInput){
+ private binding(projectId:string,input:CapabilityPlanInput,worker=false){
   const route=this.routing.records(projectId).find(r=>r.id===input.routeId);
   if(!route||route.status!=='recommended'||route.intent!=='execution'||!route.runtimeId)fail('ROUTE_NOT_EXECUTABLE');
   const brief=this.studio.execution(projectId,route.taskId),prefs=this.prefs.read(projectId),registry=this.registry();
@@ -77,7 +78,7 @@ export class CapabilityExecutionService {
   const project=this.store.projects().find(p=>p.id===projectId)!;
   if(project.kind==='code'){
    if(!input.workspaceId)fail('WORKSPACE_REQUIRED');
-   const preview=this.controller.taskVerificationPreview(projectId,route.taskId,input.workspaceId!);
+   const preview=this.controller.taskVerificationPreview(projectId,route.taskId,input.workspaceId!,worker);
    if(preview?.digest!==input.expectedAcceptanceDigest)fail('ACCEPTANCE_PREVIEW_STALE');
   }else if(input.workspaceId!==undefined||input.expectedAcceptanceDigest!==undefined)fail('INVALID_FIELDS');
   return {route,adapter,bindingDigest:hash({brief,prefs,registry,adapter,workspaceId:input.workspaceId??null,acceptance:input.expectedAcceptanceDigest??null})};
@@ -104,23 +105,46 @@ export class CapabilityExecutionService {
    executionScope:'approved_task',validationSource:'runtime_evidence_required',models:unknownModels(),quality:null};
   this.store.transaction(()=>{this.store.db.prepare('INSERT INTO capability_executions VALUES(?,?,?,?,?)').run(id,projectId,input.requestId,key,JSON.stringify(record));this.store.append('capability.plan',null,{projectId,taskId:record.taskId,executionId:id});});return record;
  }
- async start(projectId:string,id:string,input:CapabilityExecutionApproval){
+ assertWorkerPlan(projectId:string,id:string,approval:CapabilityExecutionApproval,original?:CapabilityExecutionRecord){
+  const r=original??this.raw(projectId,id);
+  if(approval.confirmed!==true||approval.expectedPlanDigest!==r.planDigest)fail('PLAN_CHANGED');
+  const current=this.binding(projectId,{requestId:r.requestId,routeId:r.routeId,...(r.workspaceId?{workspaceId:r.workspaceId}:{}),...(r.expectedAcceptanceDigest?{expectedAcceptanceDigest:r.expectedAcceptanceDigest}:{})},true);
+  if(current.bindingDigest!==r.bindingDigest)fail('PLAN_CHANGED');
+ }
+ workerTerminalReceipt(projectId:string,id:string,reservationId:string){
+  const r=this.raw(projectId,id) as CapabilityExecutionRecord&{workerReservationId?:string};
+  return r.workerReservationId===reservationId?terminalDispatch(this.store,r):null;
+ }
+ async start(projectId:string,id:string,input:CapabilityExecutionApproval,worker?:WorkerDispatchContext){
   if(!input||typeof input!=='object'||Array.isArray(input))throw new AppError('INVALID_FIELDS',400);
   exact(input as unknown as Record<string,unknown>,['confirmed','expectedPlanDigest']);
   if(input.confirmed!==true)fail('EXECUTION_CONFIRMATION_REQUIRED');
-  const r=this.raw(projectId,id);if(input.expectedPlanDigest!==r.planDigest)fail('PLAN_CHANGED');
+  const r=this.raw(projectId,id) as CapabilityExecutionRecord&{workerReservationId?:string};if(input.expectedPlanDigest!==r.planDigest)fail('PLAN_CHANGED');
   if(r.status!=='awaiting_approval')return this.record(projectId,id);
-  const submit={requestId:r.dispatchRequestId,...(r.workspaceId?{workspaceId:r.workspaceId}:{}),...(r.expectedAcceptanceDigest?{expectedAcceptanceDigest:r.expectedAcceptanceDigest}:{})};
-  const current=this.binding(projectId,{requestId:r.requestId,routeId:r.routeId,...(r.workspaceId?{workspaceId:r.workspaceId}:{}),...(r.expectedAcceptanceDigest?{expectedAcceptanceDigest:r.expectedAcceptanceDigest}:{})});
+  assertWorkerOwnership(this.store,projectId,r.taskId,worker);
+  let submit={requestId:r.dispatchRequestId,...(r.workspaceId?{workspaceId:r.workspaceId}:{}),...(r.expectedAcceptanceDigest?{expectedAcceptanceDigest:r.expectedAcceptanceDigest}:{})};
+  const current=this.binding(projectId,{requestId:r.requestId,routeId:r.routeId,...(r.workspaceId?{workspaceId:r.workspaceId}:{}),...(r.expectedAcceptanceDigest?{expectedAcceptanceDigest:r.expectedAcceptanceDigest}:{})},!!worker);
   if(current.bindingDigest!==r.bindingDigest)fail('PLAN_CHANGED');
   if(this.taskBlocked(projectId,r.taskId,id))fail('EXECUTION_RECOVERY_REQUIRED');
+  if(worker){worker.beforeDispatch();if(worker.dispatchRequestId!==r.dispatchRequestId)fail('WORKER_REQUEST_MISMATCH');r.workerReservationId=worker.fence.reservationId;}
   r.status='dispatching';r.approvedAt=new Date().toISOString();this.save(r);
   try{
    // Store observers can change policy synchronously; recheck immediately before dispatch.
-   if(this.binding(projectId,{requestId:r.requestId,routeId:r.routeId,...(r.workspaceId?{workspaceId:r.workspaceId}:{}),...(r.expectedAcceptanceDigest?{expectedAcceptanceDigest:r.expectedAcceptanceDigest}:{})}).bindingDigest!==r.bindingDigest)fail('PLAN_CHANGED');
+   if(this.binding(projectId,{requestId:r.requestId,routeId:r.routeId,...(r.workspaceId?{workspaceId:r.workspaceId}:{}),...(r.expectedAcceptanceDigest?{expectedAcceptanceDigest:r.expectedAcceptanceDigest}:{})},!!worker).bindingDigest!==r.bindingDigest)fail('PLAN_CHANGED');
   }catch{r.status='failed';r.issue='EXECUTION_PREFLIGHT_CHANGED';this.save(r);return this.record(projectId,id);}
   try{
-   const run=await this.adapters.dispatch(r.runtimeId,projectId,r.taskId,submit);
+   if(worker){
+    worker.beforeDispatch();
+    if(worker.space.kind==='code'){
+     await this.controller.prepareWorkerWorkspace(worker);
+     worker.beforeDispatch();
+     r.workspaceId=worker.space.workspaceId;
+     r.expectedAcceptanceDigest=this.controller.taskVerificationPreview(projectId,r.taskId,r.workspaceId!)?.digest??null;
+     submit={requestId:r.dispatchRequestId,workspaceId:r.workspaceId!,...(r.expectedAcceptanceDigest?{expectedAcceptanceDigest:r.expectedAcceptanceDigest}:{})};
+     this.save(r);
+    }
+   }
+   const run=await this.adapters.dispatch(r.runtimeId,projectId,r.taskId,submit,worker);
    const receipt=this.store.findRequest(r.dispatchRequestId)?.run;
    if(!receipt||receipt.id!==run.id||receipt.taskId!==r.taskId||receipt.planningVersionId!==r.baseline.planningVersionId||receipt.planningContentHash!==r.baseline.planningContentHash)fail('EXECUTION_RECEIPT_MISMATCH');
    r.runId=receipt.id;r.status='running';this.save(r);

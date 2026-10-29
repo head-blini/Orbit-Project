@@ -1,3 +1,4 @@
+import {assertWorkerOwnership,type WorkerDispatchContext} from './worker-scheduler.ts';
 import {SubscriptionUsageStore} from './subscription-usage.ts';
 import {normalizeClaudeSubscriptionUsage} from './usage.ts';
 import {createHash} from 'node:crypto';
@@ -32,8 +33,8 @@ export class ClaudeTaskService {
   private active=new Map<string,Active>();private latestQuota:Quota|null=null;private closing=false;
   constructor(store:Store,projects?:Projects,options:ClaudeTaskServiceOptions={},subscriptionUsage=new SubscriptionUsageStore(store)){this.subscriptionUsage=subscriptionUsage;this.store=store;this.projects=projects;this.options=options;}
   quota():Quota|null{return this.latestQuota?structuredClone(this.latestQuota):null;}
-  submit(projectId:string,taskId:string,requestId:string):Run {
-    return this.dispatch(projectId,taskId,requestId);
+  submit(projectId:string,taskId:string,requestId:string,worker?:WorkerDispatchContext):Run {
+    return this.dispatch(projectId,taskId,requestId,undefined,worker);
   }
   /** Internal Quality Loop repair path; callers retain the Controller's global execution gates. */
   repair(sourceRunId:string,requestId:string,prompt:string):Run {
@@ -42,7 +43,7 @@ export class ClaudeTaskService {
     if(typeof prompt!=='string'||!prompt.trim()||prompt.length>32000)throw new AppError('INVALID_REPAIR_INPUT',400);
     return this.dispatch(source.projectId,source.taskId,requestId,{source,prompt});
   }
-  private dispatch(projectId:string,taskId:string,requestId:string,repair?:{source:Run;prompt:string}):Run {
+  private dispatch(projectId:string,taskId:string,requestId:string,repair?:{source:Run;prompt:string},worker?:WorkerDispatchContext):Run {
     if(typeof requestId!=='string'||!/^[a-zA-Z0-9-]{8,80}$/.test(requestId))throw new AppError('INVALID_REQUEST_ID',400);
     const repairDigest=repair?createHash('sha256').update(JSON.stringify({sourceRunId:repair.source.id,prompt:repair.prompt})).digest('hex'):null;
     const prior=this.store.findRequest(requestId);
@@ -50,10 +51,16 @@ export class ClaudeTaskService {
       if(prior.run.runtime!=='claude-code'||prior.run.projectId!==projectId||prior.run.taskId!==taskId||repairDigest&&prior.digest!==repairDigest)throw new AppError('IDEMPOTENCY_CONFLICT',409);
       return prior.run;
     }
+    assertWorkerOwnership(this.store,projectId,taskId,worker);
     const runs=this.store.runs().filter(run=>run.taskId===taskId);
     // One writer per project folder: tasks of the same general project run one at a time.
-    if(runs.some(run=>!terminal(run.execution))||this.store.runs().some(run=>run.runtime==='claude-code'&&run.projectId===projectId&&!terminal(run.execution)))throw new AppError('RUN_ACTIVE',409);
-    if(runs.some(run=>run.execution==='lost'))throw new AppError('SOLO_RECOVERY_REQUIRED',409);
+    // Lost is not proof of process exit. Only verified PW-3 spaces narrow folder ownership.
+    const isolated=(run:Run)=>!!this.store.db.prepare("SELECT 1 FROM events WHERE run_id=? AND kind='run.worker_space'").get(run.id);
+    const conflicts=this.store.runs().filter(run=>run.runtime==='claude-code'&&run.projectId===projectId&&!isolated(run));
+    // Worker spaces live under the project folder, so a non-isolated run there can still reach them: it blocks workers too.
+    if(runs.some(run=>!terminal(run.execution))||conflicts.some(run=>!terminal(run.execution)))throw new AppError('RUN_ACTIVE',409);
+    if(runs.some(run=>run.execution==='lost')||conflicts.some(run=>run.execution==='lost'))throw new AppError('SOLO_RECOVERY_REQUIRED',409);
+    worker?.beforeDispatch();
     if(this.closing)throw new AppError('SESSION_BUSY',409);
     if(!this.projects)throw new AppError('PROJECT_CREATION_UNAVAILABLE',409);
     const project=this.projects.generalProject(projectId),studio=new Studio(this.store);
@@ -67,19 +74,22 @@ export class ClaudeTaskService {
     if(denial){this.store.append('guardrail.denied',null,{providerId:'claude-code',code:denial});throw new AppError(denial,400);}
     const prompt=claudeTaskPrompt({title:task.title,goal:handoff.goal,baseline:handoff.baseline,
       acceptanceCriteria:handoff.requirements.flatMap(requirement=>requirement.acceptanceCriteria),
-      constraints:handoff.constraints,nonGoals:handoff.nonGoals,decisions:handoff.decisions,deliverable:`task-${taskId.slice(0,8)}.md`,materials:listMaterials(project.path).map(item=>item.path)})+(repair?'\n품질 검증에서 실패한 항목만 수정하세요. 기존 통과 항목과 승인 기준은 보존하세요.\n'+repair.prompt:'');
+      constraints:handoff.constraints,nonGoals:handoff.nonGoals,decisions:handoff.decisions,deliverable:`${worker?'output/':''}task-${taskId.slice(0,8)}.md`,materials:listMaterials(worker?.space.path??project.path).map(item=>item.path)})+(repair?'\n품질 검증에서 실패한 항목만 수정하세요. 기존 통과 항목과 승인 기준은 보존하세요.\n'+repair.prompt:'');
     const executable=(this.options.findExecutable??findClaude)();
     // No await between ownership checks, durable intent and launch.
+    worker?.beforeDispatch();
     const run=this.store.createRun(requestId,repairDigest??createHash('sha256').update(prompt).digest('hex'),prompt,undefined,
       {runtime:'claude-code',projectId,taskId,planningVersionId:brief.planningVersionId,planningContentHash:brief.planningContentHash,requirementLabels:brief.requirementLabels});
     let runner:Runner;
     try{
+      if(worker)this.store.append('run.worker_space',run.id,{reservationId:worker.fence.reservationId,path:worker.space.path});
       this.store.append('run.runtime_source',run.id,{source:this.options.runnerFactory?'mock':'native',interface:'claude.print'});
       if(repair)this.store.append('run.repair_source',run.id,{sourceRunId:repair.source.id,planningVersionId:brief.planningVersionId,planningContentHash:brief.planningContentHash});
       // Revalidate after synchronous Store observers, immediately before launch.
       this.projects.generalProject(projectId);
-      runner=(this.options.runnerFactory??(options=>new ClaudeCodeRun(options)))({executable,cwd:project.path,mode:'write',env:claudeEnv(),beforeDispatch:()=>{
+      runner=(this.options.runnerFactory??(options=>new ClaudeCodeRun(options)))({executable,cwd:worker?.space.path??project.path,mode:'write',env:claudeEnv(),beforeDispatch:()=>{
         this.projects!.generalProject(projectId);
+        worker?.beforeDispatch();
         if(this.closing||new ProjectAiPreferencesService(this.store).read(projectId).execution!=='claude-code'||JSON.stringify(studio.execution(projectId,taskId))!==JSON.stringify(brief))throw new AppError('LAUNCH_CONTEXT_CHANGED',409);
       }});
     }catch{
