@@ -45,8 +45,9 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
   const taskGraphs=new TaskGraphService(controller.store);
   const progress=new ProjectProgressService(controller.store,studio,{deliverables:id=>controller.deliverables(id),verification:(workspaceId,runId)=>controller.verification.view(workspaceId,runId)});
   const planningHandoff=new PlanningHandoffService(controller.store,(workspaceId,runId)=>controller.verification.view(workspaceId,runId),id=>controller.workspaceDiff(id));
-  const nativeProbe=options.nativeProbe??createNativeProbeService();
-  const claudeAuthentication=options.claudeAuthentication??createClaudeAuthenticationService();
+  // Share the Controller's caches so registry readiness and the readiness API never diverge.
+  const nativeProbe=options.nativeProbe??controller.nativeProbe;
+  const claudeAuthentication=options.claudeAuthentication??controller.claudeAuthentication;
   const nativeReadiness=():NativeReadinessReport=>{
     const installation=nativeProbe.get(),connection=controller.snapshot().provider;
     return {codex:{installation:installation?.codex??{status:'unknown',version:null},authentication:connection==='ready'?'confirmed':'unknown',connection},
@@ -144,6 +145,7 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
         json(res,200,controller.store.soloOperation(soloOperation[1]));return;
       }
       const studioRoute=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/(plans|artifacts|tasks)(?:\/([a-f0-9-]{36})\/(revisions|approve|task-drafts|history|diff|replan))?$/);
+      const registryRoute=url.pathname.match(/^\/api\/registry(?:\/entries(?:\/([A-Za-z0-9][A-Za-z0-9_-]{0,63})(?:\/(update|disable|validate))?)?)?$/);
       const taskGraphRoute=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/task-graphs\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})(?:\/(revisions|history|state))?$/);
       const goalRoute=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/goals(?:\/([a-f0-9-]{36})\/(state|history))?$/);
       const appPreviewRoute=url.pathname.match(/^\/api\/workspaces\/([a-f0-9-]{36})\/app-preview$/);
@@ -192,6 +194,22 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
         if(appPreviewRoute){
           if(url.search)throw new AppError('INVALID_FIELDS',400);exact(data,['entryPath','expectedSourceDigest']);controller.assertAppPreviewAvailable();
           json(res,200,appPreview.create(appPreviewRoute[1],data as unknown as Parameters<AppPreviewHost['create']>[1]));return;
+        }
+        if(registryRoute&&url.pathname!=='/api/registry'){
+          if(url.search)throw new AppError('INVALID_FIELDS',400);
+          const [,entryId,action]=registryRoute;
+          if(!entryId){json(res,200,controller.modelRegistry.create(data));return;}
+          if(action==='update'){json(res,200,controller.modelRegistry.update(entryId,data));return;}
+          if(action==='disable'){json(res,200,controller.modelRegistry.disable(entryId,data));return;}
+          if(action==='validate'){
+            // The browser names a project; only the server maps it to a path, so a client path is never trusted.
+            const {projectId,...rest}=data;
+            if(rest.kind!=='connection'){if(projectId!==undefined)throw new AppError('INVALID_FIELDS',400);json(res,200,await controller.modelRegistry.validate(entryId,rest));return;}
+            const project=typeof projectId==='string'?controller.store.projects().find(item=>item.id===projectId):undefined;
+            if(!project)throw new AppError('PROJECT_NOT_FOUND',404);
+            json(res,200,await controller.modelRegistry.validate(entryId,{...rest,projectPath:project.path}));return;
+          }
+          throw new AppError('NOT_FOUND',404);
         }
         if(taskGraphRoute){
           // Graph editing is not planning approval or execution authorization; the path owns the planning version.
@@ -430,6 +448,12 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
         const general=controller.store.projects().some(project=>project.id===progressRoute[1]&&project.kind==='general');
         json(res,200,progress.read(progressRoute[1],general?{recoveryRequired:!!state.soloRecoveryRequired,quota:quotaFromClaudeWindows(controller.claudeQuota())}
           :{provider:state.provider,recoveryRequired:!!state.soloRecoveryRequired,quota:quotaSignal(controller.usageSnapshot())}));return;
+      }
+      if(req.method==='GET'&&registryRoute&&!registryRoute[2]){
+        if(url.search)throw new AppError('INVALID_FIELDS',400);
+        if(url.pathname==='/api/registry'){json(res,200,controller.modelRegistry.list());return;}
+        if(!registryRoute[1])throw new AppError('NOT_FOUND',404);
+        json(res,200,{entry:controller.modelRegistry.get(registryRoute[1]),validations:controller.modelRegistry.validations(registryRoute[1])});return;
       }
       if(req.method==='GET'&&taskGraphRoute){
         const [,projectId,versionId,action]=taskGraphRoute,keys=[...url.searchParams.keys()],raw=url.searchParams.get('revision');
