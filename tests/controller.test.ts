@@ -262,3 +262,19 @@ test('a late interrupt failure for completed A cannot mark new run B lost',async
   assert.equal(store.getRun(b.id)?.execution,'running');assert.equal(c.snapshot().provider,'ready');
   await c.close();store.close();
 });
+
+for(const status of ['failed','unexpected'])test(`Codex ${status} completion persists only a normalized failure reason`,async()=>{
+  const {c,rpc,store}=setup();try{
+    await c.connect();const run=await c.submit({requestId:'failure-privacy-'+status,prompt:'Fixture'});
+    const raw='Provider failure at /private/customer/report.txt fake-token-ABC123456789';
+    rpc.emit('notification',{method:'item/completed',params:{threadId:'thread-fixture',turnId:'turn-fixture',item:{id:'failure-message',type:'agentMessage',text:raw}}});
+    rpc.emit('notification',{method:'turn/completed',params:{threadId:'thread-fixture',turn:{id:'turn-fixture',status,error:{message:raw}}}});
+    assert.equal(store.getRun(run.id)!.execution,'failed');
+    assert.equal(store.getRun(run.id)!.response,'RUNTIME_ERROR');
+    const row=store.db.prepare("SELECT data FROM events WHERE run_id=? AND kind='run.failed'").get(run.id)!;
+    assert.deepEqual(JSON.parse(String(row.data)),{reason:'RUNTIME_ERROR'});
+    assert.equal(c.snapshot().runs.find(r=>r.id===run.id)!.response,'RUNTIME_ERROR');
+    assert.ok(!JSON.stringify(c.snapshot()).includes('/private/customer'));
+    assert.ok(!JSON.stringify(c.snapshot()).includes('fake-token-ABC123456789'));
+  }finally{await c.close();store.close();}
+});

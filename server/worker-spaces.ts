@@ -213,6 +213,27 @@ export class WorkerSpaces {
       s.identity=pin(s.path);this.scopes(s,r);s.state='ready';this.save(s);return s;
     });
   }
+  /** Compare read-only copies with server-pinned inputs, never caller-supplied manifests. */
+  assertInputs(token:WorkerFence):void {
+    const r=this.owned(token),s=this.read(r.reservationId);if(!s)fail('NOT_FOUND');
+    if(s.kind==='code')return;this.check(s,r);
+    const project=this.projects.generalProject(s.projectId),source=join(project.path,'inputs');
+    const expected=new Map<string,string>();
+    if(existsSync(source))for(const file of snapshot(source).files){
+      if(file.presence!=='present')fail('INPUT_CHANGED');expected.set(file.path,hash(file.bytes));
+    }
+    const row=this.store.db.prepare('SELECT body FROM worker_space_handoffs WHERE attempt_id=?').get(r.attempt.id);
+    const handoff:WorkerHandoff|null=row?JSON.parse(String(row.body)).handoff:null;
+    const inherited=new Map<string,string>();
+    for(const file of handoff?.predecessors.flatMap(p=>p.files)??[]){
+      if(!file.path.startsWith('output/')||expected.has(file.path)||(inherited.has(file.path)&&inherited.get(file.path)!==file.sha256))fail('INPUT_CHANGED');
+      inherited.set(file.path,file.sha256);
+    }
+    for(const [path,digest] of inherited)expected.set(path,digest);
+    if(s.inputManifest.length!==expected.size||new Set(s.inputManifest.map(f=>f.path)).size!==expected.size
+      ||s.inputManifest.some(f=>expected.get(f.path)!==f.sha256)
+      ||inputDigest(join(s.path,'inputs'))!==s.inputDigest)fail('INPUT_CHANGED');
+  }
   private terminal(token:WorkerFence){const r=this.owned(token);if(!['terminal_confirmed','released'].includes(r.state))fail('TERMINAL_REQUIRED');return r;}
   finish(token:WorkerFence):WorkerSpaceManifest {
     return this.store.transaction(()=>{

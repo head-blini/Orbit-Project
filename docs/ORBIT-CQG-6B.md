@@ -89,6 +89,8 @@ interface WorkerHandoff {
 
 ### general dependent dispatch through the controller is blocked by the batch input hash gate; needs a user-approved contract change
 
+**2026-10-30 후속:** FE5-CQG6BCTL 승인 작업에서 이 차단을 수정했다. 아래는 수정 전 기록이다. 새 계약·검증 결과는 [FE5-CQG6BCTL 작업 기록](ORBIT-FE5-CQG6BCTL.md)을 참고한다.
+
 정확한 위치는 `server/controller.ts:801`이다. 저장된 HTTP batch의 `beforeDispatch` wrapper는 프로젝트 입력과 Worker 공간 입력을 모두 원래 batch 입력 hash와 비교한다. 비교 구현은 `server/controller.ts:329`, 전체 inputs inventory는 `server/controller.ts:316`이다.
 
 재현: 입력이 비어 있는 일반 프로젝트에서 batch/plan을 승인한다. 직접 선행 작업의 `output/report.txt`가 applied/released이고 서버 완료 reader가 verifiedDone을 반환한다. Scheduler가 dependent 공간의 `inputs/output/report.txt`를 생성한다. 이 추가 입력 때문에 Controller가 `WORKER_INPUTS_CHANGED`로 거부하고 runtime dispatch는 0회이다. 인계 파일은 inputManifest와 inputDigest에 그대로 남는다.

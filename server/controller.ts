@@ -407,9 +407,9 @@ export class Controller {
     this.store.db.prepare('INSERT INTO worker_http_batches VALUES(?,?,?,?)').run(batch.id,input.requestId,digest,JSON.stringify({batch,executions,claims} satisfies StoredWorkerBatch));
     return this.workerBatch(projectId,batch.id);
   }
-  private workerInputHashes(projectId:string,root?:string):ApprovedExecutionBatch['inputArtifactHashes'] {
+  private workerInputHashes(projectId:string):ApprovedExecutionBatch['inputArtifactHashes'] {
     const project=this.store.projects().find(p=>p.id===projectId)!;if(project.kind==='code')return [];
-    const path=root??project.path,files:{path:string;mode:string}[]=[];let count=0;
+    const path=project.path,files:{path:string;mode:string}[]=[];let count=0;
     const walk=(logical:string)=>{
       if(++count>2000)throw new AppError('WORKER_INPUTS_UNAVAILABLE',409);
       resolveWorkerPath(path,logical);
@@ -419,8 +419,8 @@ export class Controller {
     };
     walk('inputs');return [{id:'inputs',hash:fingerprintWorkspace(path,'0'.repeat(40),files)}];
   }
-  private assertWorkerInputs(batch:ApprovedExecutionBatch,root?:string){
-    if(JSON.stringify(this.workerInputHashes(batch.projectId,root))!==JSON.stringify(batch.inputArtifactHashes))throw new AppError('WORKER_INPUTS_CHANGED',409);
+  private assertWorkerInputs(batch:ApprovedExecutionBatch){
+    if(JSON.stringify(this.workerInputHashes(batch.projectId))!==JSON.stringify(batch.inputArtifactHashes))throw new AppError('WORKER_INPUTS_CHANGED',409);
   }
   private workerClaims(batch:ApprovedExecutionBatch,plan:CapabilityExecutionRecord):WorkerResourceClaim[]{
     const project=this.store.projects().find(p=>p.id===batch.projectId)!;
@@ -929,7 +929,14 @@ export class Controller {
     if(worker&&this.workerScheduler){
       const reservation=this.workerScheduler.read(worker.fence.reservationId);
       const row=this.store.db.prepare('SELECT id FROM worker_http_batches WHERE id=?').get(reservation.batch.id);
-      if(row){const original=worker;worker={...original,beforeDispatch:()=>{original.beforeDispatch();this.assertWorkerInputs(reservation.batch);this.assertWorkerInputs(reservation.batch,original.space.path);}};}
+      if(row){
+        const original=worker,spaces=new WorkerSpaces(this.store,this.projects!,new ParallelWorkerService(this.store));
+        worker={...original,beforeDispatch:()=>{
+          this.assertWorkerInputs(reservation.batch);
+          try{spaces.assertInputs(reservation);}catch{throw new AppError('WORKER_INPUTS_CHANGED',409);}
+          original.beforeDispatch();
+        }};
+      }
     }
     this.qualityAvailable();assertWorkerOwnership(this.store,projectId,taskId,worker);
     if(this.store.projects().some(project=>project.id===projectId&&project.kind==='general')&&!Object.hasOwn(input,'workspaceId')){
@@ -1015,7 +1022,7 @@ export class Controller {
       if(error instanceof AppError&&error.message==='LAUNCH_CONTEXT_CHANGED'){
         this.clearDeadline();
         this.store.append('run.launch_refused',run.id,{code:'LAUNCH_CONTEXT_CHANGED'});
-        this.store.updateRun(run.id,{execution:'failed'},'run.failed');
+        this.store.updateRun(run.id,{execution:'failed',response:'LAUNCH_CONTEXT_CHANGED'},'run.failed',{reason:'LAUNCH_CONTEXT_CHANGED'});
         this.telemetry.finish(run.id,false);this.modelTracker.finish(run.id,'failed');
         this.retireToolSession(run.id);
         throw error;
@@ -1064,7 +1071,9 @@ export class Controller {
     }
     if(e.method==='turn/completed'){
       const execution:Execution=['completed','interrupted','failed'].includes(p.turn?.status)?p.turn.status:'failed';
-      this.store.updateRun(r.id,{execution,response:this.safeOutput(true),...(typeof turnId==='string'?{turnId}:{})},'run.'+execution);this.clearDeadline();
+      // Failed output is untrusted provider text; persist only the existing generic failure code.
+      const reason=execution==='failed'?'RUNTIME_ERROR':null;
+      this.store.updateRun(r.id,{execution,response:reason??this.safeOutput(true),...(typeof turnId==='string'?{turnId}:{})},'run.'+execution,reason?{reason}:undefined);this.clearDeadline();
       this.telemetry.finish(r.id);
       this.modelTracker.finish(r.id,execution==='completed'?'completed':execution==='interrupted'?'interrupted':'failed');
       this.retireToolSession(r.id);

@@ -8,12 +8,11 @@
  * below; they are NOT live evidence. Local commands run only in disposable projects.
  * Live CLI/model identity, independent semantic review, browser interactions and full
  * A16/AX07 acceptance still require separately approved live runs. No listener/network.
- * Observed product gaps (asserted, not patched): uploaded/general inherited inputs can
- * fail WORKER_INPUTS_CHANGED (CQG-6B-CTL); general candidate semantic evidence is required
+ * CQG-6B-CTL admits unchanged uploaded material plus server-pinned predecessor inputs.
+ * Observed product gaps (asserted, not patched): general candidate semantic evidence is required
  * (GENERAL-ACCEPT-B); refreshed execution approval is required after PLAN_CHANGED;
  * code material/download APIs require GENERAL_PROJECT_REQUIRED;
  * General integrated versions have no producing run/task, so P6 omits their references.
- * No-upload general continuations are separate scenarios, not a passed material journey.
  * Local command categories are a synthetic host policy, not production lint/build/E2E proof.
  */
 import test from 'node:test';
@@ -238,23 +237,23 @@ for(const semantic of [false,true])test(`P8 general: native-shaped review fixtur
   }finally{await f.close();}
 });
 
-test('P8 general uploaded material: Controller input-hash admission gap never dispatches or fabricates success',async t=>{
+test('P8 general uploaded material: read-only worker copies preserve approved input bytes',async()=>{
   const f=await productFixture('general');try{
     const flow=await planAndSubmit(f,3,true),result=await views(f,flow);
-    assert.equal(f.runners.length,0);assert.equal(f.store.runs().length,0);assert.equal(result.queue.items.length,0);
-    assert.ok(result.workers.reservations.every((r:any)=>r.state==='released'&&r.evidence.kind==='not_dispatched'));
-    assert.ok(result.progress.tasks.every(task=>!task.completion!.verifiedDone));
+    // The batch pins original files; worker copies intentionally change permissions to read-only.
+    assert.equal(f.runners.length,2);assert.equal(f.store.runs().length,2);assert.equal(result.queue.items.length,0);
+    assert.ok(result.workers.reservations.every((r:any)=>r.state==='running'));
     const executions=await f.get(f.base+'/capability-executions');
-    assert.equal(executions.records.filter((e:any)=>e.issue==='EXECUTION_DISPATCH_UNCONFIRMED').length,2);
-    assert.deepEqual(f.dispatchErrors,['WORKER_INPUTS_CHANGED','WORKER_INPUTS_CHANGED']);
-    t.diagnostic('uploaded material gap: WORKER_INPUTS_CHANGED before native dispatch');
+    assert.equal(executions.records.filter((e:any)=>e.issue==='EXECUTION_DISPATCH_UNCONFIRMED').length,0);
+    assert.ok(result.progress.tasks.every(task=>!task.completion!.verifiedDone));
+    assert.deepEqual(f.dispatchErrors,[]);
     assert.equal((await f.get(f.base+'/goals'))[0].verifiedDone,false);
   }finally{await f.close();}
 });
 
-test('P8 general dependent: applied native-shaped predecessor fixtures do not bypass Controller input hashes',async t=>{
+test('P8 general dependent: uploaded material and pinned predecessor inputs pass Controller admission',async t=>{
   const f=await productFixture('general',true);try{
-    const flow=await planAndSubmit(f,3),running=await views(f,flow);
+    const flow=await planAndSubmit(f,3,true),running=await views(f,flow);
     assert.equal(f.runners.length,2);
     for(let i=0;i<2;i++)writeFileSync(join(running.workers.spaces[i].path,`output/report-${i+1}.md`),'Evidence: 42\n');
     for(const runner of f.runners)runner.finish(outcome('completed'));
@@ -270,9 +269,10 @@ test('P8 general dependent: applied native-shaped predecessor fixtures do not by
     const execution=await f.post(f.base+'/capability-executions',{requestId:randomUUID(),routeId:route.id});
     const batch=await f.post(f.base+'/worker-batches',{requestId:randomUUID(),planningVersionId:flow.approved.id,graphRevision:1,planningHash:flow.approved.contentHash,confirmed:true,executions:[{executionId:execution.id,expectedPlanDigest:execution.planDigest}]});
     await f.post(f.base+'/worker-batches/'+batch.id+'/submit',{requestId:randomUUID()});
-    assert.equal(f.runners.length,2);assert.deepEqual(f.dispatchErrors,['WORKER_INPUTS_CHANGED']);
+    // Only exact server-recorded handoff files extend the approved uploaded-material set.
+    assert.equal(f.runners.length,3);assert.deepEqual(f.dispatchErrors,[]);
     assert.equal(result.queue.items.length,2);assert.equal(result.progress.tasks.find(t=>t.id===flow.tasks[2].id)!.completion!.verifiedDone,false);
     assert.equal((await f.get(f.base+'/goals'))[0].verifiedDone,false);
-    t.diagnostic('CQG-6B-CTL gap: WORKER_INPUTS_CHANGED on inherited predecessor materials; no dependent runtime launched');
+    t.diagnostic('CQG-6B-CTL: dependent runtime launched with uploaded material and pinned predecessor inputs');
   }finally{await f.close();}
 });

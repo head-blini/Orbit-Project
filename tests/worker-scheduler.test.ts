@@ -310,20 +310,38 @@ test('CQG-6b: consumed plan cannot redispatch after bytes recover; a new plan re
  }finally{await f.close();}
 });
 
-test('CQG-6b open item: controller batch input hash gate blocks general dependent dispatch',async()=>{
+for(const mutation of ['none','handoff bytes','extra file','user material','project material','missing stored handoff','forged caller manifest'] as const)test(`CQG-6B-CTL: controller validates stored handoff and user inputs (${mutation})`,async()=>{
  const f=setup();try{
+  mkdirSync(join(f.project.path,'inputs'),{recursive:true});writeFileSync(join(f.project.path,'inputs/material.txt'),'user material');
   f.controller.initializeWorkers(f.execution);
   const view=f.controller.createWorkerBatch(f.project.id,{requestId:randomUUID(),planningVersionId:f.version.id,graphRevision:1,planningHash:f.version.contentHash,confirmed:true,executions:f.plans.map(p=>({executionId:p.id,expectedPlanDigest:p.planDigest}))});
   Object.assign(f.batch,JSON.parse(String(f.store.db.prepare('SELECT body FROM worker_http_batches WHERE id=?').get(view.id)!.body)).batch);
   let dispatchFailure='';const submitTask=f.controller.submitTask.bind(f.controller);
-  f.controller.submitTask=async(...args)=>{try{return await submitTask(...args);}catch(error){dispatchFailure=(error as Error).message;throw error;}};
+  f.controller.submitTask=async(...args)=>{
+   const space=args[3]!.space;
+   if(mutation==='handoff bytes'){chmodSync(join(space.path,'inputs/output/report.txt'),0o644);writeFileSync(join(space.path,'inputs/output/report.txt'),'tampered');chmodSync(join(space.path,'inputs/output/report.txt'),0o444);}
+   if(mutation==='extra file'){chmodSync(join(space.path,'inputs/output'),0o755);writeFileSync(join(space.path,'inputs/output/extra.txt'),'unexpected',{mode:0o444});chmodSync(join(space.path,'inputs/output'),0o555);}
+   if(mutation==='user material'){chmodSync(join(space.path,'inputs/material.txt'),0o644);writeFileSync(join(space.path,'inputs/material.txt'),'tampered');chmodSync(join(space.path,'inputs/material.txt'),0o444);}
+   if(mutation==='project material')writeFileSync(join(f.project.path,'inputs/material.txt'),'tampered');
+   if(mutation==='missing stored handoff')f.store.db.prepare('DELETE FROM worker_space_handoffs WHERE attempt_id=?').run(space.attemptId);
+   if(mutation==='forged caller manifest'){
+    chmodSync(join(space.path,'inputs/output'),0o755);writeFileSync(join(space.path,'inputs/output/extra.txt'),'unexpected',{mode:0o444});chmodSync(join(space.path,'inputs/output'),0o555);
+    space.inputManifest.push({path:'output/extra.txt',sha256:createHash('sha256').update('unexpected').digest('hex')});
+    space.inputDigest='forged caller digest';
+   }
+   try{return await submitTask(...args);}catch(error){dispatchFailure=(error as Error).message;throw error;}
+  };
   const scheduler=appliedGeneral(f),result=await f.submit(2,scheduler);
-  assert.equal(dispatchFailure,'WORKER_INPUTS_CHANGED');assert.equal(f.runners.length,0);
-  assert.equal(f.store.findRequest(result.attempt.dispatchRequestId),null);
-  const space=JSON.parse(String(f.store.db.prepare('SELECT body FROM worker_spaces WHERE reservation_id=?').get(result.reservationId)!.body));
-  assert.equal(readFileSync(join(space.path,'inputs/output/report.txt'),'utf8'),'bound output');
-  assert.equal(space.inputManifest.length,1,'handoff remains visible to the input hash gate');
-  assert.equal(f.execution.record(f.project.id,f.plans[2].id).status,'recovery_required');
-  await f.submit(2,scheduler);assert.equal(f.runners.length,0);
+  assert.equal(dispatchFailure,mutation==='none'?'':'WORKER_INPUTS_CHANGED');
+  assert.equal(f.runners.length,mutation==='none'?1:0);
+  assert.equal(!!f.store.findRequest(result.attempt.dispatchRequestId),mutation==='none');
+  const storedSpace=JSON.parse(String(f.store.db.prepare('SELECT body FROM worker_spaces WHERE reservation_id=?').get(result.reservationId)!.body));
+  assert.deepEqual(storedSpace.inputManifest,[
+   {path:'material.txt',sha256:createHash('sha256').update('user material').digest('hex')},
+   {path:'output/report.txt',sha256:createHash('sha256').update('bound output').digest('hex')},
+  ],'handoff stays in the authoritative input manifest even when caller metadata changes');
+  assert.equal(readFileSync(join(storedSpace.path,'inputs/output/report.txt'),'utf8'),mutation==='handoff bytes'?'tampered':'bound output');
+  if(mutation!=='none')assert.equal(f.execution.record(f.project.id,f.plans[2].id).status,'recovery_required');
+  await f.submit(2,scheduler);assert.equal(f.runners.length,mutation==='none'?1:0);
  }finally{await f.controller.stopWorkers();await f.close();}
 });

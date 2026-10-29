@@ -150,7 +150,12 @@ test('pointer moves before start or in beforeDispatch refuse with no turn, inclu
       await assert.rejects(launch(f,result,timing==='dispatch'?()=>p.promote(next):undefined),/LAUNCH_CONTEXT_CHANGED/);
       assert.equal(f.rpc.turns.length,0);
       assert.equal(f.store.runs().length,timing==='intent'?0:1);
-      if(timing==='dispatch')assert.equal(f.store.runs()[0].execution,'failed');
+      if(timing==='dispatch'){
+        const run=f.store.runs()[0];assert.equal(run.execution,'failed');
+        assert.equal(run.response,'LAUNCH_CONTEXT_CHANGED');
+        const row=f.store.db.prepare("SELECT data FROM events WHERE run_id=? AND kind='run.failed'").get(run.id)!;
+        assert.deepEqual(JSON.parse(String(row.data)),{reason:'LAUNCH_CONTEXT_CHANGED'});
+      }
     }finally{await f.close();}
   }
 });
