@@ -116,7 +116,7 @@ export class GoalService {
   list(projectId:string):TrackedGoalView[]{
     this.project(projectId);
     const tasks=this.studio.read(projectId,'tasks') as SavedTask[],workspaces=new Set(this.store.workspaces().filter(w=>w.projectId===projectId).map(w=>w.id));
-    const allRuns=this.store.runs().filter(run=>run.workspaceId&&workspaces.has(run.workspaceId));
+    const allRuns=this.store.runs().filter(run=>run.workspaceId?workspaces.has(run.workspaceId):run.projectId===projectId);
     return this.store.db.prepare('SELECT id FROM tracked_goals WHERE project_id=? ORDER BY rowid DESC').all(projectId).map(row=>{
       const goal=this.record(projectId,String(row.id)),plan=this.plan(projectId,goal.planningVersionId);
       if(plan.contentHash!==goal.planningHash)throw new AppError('GOAL_PLAN_INTEGRITY',409);
