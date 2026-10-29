@@ -8,7 +8,7 @@ import type {RunMetrics} from '../shared/analytics.ts';
 import type {SoloOperationIdentity} from '../shared/solo-operation.ts';
 import {migrateSoloOperations,readSoloOperation,insertSoloOperation,updateSoloOperation} from './solo-operation-journal.ts';
 import type {NativeProcessObservation} from '../shared/native-process.ts';
-import type {TaskVerificationPreview} from '../shared/acceptance.ts';
+import type {GeneralAcceptanceBaseline,TaskVerificationPreview} from '../shared/acceptance.ts';
 import {migrateNativeConnections,readNativeConnection,beginNativeConnection,bindNativeSession,observeNativeProcess,closeNativeTransport,finishNativeConnectionJournal,unresolvedNativeConnections} from './native-connection-journal.ts';
 // Claude task text belongs in the Run record, never in observable activity events.
 function runEventData(run:Run):Record<string,unknown>{
@@ -109,7 +109,7 @@ export class Store extends EventEmitter {
     const row=this.db.prepare('SELECT body,digest FROM runs WHERE request_id=?').get(id);
     return row?{run:JSON.parse(row.body as string),digest:row.digest as string}:null;
   }
-  createRun(requestId:string,digest:string,prompt:string,workspaceId?:string,task?:Pick<Run,'taskId'|'planningVersionId'|'planningContentHash'|'requirementLabels'|'runtime'|'projectId'>,identity?:SoloOperationIdentity,acceptance?:TaskVerificationPreview):Run {
+  createRun(requestId:string,digest:string,prompt:string,workspaceId?:string,task?:Pick<Run,'taskId'|'planningVersionId'|'planningContentHash'|'requirementLabels'|'runtime'|'projectId'>,identity?:SoloOperationIdentity,acceptance?:TaskVerificationPreview|GeneralAcceptanceBaseline):Run {
     const now=new Date().toISOString();
     const r:Run={id:randomUUID(),requestId,turnId:null,prompt,response:'',execution:'starting',verification:'not_run',createdAt:now,updatedAt:now,...(workspaceId?{workspaceId}:{}),...task,...(acceptance?{acceptanceDigest:acceptance.digest}:{})};
     this.db.exec('BEGIN IMMEDIATE');

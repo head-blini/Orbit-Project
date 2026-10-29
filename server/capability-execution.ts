@@ -14,6 +14,7 @@ import {Studio,exact} from './studio.ts';
 import {qualityRunEvidence} from './quality-loop-native.ts';
 import {containsCredential} from './privacy.ts';
 import {AppError} from './errors.ts';
+import {generalAcceptance} from './acceptance.ts';
 const hash=(v:unknown)=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
 const validId=(v:unknown)=>typeof v==='string'&&/^[A-Za-z0-9-]{1,80}$/.test(v)&&!containsCredential(v);
 function fail(code:string):never{throw new AppError(code,409);}
@@ -80,7 +81,12 @@ export class CapabilityExecutionService {
    if(!input.workspaceId)fail('WORKSPACE_REQUIRED');
    const preview=this.controller.taskVerificationPreview(projectId,route.taskId,input.workspaceId!,worker);
    if(preview?.digest!==input.expectedAcceptanceDigest)fail('ACCEPTANCE_PREVIEW_STALE');
-  }else if(input.workspaceId!==undefined||input.expectedAcceptanceDigest!==undefined)fail('INVALID_FIELDS');
+  }else{
+   if(input.workspaceId!==undefined)fail('INVALID_FIELDS');
+   // Legacy records without a digest stay blocked; never auto-fill them here.
+   if(input.expectedAcceptanceDigest===undefined)fail('PLAN_CHANGED');
+   if(generalAcceptance(this.store,projectId,route.taskId).digest!==input.expectedAcceptanceDigest)fail('ACCEPTANCE_PREVIEW_STALE');
+  }
   return {route,adapter,bindingDigest:hash({brief,prefs,registry,adapter,workspaceId:input.workspaceId??null,acceptance:input.expectedAcceptanceDigest??null})};
  }
  plan(projectId:string,input:CapabilityPlanInput):CapabilityExecutionRecord {
@@ -95,6 +101,9 @@ export class CapabilityExecutionService {
    const route=this.routing.records(projectId).find(r=>r.id===input.routeId);if(!route)fail('ROUTE_NOT_EXECUTABLE');
    const preview=this.controller.taskVerificationPreview(projectId,route.taskId,workspaceId);
    input={...input,workspaceId,...(preview?{expectedAcceptanceDigest:preview.digest}:{})};
+  }else if(this.store.projects().find(p=>p.id===projectId)?.kind==='general'&&input.expectedAcceptanceDigest===undefined){
+   const route=this.routing.records(projectId).find(r=>r.id===input.routeId);if(!route)fail('ROUTE_NOT_EXECUTABLE');
+   input={...input,expectedAcceptanceDigest:generalAcceptance(this.store,projectId,route.taskId).digest};
   }
   const {route,adapter,bindingDigest}=this.binding(projectId,input);
   if(this.taskBlocked(projectId,route.taskId))fail('EXECUTION_RECOVERY_REQUIRED');
@@ -122,7 +131,8 @@ export class CapabilityExecutionService {
   const r=this.raw(projectId,id) as CapabilityExecutionRecord&{workerReservationId?:string};if(input.expectedPlanDigest!==r.planDigest)fail('PLAN_CHANGED');
   if(r.status!=='awaiting_approval')return this.record(projectId,id);
   assertWorkerOwnership(this.store,projectId,r.taskId,worker);
-  let submit={requestId:r.dispatchRequestId,...(r.workspaceId?{workspaceId:r.workspaceId}:{}),...(r.expectedAcceptanceDigest?{expectedAcceptanceDigest:r.expectedAcceptanceDigest}:{})};
+  // General runs bind the digest server-side (ClaudeTaskService); their submit payload stays requestId-only.
+  let submit={requestId:r.dispatchRequestId,...(r.workspaceId?{workspaceId:r.workspaceId}:{}),...(r.workspaceId&&r.expectedAcceptanceDigest?{expectedAcceptanceDigest:r.expectedAcceptanceDigest}:{})};
   const current=this.binding(projectId,{requestId:r.requestId,routeId:r.routeId,...(r.workspaceId?{workspaceId:r.workspaceId}:{}),...(r.expectedAcceptanceDigest?{expectedAcceptanceDigest:r.expectedAcceptanceDigest}:{})},!!worker);
   if(current.bindingDigest!==r.bindingDigest)fail('PLAN_CHANGED');
   if(this.taskBlocked(projectId,r.taskId,id))fail('EXECUTION_RECOVERY_REQUIRED');
@@ -146,7 +156,8 @@ export class CapabilityExecutionService {
    }
    const run=await this.adapters.dispatch(r.runtimeId,projectId,r.taskId,submit,worker);
    const receipt=this.store.findRequest(r.dispatchRequestId)?.run;
-   if(!receipt||receipt.id!==run.id||receipt.taskId!==r.taskId||receipt.planningVersionId!==r.baseline.planningVersionId||receipt.planningContentHash!==r.baseline.planningContentHash)fail('EXECUTION_RECEIPT_MISMATCH');
+   if(!receipt||receipt.id!==run.id||receipt.taskId!==r.taskId||receipt.planningVersionId!==r.baseline.planningVersionId||receipt.planningContentHash!==r.baseline.planningContentHash
+    ||(receipt.acceptanceDigest??null)!==r.expectedAcceptanceDigest)fail('EXECUTION_RECEIPT_MISMATCH');
    r.runId=receipt.id;r.status='running';this.save(r);
   }catch{r.runId=this.store.findRequest(r.dispatchRequestId)?.run.id??null;r.status='recovery_required';r.issue='EXECUTION_DISPATCH_UNCONFIRMED';r.recoveryRequired=true;this.save(r);}
   return this.record(projectId,id);

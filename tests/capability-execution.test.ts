@@ -5,11 +5,12 @@ import {fixture} from './capability-fixtures.ts';
 import {CapabilityExecutionService} from '../server/capability-execution.ts';
 import {CapabilityRuntimeAdapters} from '../server/capability-runtime-adapters.ts';
 import type {Controller} from '../server/controller.ts';
+import {generalAcceptance} from '../server/acceptance.ts';
 
 function setup(){
  const f=fixture(); f.registry.providers[1].version='2.1.312'; let calls=0;
  const controller={store:f.store,submitTask:async(projectId:string,taskId:string,input:{requestId:string})=>{
-  calls++;const run=f.store.createRun(input.requestId,'digest','approved task',undefined,{runtime:'claude-code',projectId,taskId,planningVersionId:f.plan.id,planningContentHash:f.plan.contentHash,requirementLabels:f.task.requirementLabels});
+  calls++;const run=f.store.createRun(input.requestId,'digest','approved task',undefined,{runtime:'claude-code',projectId,taskId,planningVersionId:f.plan.id,planningContentHash:f.plan.contentHash,requirementLabels:f.task.requirementLabels},undefined,generalAcceptance(f.store,projectId,taskId));
   return f.store.updateRun(run.id,{execution:'running'},'run.started');
  },interrupt:async(id:string)=>{f.store.updateRun(id,{execution:'interrupting'},'interrupt.requested');}} as unknown as Controller;
  const adapters=new CapabilityRuntimeAdapters(controller),service=new CapabilityExecutionService(f.store,controller,()=>f.registry,adapters);
@@ -99,7 +100,7 @@ test('durable dispatch intent survives database reopen and only observed termina
  await service.start('p',p.id,{confirmed:true,expectedPlanDigest:p.planDigest});f.store.close();
  const store=new Store(path);try{let calls=0;controller.submitTask=async()=>{calls++;throw Error();};const resumed=new CapabilityExecutionService(store,controller,()=>f.registry);
  await resumed.start('p',p.id,{confirmed:true,expectedPlanDigest:p.planDigest});assert.equal(calls,0);await assert.rejects(resumed.recover('p',p.id),/EXECUTION_UNCONFIRMED/);
- const run=store.createRun(p.dispatchRequestId,'known','approved',undefined,{runtime:'claude-code',projectId:'p',taskId:f.task.id,planningVersionId:p.baseline.planningVersionId,planningContentHash:p.baseline.planningContentHash});store.updateRun(run.id,{execution:'failed'},'run.failed');
+ const run=store.createRun(p.dispatchRequestId,'known','approved',undefined,{runtime:'claude-code',projectId:'p',taskId:f.task.id,planningVersionId:p.baseline.planningVersionId,planningContentHash:p.baseline.planningContentHash},undefined,generalAcceptance(store,'p',f.task.id));store.updateRun(run.id,{execution:'failed'},'run.failed');
  const recovered=await resumed.recover('p',p.id);assert.equal(recovered.recoveryRequired,false);assert.equal(recovered.status,'failed');assert.equal(calls,0);
  }finally{store.close();rmSync(dir,{recursive:true,force:true});}
 });
