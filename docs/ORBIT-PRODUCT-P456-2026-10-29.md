@@ -1,5 +1,29 @@
 # PRODUCT P4/P5/P6 — 구현 및 검증 기록
 
+## 독립 리뷰 수정 — `488bb82` 위의 미커밋 변경
+
+이 절이 아래 최초 구현 기록보다 우선한다. 시작 HEAD는 `488bb82`, 작업 트리는 깨끗했다. 기존 기능·보안 gate·완료 판정은 유지했다.
+
+- `server/controller.ts`: 종료 이벤트의 정확한 run ID를 관측 서비스에 전달한다. 결과물 목록을 한 번만 읽고 반환한다. 현재 버전 다운로드는 전체 결과물 해싱·수치 검사 대신 메타데이터로 ID를 찾고 선택된 파일만 읽는다.
+- `server/deliverable-versions.ts`: 지정된 완료 run만 snapshot한다. 명시적 수동 관측은 과거 모든 run을 다시 스캔하지 않고 출처를 미확인으로 둔다. 정확히 하나의 검증된 manifest 항목이 바이트와 일치해야 출처를 연결한다. 파일 읽기·해싱·manifest 검증은 트랜잭션 전에 끝내고, 쓰기 트랜잭션은 최신 중복 재확인과 INSERT만 수행한다.
+- `server/deliverables.ts`: 바이트를 읽지 않는 ID 탐색을 추가했다. 선택된 파일은 기존 출력 전용 guard와 P2 fd·identity·alias·symlink·hardlink·크기 검사를 그대로 통과해야 한다.
+- 버전 목록은 최신 최대 100개 메타데이터만 반환한다. 파일 바이트를 읽거나 `available`을 추정하지 않는다. 개별 버전 다운로드는 전체 이력을 읽지 않고 정확한 ID로 조회한 뒤 기존 보존 바이트 검증을 수행한다. 100개 제한은 표시 제한이며 이전 이력 삭제가 아니다.
+- `web/deliverables.tsx`: 최대 표시 수를 명시하고 보존 상태 미확인을 `보존 여부 확인 후 받기`로 표시한다.
+- `web/goals.tsx`: completion의 gates·decision·evidenceIds·tools 구조를 검증한다. 잘못된 응답은 불러오기 실패 상태로 처리한다.
+- 테스트 파일: `tests/deliverable-versions.test.ts`, `tests/deliverables-http.test.ts`, `tests/deliverables-ui.test.ts`, `tests/goals-ui.test.ts`. 기존 바이트 보존/변조 거부 assertion은 유지했다. 목록의 availability assertion은 요청된 lazy 계약에 맞춰 미확인임을 검사하며, 실제 다운로드 성공/거부 검사는 그대로 유지한다.
+
+회귀 증거: fs 호출 계측으로 트랜잭션 안의 파일 I/O가 0회임을 확인했다. 트랜잭션 직전 중복 관측 삽입도 재확인으로 중복을 방지한다. 종료 run만 조회, 프로젝트 전체 run 열거 0회, 목록 호출 1회, 단일 다운로드에서 다른 출력 open 0회, 버전 목록에서 바이트 읽기 0회, 최신 100개 제한, malformed goal 응답의 안전한 실패를 검사했다.
+
+Node `v24.22.1` 검증:
+
+- `npx tsc --noEmit`: exit 0.
+- `node --test tests/deliverables*.test.ts tests/deliverable-versions.test.ts tests/goals*.test.ts`: **53개, 50 pass, 3 fail, 0 skip**, exit 1. 실패는 `tests/deliverables-http.test.ts` 2개와 `tests/goals-http.test.ts` 1개의 `listen EPERM`뿐이다. 소켓 없는 실제 HTTP handler 보안 테스트는 통과했다. 로그: `/private/tmp/p456-review-tests.log`.
+- `npm run build`: exit 0.
+- `git diff --check`: exit 0.
+
+남은 한계: 파일 관측 자체는 기존 동기식·최대 파일 수/크기 제한을 유지한다. 비동기 파일 서비스나 watcher를 추가하지 않았다. 라이브 리스너 재검증은 허용 환경에서 필요하다. 커밋·설치·네트워크·모델 호출·push·merge·배포 없음.
+
+
 ## 기준과 재개 상태
 
 - 작업 브랜치: `codex/product-p456`, 시작 HEAD `c3f0299`. 시작 시 작업 트리는 깨끗했다.

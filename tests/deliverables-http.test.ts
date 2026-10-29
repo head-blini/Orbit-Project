@@ -61,7 +61,7 @@ test('download authentication, origin, exact IDs, attachment headers, history an
     assert.equal(await response.text(),'<script>inert</script>');
     assert.equal((await post({},'0'.repeat(64))).status,403);assert.equal((await post({path:'result.html'})).status,400);assert.equal((await post({},csrfToken,'?x=1')).status,400);
     assert.equal((await post({})).status,200);
-    const history=await (await get(base+'/'+id+'/versions')).json() as {id:string;available:boolean}[];assert.equal(history.length,1);assert.equal(history[0].available,true);
+    const history=await (await get(base+'/'+id+'/versions')).json() as {id:string;available:boolean}[];assert.equal(history.length,1);assert.equal(history[0].available,undefined,'byte availability is checked only at download');
     const old=base+'/'+id+'/versions/'+history[0].id+'/download';assert.equal((await get(old)).status,200);
     writeFileSync(join(project.path,'result.html'),'changed');assert.equal((await get(old)).status,409);
     assert.equal((await post({})).status,200);assert.equal(((await (await get(base+'/'+id+'/versions')).json()) as unknown[]).length,2);

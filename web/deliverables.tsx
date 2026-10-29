@@ -23,10 +23,10 @@ export function DeliverablesView({list,preview,onPreview,projectId,history,onHis
         <td>{!item.checks.nonEmpty?'빈 파일 · ':''}{formatLabels[item.checks.format]}{item.checks.evidence&&<><br/><span className={'evidence-'+item.checks.evidence.status}>{evidenceLabel(item.checks.evidence)}</span></>}</td>
         <td>{projectId&&item.id&&<><a href={`/api/projects/${encodeURIComponent(projectId)}/deliverables/${encodeURIComponent(item.id)}/download`} download>파일 받기</a>{onHistory&&<button onClick={()=>onHistory(item.id!)}>이전 버전 보기</button>}</>}{item.previewable?<button onClick={()=>onPreview(item.path)}>미리보기</button>:<span className="progress-note">미리보기 미지원</span>}</td>
       </tr>)}</tbody></table>:<p className="progress-empty">아직 결과물 파일이 없습니다.</p>}
-    {history&&<details open><summary>저장된 버전 기록</summary>{history.versions.length?<ol>{history.versions.map(version=><li key={version.id}>
+    {history&&<details open><summary>저장된 버전 기록 · 최근 최대 100개</summary>{history.versions.length?<ol>{history.versions.map(version=><li key={version.id}>
       {version.path} · {size(version.size)} · 관측 {when(version.observedAt)} · 생성 실행 {version.runId??'미확인'} · 실행 시각 {version.runAt?when(version.runAt):'미확인'}
       <small> SHA256 {version.sha256}</small>
-      {version.available&&projectId?<a href={`/api/projects/${encodeURIComponent(projectId)}/deliverables/${encodeURIComponent(history.id)}/versions/${encodeURIComponent(version.id)}/download`} download>이 버전 받기</a>:<span>파일이 보존되어 있지 않아 받을 수 없습니다.</span>}
+      {version.available!==false&&projectId?<a href={`/api/projects/${encodeURIComponent(projectId)}/deliverables/${encodeURIComponent(history.id)}/versions/${encodeURIComponent(version.id)}/download`} download>{version.available===undefined?'보존 여부 확인 후 받기':'이 버전 받기'}</a>:<span>파일이 보존되어 있지 않아 받을 수 없습니다.</span>}
     </li>)}</ol>:<p>기록된 버전이 없습니다. 파일 변경 확인으로 현재 버전을 기록하세요.</p>}</details>}
     {list.skipped>0&&<p className="progress-note">{list.skipped}개 항목은 보안상 표시하지 않았습니다(숨김·인증·DB·키 파일, 링크).</p>}
     {list.truncated&&<p className="progress-note">파일이 많아 일부만 표시했습니다.</p>}

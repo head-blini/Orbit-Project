@@ -55,7 +55,7 @@ import {RunTelemetry} from './run-telemetry.ts';
 import {CodexModelTracker} from './codex-model-attribution.ts';
 import {getDevelopmentResult} from './development-results.ts';
 import {staticAppPreviewCapability} from './app-preview-policy.ts';
-import {listDeliverables,previewDeliverable,readOutputDeliverable} from './deliverables.ts';
+import {listDeliverables,previewDeliverable,readOutputDeliverable,findOutputPath} from './deliverables.ts';
 import {addMaterials,listMaterials} from './materials.ts';
 import {ClaudeTaskService,type ClaudeTaskServiceOptions} from './claude-task-service.ts';
 import {QualityLoopService} from './quality-loop-service.ts';
@@ -149,7 +149,7 @@ export class Controller {
     store.on('event',event=>{
       if(!event.runId||event.kind!=='run.completed')return;
       const run=store.getRun(event.runId);
-      if(run?.projectId&&!run.workspaceId&&run.execution==='completed')try{this.observeDeliverables(run.projectId);}catch{/* Explicit refresh can retry unavailable files. */}
+      if(run?.projectId&&!run.workspaceId&&run.execution==='completed')try{this.observeDeliverables(run.projectId,run.id);}catch{/* Explicit refresh can retry unavailable files. */}
     });
     this.subscriptionUsage=new SubscriptionUsageStore(store);
     this.claudeTasks=new ClaudeTaskService(store,projects,claudeOptions,this.subscriptionUsage);
@@ -851,10 +851,10 @@ export class Controller {
     const list=listDeliverables(project.path,tasks);
     return {...list,items:list.items.map(item=>({...item,...(item.role==='output'?{id:deliverableId(projectId,item.path)}:{})}))};
   }
-  observeDeliverables(projectId:string){
+  observeDeliverables(projectId:string,completedRunId?:string){
     const list=this.deliverables(projectId);
-    this.deliverableVersions.observe(projectId,this.projects!.generalProject(projectId).path,list);
-    return this.deliverables(projectId);
+    this.deliverableVersions.observe(projectId,this.projects!.generalProject(projectId).path,list,completedRunId);
+    return list;
   }
   deliverableHistory(projectId:string,id:string){
     if(!this.projects)throw new AppError('PROJECT_CREATION_UNAVAILABLE',409);
@@ -864,9 +864,8 @@ export class Controller {
     if(!this.projects)throw new AppError('PROJECT_CREATION_UNAVAILABLE',409);
     const root=this.projects.generalProject(projectId).path;
     if(versionId)return this.deliverableVersions.download(projectId,root,id,versionId);
-    const item=this.deliverables(projectId).items.find(item=>item.role==='output'&&item.id===id);
-    if(!item)throw new AppError('DELIVERABLE_NOT_FOUND',404);
-    return readOutputDeliverable(root,item.path);
+    const path=findOutputPath(root,path=>deliverableId(projectId,path)===id);
+    return readOutputDeliverable(root,path);
   }
   /** User materials of a general project (inputs/). Adding never overwrites. */
   materials(projectId:string){if(!this.projects)throw new AppError('PROJECT_CREATION_UNAVAILABLE',409);return listMaterials(this.projects.generalProject(projectId).path);}

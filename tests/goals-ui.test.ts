@@ -224,3 +224,16 @@ test('goal view shows CQG evidence and never labels stale, mock, unknown or unre
   shown.gates[0].freshness='stale';assert.doesNotMatch(render(),/연결 작업 검증 완료|현재 검증 통과/);shown.gates[0].freshness='current';
   state.loaded=false;assert.doesNotMatch(render(),/연결 작업 검증 완료|현재 검증 통과/);coordinator.dispose();
 });
+
+test('malformed completion gates are rejected and render unavailable without throwing',async()=>{
+  const {GoalTrackingView,createGoalTrackingCoordinator}=await components();
+  const decision={status:'passed',source:'local',freshness:'current',evidenceIds:['evidence'],blockers:[]};
+  const valid={verifiedDone:true,qualityPassed:true,gates:[{id:'unit',...decision}],independentReview:decision,userApproval:decision};
+  for(const patch of [{gates:null},{gates:{}},{gates:[null]},{gates:[{...decision,id:4}]},{gates:[{...decision,id:'unit',evidenceIds:null}]},{gates:[{...decision,id:'unit',evidenceIds:[{}]}]},{independentReview:null},{tools:{}}]){
+    const row=view({verifiedDone:true,taskCompletions:[{taskId:'task-a',runId:'run-a',verifiedDone:true,completion:{...valid,...patch} as any}]});
+    const coordinator=createGoalTrackingCoordinator({post:noPost,get:async path=>json(path.endsWith('/plans')?[plan()]:[row])});await coordinator.setScope(scope);
+    const state=coordinator.getSnapshot();assert.equal(state.loaded,false);assert.equal(state.goals.length,0);assert.match(state.error,/불러오지 못했습니다/);
+    const html=renderToStaticMarkup(createElement(GoalTrackingView,{state,onRefresh:()=>{},onSelectPlan:()=>{},onCreate:()=>{},onSetState:()=>{},onHistory:()=>{}}));
+    assert.match(html,/불러오지 못했습니다/);assert.doesNotMatch(html,/연결 작업 검증 완료/);coordinator.dispose();
+  }
+});

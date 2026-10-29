@@ -43,3 +43,10 @@ test('one-click output download uses opaque IDs; inputs have no download and mis
   assert.match(html,new RegExp(`/api/projects/project/deliverables/${id}/download`));assert.match(html,/파일 받기/);assert.match(html,/이전 버전 보기/);
   assert.doesNotMatch(html,/href="[^"]*inputs|href="[^"]*version/);assert.match(html,/파일이 보존되어 있지 않아/);assert.match(html,/생성 실행 미확인/);
 });
+
+test('lazy retention is labelled unverified and history cap is disclosed',async()=>{
+  const {DeliverablesView}=await view(),id='a'.repeat(64);
+  const html=renderToStaticMarkup(createElement(DeliverablesView,{projectId:'project',list:{items:[],skipped:0,truncated:false},preview:null,onPreview:()=>{},history:{id,versions:[{id:'version',deliverableId:id,path:'result.txt',size:1,sha256:id,taskId:null,runId:null,runAt:null,observedAt:'2026-10-29T00:00:00Z'}]}}));
+  assert.match(html,/최근 최대 100개/);assert.match(html,/보존 여부 확인 후 받기/);assert.match(html,/versions\/version\/download/);
+  assert.doesNotMatch(html,/파일이 보존되어 있지 않아/);
+});

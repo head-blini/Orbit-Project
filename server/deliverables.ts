@@ -162,3 +162,20 @@ export function downloadHeaders(file:DeliverableBytes):Record<string,string> {
   return {'Content-Disposition':`attachment; filename="${name}"`,'Content-Type':allowed.has(file.contentType)?file.contentType:'application/octet-stream',
     'Content-Length':String(file.size),'X-Content-Type-Options':'nosniff'};
 }
+
+/** Resolve an opaque ID by directory metadata only; read bytes only after selecting one output. */
+export function findOutputPath(root:string,matches:(path:string)=>boolean):string {
+  let visited=0;
+  const walk=(dir:string,depth:number):string|null=>{
+    for(const entry of readdirSync(dir,{withFileTypes:true}).sort((a,b)=>a.name.localeCompare(b.name))){
+      if(visited>=MAX_FILES)return null;
+      if(sensitive(entry.name)||entry.isSymbolicLink()||depth===0&&entry.name.toLowerCase()==='inputs')continue;
+      const full=join(dir,entry.name),path=relative(root,full).split(sep).join('/');
+      // Validate each directory before descent; the selected file is checked again by the byte reader.
+      if(entry.isDirectory()&&depth<MAX_DEPTH){checkedPath(root,path);const found=walk(full,depth+1);if(found)return found;}
+      else if(entry.isFile()){visited++;if(matches(path))return path;}
+    }
+    return null;
+  };
+  const path=walk(root,0);if(!path)throw new AppError('DELIVERABLE_NOT_FOUND',404);return path;
+}

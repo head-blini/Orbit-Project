@@ -20,22 +20,29 @@ export class DeliverableVersions {
   private records(projectId:string,id?:string):DeliverableVersion[]{
     return this.store.db.prepare('SELECT body FROM deliverable_versions WHERE project_id=?'+(id?' AND deliverable_id=?':'')+' ORDER BY rowid').all(...(id?[projectId,id]:[projectId])).map(row=>JSON.parse(String(row.body)) as DeliverableVersion);
   }
-  observe(projectId:string,root:string,list:DeliverableList){
+  observe(projectId:string,root:string,list:DeliverableList,completedRunId?:string){
     // Only existing, validated task manifests establish a producing run. Filenames and mtimes do not.
-    const sources=this.store.runs().filter(run=>run.projectId===projectId&&!run.workspaceId&&run.execution==='completed').flatMap(run=>{
-      try{const snapshot=generalEvidenceSnapshot(this.store,run,()=>{throw Error('NO_MANIFEST');});
-        return snapshot.manifest?[{run,files:snapshot.manifest.files}]:[];
-      }catch{return [];}
-    });
+    const candidate=completedRunId?this.store.getRun(completedRunId):null;
+    let source:ReturnType<typeof generalEvidenceSnapshot>|null=null;
+    if(candidate?.projectId===projectId&&!candidate.workspaceId&&candidate.execution==='completed'){
+      try{source=generalEvidenceSnapshot(this.store,candidate,()=>{throw Error('NO_MANIFEST');});}catch{}
+    }
+    const observations:DeliverableVersion[]=[];
+    for(const item of list.items.filter(item=>item.role==='output')){
+      let file;try{file=readOutputDeliverable(root,item.path);}catch{continue;}
+      const matches=source?.manifest?.files.filter(f=>f.path===item.path&&f.sha256===file.sha256)??[];
+      const run=matches.length===1?candidate:null;
+      observations.push({id:randomUUID(),deliverableId:deliverableId(projectId,item.path),path:item.path,size:file.size,sha256:file.sha256,
+        taskId:run?.taskId??null,runId:run?.id??null,runAt:run?.updatedAt??null,observedAt:new Date().toISOString()});
+    }
+    // Hashing and manifest validation finish before acquiring the SQLite write lock.
     this.store.transaction(()=>{
-      for(const item of list.items.filter(item=>item.role==='output')){
-        let file;try{file=readOutputDeliverable(root,item.path);}catch{continue;}
-        const id=deliverableId(projectId,item.path),last=this.records(projectId,id).at(-1);
-        const matches=sources.filter(source=>source.files.some(f=>f.path===item.path&&f.sha256===file.sha256)),run=matches.length===1?matches[0].run:null;
-        if(last?.sha256===file.sha256&&last.size===file.size&&last.runId===(run?.id??null))continue;
-        const version:DeliverableVersion={id:randomUUID(),deliverableId:id,path:item.path,size:file.size,sha256:file.sha256,
-          taskId:run?.taskId??null,runId:run?.id??null,runAt:run?.updatedAt??null,observedAt:new Date().toISOString()};
-        this.store.db.prepare('INSERT INTO deliverable_versions VALUES(?,?,?,?)').run(version.id,projectId,id,JSON.stringify(version));
+      const latest=this.store.db.prepare('SELECT body FROM deliverable_versions WHERE project_id=? AND deliverable_id=? ORDER BY rowid DESC LIMIT 1');
+      const insert=this.store.db.prepare('INSERT INTO deliverable_versions VALUES(?,?,?,?)');
+      for(const version of observations){
+        const row=latest.get(projectId,version.deliverableId),last=row?JSON.parse(String(row.body)) as DeliverableVersion:null;
+        if(last?.sha256===version.sha256&&last.size===version.size&&last.runId===version.runId)continue;
+        insert.run(version.id,projectId,version.deliverableId,JSON.stringify(version));
       }
     });
   }
@@ -53,15 +60,15 @@ export class DeliverableVersions {
     }
     throw new AppError('DELIVERABLE_VERSION_UNAVAILABLE',409);
   }
-  list(projectId:string,root:string,id:string){
-    return this.records(projectId,id).map(version=>{
-      let available=false;try{this.retained(projectId,root,version);available=true;}catch{}
-      return {...version,available};
-    });
+  list(projectId:string,_root:string,id:string){
+    // Retention is unknown until a requested download passes the guarded byte read.
+    return this.store.db.prepare('SELECT body FROM deliverable_versions WHERE project_id=? AND deliverable_id=? ORDER BY rowid DESC LIMIT 100')
+      .all(projectId,id).reverse().map(row=>JSON.parse(String(row.body)) as DeliverableVersion);
   }
   references(projectId:string){return this.records(projectId);}
   download(projectId:string,root:string,id:string,versionId:string){
-    const version=this.records(projectId,id).find(v=>v.id===versionId);
+    const row=this.store.db.prepare('SELECT body FROM deliverable_versions WHERE project_id=? AND deliverable_id=? AND id=?').get(projectId,id,versionId);
+    const version=row?JSON.parse(String(row.body)) as DeliverableVersion:null;
     if(!version)throw new AppError('DELIVERABLE_NOT_FOUND',404);
     return this.retained(projectId,root,version);
   }

@@ -21,8 +21,23 @@ function validGoal(value:TrackedGoal,projectId:string){
     &&Number.isSafeInteger(value.revision)&&value.revision>0&&typeof value.planningVersionId==='string'&&typeof value.planningHash==='string'
     &&typeof value.createdAt==='string'&&typeof value.updatedAt==='string';
 }
+function validDecision(value:unknown):boolean {
+  if(!value||typeof value!=='object')return false;
+  const d=value as Record<string,unknown>;
+  return typeof d.status==='string'&&typeof d.source==='string'&&typeof d.freshness==='string'&&textArray(d.evidenceIds)&&textArray(d.blockers);
+}
+function validCompletion(value:unknown):boolean {
+  if(value===null)return true;
+  if(!value||typeof value!=='object')return false;
+  const c=value as Record<string,unknown>;
+  return typeof c.verifiedDone==='boolean'&&typeof c.qualityPassed==='boolean'&&Array.isArray(c.gates)
+    &&c.gates.every(g=>validDecision(g)&&typeof g.id==='string')
+    &&validDecision(c.independentReview)&&validDecision(c.userApproval)
+    &&(c.tools===undefined||Array.isArray(c.tools)&&c.tools.every(validDecision));
+}
 function validView(value:TrackedGoalView,projectId:string){
   return !!value&&validGoal(value.goal,projectId)&&typeof value.title==='string'&&typeof value.objective==='string'&&typeof value.planCurrent==='boolean'
+    &&(value.taskCompletions===undefined||Array.isArray(value.taskCompletions)&&value.taskCompletions.every(t=>t&&typeof t.taskId==='string'&&(t.runId===null||typeof t.runId==='string')&&typeof t.verifiedDone==='boolean'&&validCompletion(t.completion)))
     &&typeof value.evidenceScope==='string'&&textArray(value.blockers)&&Array.isArray(value.requirements)&&value.requirements.every(requirement=>
       !!requirement&&typeof requirement.label==='string'&&typeof requirement.description==='string'&&textArray(requirement.acceptanceCriteria)&&textArray(requirement.taskIds)
       &&requirement.acceptance==='unverified'&&Number.isSafeInteger(requirement.runsTotal)&&requirement.runsTotal>=0&&Array.isArray(requirement.runs)&&requirement.runs.every(run=>!!run&&typeof run.id==='string'&&typeof run.execution==='string')
