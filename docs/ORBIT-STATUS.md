@@ -1,3 +1,10 @@
+# USAGE 재개 상태 (2026-10-29 · Claude Code 오케스트레이터)
+
+- HEAD `25ca69b`. 설계 [ORBIT-USAGE-D1](ORBIT-USAGE-D1.md) `b5eb9c3`(보수적 기본값). U1 계약·정규화 `0b6fe1e`(Codex), U2 관측·저장 `66476f8`(Codex), U3 HTTP·진행 신호 `764e88f`, U4 화면 `25ca69b`(Claude).
+- 동작: 공식 경로 관측값만 표시. Claude 잔여율은 유효 utilization일 때만 계산값으로 표시. 60초·연결 끊김·재시작·창 초기화 경과 시 마지막 관측(stale). 계정 미식별·공유 미확인·ChatGPT 웹은 unknown. 진행판의 `available`은 최신 관측일 때만, 관측된 거부(`exhausted`)는 오래돼도 유지(보수적).
+- 검증: Node24 `npm run verify` exit0 **1497 tests /1495 pass /0 fail /2 skip**. 실제 quota 조회·모델 호출 0회(mock-tested).
+- 후속: 읽기 시점 freshness가 창 초기화 경과를 재검사하지 않음(60초 정책이 먼저 적용). 다중 계정·로그인 전환·계정 별칭은 별도 승인.
+
 # Task Graph · Registry 재개 상태 (2026-10-29 · Claude Code 오케스트레이터)
 
 - 기준 브랜치 `codex/orbit-mac-handoff-2026-10-26` HEAD `fc0afd1`. Codex 작업은 `/codex` Skill로 위임, 오케스트레이터가 코드 검토·전체 verify 후 커밋·병합.
