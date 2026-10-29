@@ -5,8 +5,9 @@ import {getUiMode,subscribeUiMode} from './ui-mode.ts';
 import {qualityOrigin,completionView,verifiedTaskCount,plainStatus} from './project-work-model.ts';
 import {ProgressImpact} from './progress-impact.tsx';
 import {TaskGraphPanel} from './task-graph-panel.tsx';
+import {ClaudeRecoveryControl,QuotaResumeNote} from './claude-recovery.tsx';
 import {useEffect,useRef,useState} from 'react';
-import type {ConnectionFreshness,ProgressTask,ProjectProgress,TaskStage,ProgressVerification} from '../shared/project-progress.ts';
+import type {ConnectionFreshness,ProgressTask,ProjectProgress,TaskStage,ProgressVerification,ClaudeRunRecovery} from '../shared/project-progress.ts';
 import type {HandoffPackage} from '../shared/handoff.ts';
 
 export const stageLabels:Record<TaskStage,string>={
@@ -35,9 +36,11 @@ export const runnableStages:readonly TaskStage[]=['not_started','error','interru
 export interface TaskActions {
   runtimeLabel:string;canRun:boolean;busy:boolean;pendingTaskId:string|null;handoff:{taskId:string;markdown:string}|null;
   onRun(task:ProgressTask):void;onInterrupt(task:ProgressTask):void;onHandoff(task:ProgressTask):void;
+  /** Explicit lost-run recovery; absent where the runtime has no such action. */onRecover?(runId:string):void;
 }
-function TaskButtons({task,actions}:{task:ProgressTask;actions:TaskActions}){
-  const pending=actions.pendingTaskId===task.id,runnable=actions.canRun&&runnableStages.includes(task.stage);
+function TaskButtons({task,actions,released}:{task:ProgressTask;actions:TaskActions;released:boolean}){
+  // A lost head becomes runnable only after its explicit recovery; the new run still needs a click and a new requestId.
+  const pending=actions.pendingTaskId===task.id,runnable=actions.canRun&&(runnableStages.includes(task.stage)||task.stage==='lost'&&released);
   return <div className="progress-actions">
     {(runnable||pending)&&<button className={task.stage==='not_started'&&!pending?'primary':''} disabled={actions.busy||(!!actions.pendingTaskId&&!pending)} onClick={()=>actions.onRun(task)}>
       {pending?'같은 요청으로 다시 확인':task.stage==='not_started'?`${actions.runtimeLabel}로 실행`:`${actions.runtimeLabel}로 다시 실행`}</button>}
@@ -47,7 +50,9 @@ function TaskButtons({task,actions}:{task:ProgressTask;actions:TaskActions}){
   </div>;
 }
 
-function TaskRow({task,actions,advanced,projectId,routePost,routeDisabled}:{task:ProgressTask;actions?:TaskActions;advanced:boolean;projectId:string;routePost?:CapabilityRoutePost;routeDisabled?:boolean}){
+function TaskRow({task,actions,advanced,projectId,routePost,routeDisabled,recoveries=[],quotaResetsAt}:{task:ProgressTask;actions?:TaskActions;advanced:boolean;projectId:string;routePost?:CapabilityRoutePost;routeDisabled?:boolean;
+  recoveries?:ClaudeRunRecovery[];quotaResetsAt?:string|null}){
+  const own=recoveries.filter(item=>item.taskId===task.id);
   return <details className="progress-task">
     <summary>
       <span className="progress-task-title">{task.title}</span>
@@ -65,10 +70,12 @@ function TaskRow({task,actions,advanced,projectId,routePost,routeDisabled}:{task
       {task.requirementLabels.length>0&&<div><dt>요구사항</dt><dd>{task.requirementLabels.join(', ')}</dd></div>}
     </dl>
     {nextActions[task.stage]&&<p className="progress-next">{nextActions[task.stage]}</p>}
+    {task.stage==='quota_wait'&&<QuotaResumeNote resetsAt={quotaResetsAt}/>}
+    {own.map(item=><ClaudeRecoveryControl key={item.runId} recovery={item} advanced={advanced} busy={!!actions?.busy} onRecover={actions?.onRecover}/>)}
     <CompletionStatus task={task} advanced={advanced}/>
     {task.qualityLoops?.map(loop=><QualityLoopStatus key={loop.id} loop={loop} advanced={advanced}/>)}
     <CapabilityRouting key={`${projectId}/${task.id}`} projectId={projectId} taskId={task.id} records={task.capabilityRoutes} executions={task.capabilityExecutions} canPlan={!!routePost} advanced={advanced} post={routePost} disabled={routeDisabled}/>
-    {actions&&<TaskButtons task={task} actions={actions}/>}
+    {actions&&<TaskButtons task={task} actions={actions} released={own.some(item=>item.runId===task.latestRunId&&item.state==='released')}/>}
     {task.runs.length>0?<table className="progress-runs"><caption>실행 기록 {task.runsTotal}개{task.runsTotal>task.runs.length?` 중 최근 ${task.runs.length}개`:''}</caption>
       <thead><tr><th>실행</th><th>담당</th><th>실행 상태</th><th>최근 도구</th><th>검증</th><th>마지막 관측</th></tr></thead>
       <tbody>{task.runs.map(run=><tr key={run.id}><td><code>{run.id.slice(0,8)}</code></td><td>{runtime(run.assignee)}{advanced&&run.modelAttribution&&<CodexModelEvidence value={run.modelAttribution}/>}</td><td>{run.execution}</td><td>{run.lastActivity??'—'}</td><td>{verificationLabels[run.verification]}{run.checks>1?` (${run.checks}회)`:''}</td><td>{time(run.lastObservedAt)}</td></tr>)}</tbody>
@@ -84,6 +91,7 @@ export function ProjectProgressView({progress,freshness,lastEventAt,actions,comp
   const [mode,setMode]=useState(getUiMode);
   useEffect(()=>subscribeUiMode(()=>setMode(getUiMode())),[]);
   const verified=verifiedTaskCount(progress);
+  const quotaResetsAt=progress.blockers.find(b=>b.code==='QUOTA_EXHAUSTED')?.resetsAt;
   return <div className="project-progress">
     {!compact&&<section className="surface progress-summary" aria-label="프로젝트 진행 요약">
       <div className="section-heading"><div>
@@ -97,7 +105,7 @@ export function ProjectProgressView({progress,freshness,lastEventAt,actions,comp
           <progress max={Math.max(criteria.total,1)} value={criteria.verified} aria-label="완료 조건 기준 확인"/></div>
         <div><strong>{time(progress.lastObservedAt)}</strong><span>마지막 관측 활동</span></div>
       </div>
-      {progress.blockers.length>0&&<ul className="progress-blockers" role="alert">{progress.blockers.map(b=><li key={b.code}>{blockerLabels[b.code]??b.code}</li>)}</ul>}
+      {progress.blockers.length>0&&<ul className="progress-blockers" role="alert">{progress.blockers.map(b=><li key={b.code}>{blockerLabels[b.code]??b.code}{b.code==='QUOTA_EXHAUSTED'&&<QuotaResumeNote resetsAt={b.resetsAt}/>}</li>)}</ul>}
       {progress.untaskedRuns>0&&<p className="progress-note">작업과 연결되지 않은 직접 실행 {progress.untaskedRuns}개는 작업 진행에 포함하지 않았습니다.</p>}
       <p className="progress-note">AI 응답 완료와 검증 통과는 다른 상태입니다. 시간·노력 비율이나 남은 시간은 추정하지 않습니다.</p>
     </section>}
@@ -105,7 +113,7 @@ export function ProjectProgressView({progress,freshness,lastEventAt,actions,comp
     {!compact&&online!==undefined&&progress.plan&&<TaskGraphPanel projectId={progress.projectId} planningVersionId={progress.plan.id} online={online}/>}
     <section className="surface" aria-label="작업별 진행">
       {!compact&&<div className="section-heading"><div><h2>작업</h2><p>작업을 펼치면 실행 기록과 검증 결과를 볼 수 있습니다.</p></div></div>}
-      {progress.tasks.length?progress.tasks.map(task=><TaskRow key={task.id} task={task} actions={actions} advanced={mode==='advanced'} projectId={progress.projectId} routePost={routePost} routeDisabled={routeDisabled}/>):<p className="progress-empty">승인된 기획에서 만든 작업이 아직 없습니다.</p>}
+      {progress.tasks.length?progress.tasks.map(task=><TaskRow key={task.id} task={task} actions={actions} advanced={mode==='advanced'} projectId={progress.projectId} routePost={routePost} routeDisabled={routeDisabled} recoveries={progress.claudeRecovery} quotaResetsAt={quotaResetsAt}/>):<p className="progress-empty">승인된 기획에서 만든 작업이 아직 없습니다.</p>}
     </section>
   </div>;
 }
@@ -116,6 +124,8 @@ type RawPost=(path:string,body:object)=>Promise<Response>;
 const pendingKey='orbit.progress.pending';
 const runErrors:Record<string,string>={RUN_ACTIVE:'이 작업은 이미 실행 중입니다. 기존 실행이 끝난 뒤 다시 시도하세요.',PLANNING_VERSION_STALE:'작업의 승인 기준이 현재 승인본이 아닙니다. 기획을 확인하세요.',
   CLAUDE_NOT_INSTALLED:'Claude Code가 설치되어 있지 않습니다.',SOLO_RECOVERY_REQUIRED:'종료를 확인하지 못한 실행이 있어 새 실행이 차단되었습니다.',IDEMPOTENCY_CONFLICT:'저장된 요청과 다른 작업입니다. 새로고침 후 확인하세요.'};
+const recoveryErrors:Record<string,string>={CLAUDE_RUN_STILL_OWNED:'Orbit이 아직 이 실행을 관리 중입니다. 종료가 관측될 때까지 기다리거나 중단을 요청하세요.',
+  CLAUDE_RUN_NOT_LOST:'이 실행은 복구 대상이 아닙니다. 새로고침 후 상태를 확인하세요.',CLAUDE_STOP_CONFIRMATION_REQUIRED:'종료 확인이 필요합니다.',SESSION_BUSY:'Orbit이 종료 중입니다.'};
 function readPending(projectId:string):{taskId:string;requestId:string}|null{
   try{const value=JSON.parse(sessionStorage.getItem(pendingKey)??'null');return value&&value.projectId===projectId&&typeof value.taskId==='string'&&typeof value.requestId==='string'?value:null;}catch{return null;}
 }
@@ -164,6 +174,18 @@ export function ProjectProgressPanel({projectId,projectKind,online,lastSeq,lastE
     try{const response=await post(`/api/runs/${encodeURIComponent(task.latestRunId)}/interrupt`,{});if(!response.ok)setError('중단 요청을 보내지 못했습니다.');}
     catch{setError('중단 요청 결과를 확인하지 못했습니다. 진행판의 다음 관측을 확인하세요.');}
   });
+  const recoveryIds=useRef(new Map<string,string>());
+  const recover=(runId:string)=>act(async()=>{
+    if(!post)return;
+    // An uncertain answer keeps the same requestId so a manual retry cannot record a second recovery.
+    const requestId=recoveryIds.current.get(runId)??crypto.randomUUID();recoveryIds.current.set(runId,requestId);
+    let response:Response;
+    try{response=await post(`/api/projects/${encodeURIComponent(projectId)}/claude-runs/${encodeURIComponent(runId)}/recover`,{requestId,confirmedStopped:true});}
+    catch{setError('차단 해제 결과를 확인하지 못했습니다. 진행판을 확인한 뒤 다시 시도하세요.');return;}
+    const data=await response.json().catch(()=>null) as {error?:string}|null;
+    if(response.status<500)recoveryIds.current.delete(runId);
+    if(!response.ok)setError(recoveryErrors[data?.error??'']??'차단을 해제하지 못했습니다. 기록을 확인하세요.');
+  });
   const showHandoff=(task:ProgressTask)=>act(async()=>{
     if(handoff?.taskId===task.id){setHandoff(null);return;}
     try{
@@ -172,7 +194,7 @@ export function ProjectProgressPanel({projectId,projectKind,online,lastSeq,lastE
       if(value.taskId!==task.id||typeof value.markdown!=='string')throw new Error();setHandoff({taskId:task.id,markdown:value.markdown});
     }catch{setError('인계 자료를 불러오지 못했습니다.');}
   });
-  const actions:TaskActions|undefined=projectKind==='general'&&post?{runtimeLabel:'Claude Code',canRun:true,busy:busy||!online,pendingTaskId:pending?.taskId??null,handoff,onRun:run,onInterrupt:interrupt,onHandoff:showHandoff}
+  const actions:TaskActions|undefined=projectKind==='general'&&post?{runtimeLabel:'Claude Code',canRun:true,busy:busy||!online,pendingTaskId:pending?.taskId??null,handoff,onRun:run,onInterrupt:interrupt,onHandoff:showHandoff,onRecover:recover}
     :projectKind==='code'?{runtimeLabel:'Codex',canRun:false,busy:busy||!online,pendingTaskId:null,handoff,onRun:()=>{},onInterrupt:()=>{},onHandoff:showHandoff}:undefined;
   if(!projectId)return <section className="surface"><p>프로젝트를 선택하면 진행 상태를 볼 수 있습니다.</p></section>;
   return <>

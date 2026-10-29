@@ -178,7 +178,7 @@ export class Controller {
     this.merges=new MergeService(store,projects,this.verification,()=>this.qualityBusy()||this.soloRecoveryRequired()||!!this.extensionPending||!!this.active()||!!this.connecting||this.switching||this.modelHub.active||!!this.workflows?.active||!!this.reviews?.active||!!this.planningSuggestions?.active);
     this.workflows=new WorkflowService(store,projects,commandResolver,()=>this.qualityBusy()||this.soloRecoveryRequired()||!!this.extensionPending||!!this.active()||!!this.connecting||this.switching||this.modelHub.active||this.verification.active||this.merges.active||!!this.reviews?.active||!!this.planningSuggestions?.active,id=>{this.merges.ensureAvailable(id);this.verification.ensureAvailable(id);this.planningSuggestions.ensureAvailable(id);this.reviews.ensureAvailable(id);});
     this.reviews=new ReviewService(store,projects,factory,()=>this.qualityBusy()||this.soloRecoveryRequired()||!!this.extensionPending||!!this.active()||!!this.connecting||this.switching||this.modelHub.active||this.verification.active||this.merges.active||this.workflows.active||!!this.planningSuggestions?.active,id=>{this.planningSuggestions.ensureAvailable(id);this.merges.ensureAvailable(id);this.verification.ensureAvailable(id);this.workflows.ensureAvailable(id);});
-    this.planningSuggestions=new PlanningAgentService(store,projects,factory,projectId=>this.qualityBusy()||this.soloRecoveryRequired()||store.runs().some(run=>run.runtime==='claude-code'&&(!terminal(run.execution)||run.execution==='lost'&&run.projectId===projectId))||!!this.extensionPending||!!this.active()||!!this.connecting||this.switching||this.modelHub.active||this.verification.active||this.merges.active||this.workflows.active||this.reviews.active,id=>{this.merges.ensureAvailable(id);this.verification.ensureAvailable(id);this.workflows.ensureAvailable(id);this.reviews.ensureAvailable(id);},undefined,claudePlanningOptions);
+    this.planningSuggestions=new PlanningAgentService(store,projects,factory,projectId=>this.qualityBusy()||this.soloRecoveryRequired()||store.runs().some(run=>run.runtime==='claude-code'&&(!terminal(run.execution)||run.projectId===projectId&&this.claudeTasks.lostUnresolved(run)))||!!this.extensionPending||!!this.active()||!!this.connecting||this.switching||this.modelHub.active||this.verification.active||this.merges.active||this.workflows.active||this.reviews.active,id=>{this.merges.ensureAvailable(id);this.verification.ensureAvailable(id);this.workflows.ensureAvailable(id);this.reviews.ensureAvailable(id);},undefined,claudePlanningOptions);
     const unavailable=()=>{throw new AppError('QUALITY_PROJECT_REQUIRED',409);};
     this.qualityPorts=projects?createQualityNativePorts({store,projects,factory,...qualityOptions,guard:run=>this.guardQuality(run),repair:async(request,context)=>{try{const result=await this.repairQuality(request,context);this.saveQualityReceipt(context,{result,evidence:result.evidence});return result;}catch(error){if(context.sourceRun.runtime==='claude-code'&&!store.findRequest(context.stepId)){const failureIssue=error instanceof Error&&/^[A-Z][A-Z0-9_]{1,100}$/.test(error.message)?error.message:'QUALITY_REPAIR_NOT_STARTED';this.saveQualityReceipt(context,{failureIssue,processStopped:true});}throw error;}},verify:async context=>{const result=await this.verifyQuality(context);this.saveQualityReceipt(context,{result,evidence:null});return result;},recover:(step,context)=>this.recoverQuality(step,context)}):{guard:unavailable,snapshot:unavailable,review:unavailable,repair:unavailable,verify:unavailable};
     const review=this.qualityPorts.review,verify=this.qualityPorts.verify;
@@ -753,6 +753,12 @@ export class Controller {
     return this.verification.acceptance.preview(projectId,workspaceId,taskId);
   }
   claudeQuota(){return this.claudeTasks.quota();}
+  claudeRecoveries(projectId:string){return this.claudeTasks.recoveries(projectId);}
+  /** Explicit user action only; never retries, re-dispatches or marks the lost run successful. */
+  recoverClaudeRun(projectId:string,runId:string,input:{requestId:string;confirmedStopped:boolean}){
+    if(!this.store.projects().some(project=>project.id===projectId&&project.kind==='general'))throw new AppError('PROJECT_NOT_FOUND',404);
+    return this.claudeTasks.recover(projectId,runId,input);
+  }
   private saveQualityReceipt(context:QualityStepContext,value:NonNullable<Awaited<ReturnType<NonNullable<QualityServicePorts['recover']>>>>){
     this.store.db.prepare('INSERT INTO quality_controller_receipts VALUES(?,?)').run(context.stepId,JSON.stringify({loopId:context.loopId,sourceRunId:context.sourceRun.id,baselineDigest:context.version.contentHash,artifactDigest:context.artifact.digest,value}));
   }
@@ -780,7 +786,7 @@ export class Controller {
   }
   private guardQuality(run:Run){
     this.ownQualityStep(()=>this.idle());
-    if(this.store.runs().some(item=>item.runtime==='claude-code'&&(!terminal(item.execution)||item.execution==='lost')))throw new AppError('SOLO_RECOVERY_REQUIRED',409);
+    if(this.store.runs().some(item=>item.runtime==='claude-code'&&(!terminal(item.execution)||this.claudeTasks.lostUnresolved(item))))throw new AppError('SOLO_RECOVERY_REQUIRED',409);
     if(run.workspaceId&&run.workspaceId!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);
   }
   private waitQualityRun(id:string,signal:AbortSignal):Promise<Run>{

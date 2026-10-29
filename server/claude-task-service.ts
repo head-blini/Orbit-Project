@@ -23,6 +23,7 @@ import {ProjectAiPreferencesService} from './project-ai-preferences.ts';
 import {HarnessStore} from './harness-store.ts';
 import {classifyHarnessCandidate,harnessDigest} from './harness-policy.ts';
 import {renderOverlay,type HarnessTarget,type HarnessVersion} from '../shared/harness.ts';
+import type {ClaudeRunRecovery} from '../shared/project-progress.ts';
 
 type Runner=Pick<ClaudeCodeRun,'start'|'interrupt'>;
 type Quota=Extract<ClaudeEvent,{kind:'quota'}>;
@@ -33,6 +34,15 @@ export interface ClaudeTaskServiceOptions {
   harness?:Pick<HarnessStore,'current'>;
 }
 type Active={runner:Runner;done:Promise<void>};
+const RECOVERY='run.recovery_confirmed';
+
+/** Expected reset of the observed rejected windows; unknown unless every rejected window reports a valid time. */
+export function claudeQuotaResetsAt(quota:Pick<Quota,'windows'>|null):string|null{
+  const rejected=quota?.windows.filter(window=>window.status==='rejected')??[];
+  const times=rejected.map(window=>typeof window.resetsAt==='string'&&Number.isFinite(Date.parse(window.resetsAt))?window.resetsAt:null);
+  // Every rejected window must reset before work can resume, so the latest one bounds the wait.
+  return times.length&&!times.includes(null)?(times as string[]).reduce((a,b)=>Date.parse(a)>=Date.parse(b)?a:b):null;
+}
 
 /** HE-5a: the promoted pointer only, re-checked against AX06 at injection. Anything unreadable or unsafe refuses
  * dispatch: HE-D1 names a silent v0 fallback only for the Codex length bound, so Claude fails closed. */
@@ -82,7 +92,7 @@ export class ClaudeTaskService {
     const conflicts=this.store.runs().filter(run=>run.runtime==='claude-code'&&run.projectId===projectId&&!isolated(run));
     // Worker spaces live under the project folder, so a non-isolated run there can still reach them: it blocks workers too.
     if(runs.some(run=>!terminal(run.execution))||conflicts.some(run=>!terminal(run.execution)))throw new AppError('RUN_ACTIVE',409);
-    if(runs.some(run=>run.execution==='lost')||conflicts.some(run=>run.execution==='lost'))throw new AppError('SOLO_RECOVERY_REQUIRED',409);
+    if(runs.some(run=>this.lostUnresolved(run))||conflicts.some(run=>this.lostUnresolved(run)))throw new AppError('SOLO_RECOVERY_REQUIRED',409);
     worker?.beforeDispatch();
     if(this.closing)throw new AppError('SESSION_BUSY',409);
     if(!this.projects)throw new AppError('PROJECT_CREATION_UNAVAILABLE',409);
@@ -156,6 +166,48 @@ export class ClaudeTaskService {
     }catch{result={execution:'lost',reason:'EXIT_NOT_OBSERVED'};}
     try{this.store.updateRun(id,{execution:result.execution},'run.'+result.execution,{reason:result.reason});}
     catch{/* The durable nonterminal intent still blocks this task and becomes lost on restart. */}
+  }
+  /** A lost run blocks new owners until the user explicitly records that it stopped. History is never rewritten. */
+  lostUnresolved(run:Run):boolean{return run.execution==='lost'&&(run.runtime!=='claude-code'||!this.released(run.id));}
+  private released(runId:string){
+    const row=this.store.db.prepare('SELECT at,data FROM events WHERE kind=? AND run_id=? ORDER BY seq LIMIT 1').get(RECOVERY,runId);
+    return row?{at:String(row.at),...JSON.parse(String(row.data)) as {requestId:string;basis:ClaudeRunRecovery['basis']}}:null;
+  }
+  private event(runId:string,kind:string){
+    const row=this.store.db.prepare('SELECT data FROM events WHERE kind=? AND run_id=? ORDER BY seq DESC LIMIT 1').get(kind,runId);
+    return row?JSON.parse(String(row.data)) as Record<string,unknown>:null;
+  }
+  /** Read-only recovery view of one lost Claude run; null for any other run. */
+  recovery(runId:string):ClaudeRunRecovery|null{
+    const run=this.store.getRun(runId);if(!run||run.runtime!=='claude-code'||run.execution!=='lost')return null;
+    const released=this.released(run.id),reason=this.event(run.id,'run.lost')?.reason;
+    return {runId:run.id,taskId:run.taskId??null,state:released?'released':'required',lostReason:typeof reason==='string'?reason:null,
+      exitObserved:this.event(run.id,'run.runtime_outcome')?.exit==='observed',basis:released?.basis??null,releasedAt:released?.at??null};
+  }
+  recoveries(projectId:string):ClaudeRunRecovery[]{
+    return this.store.runs().filter(run=>run.runtime==='claude-code'&&run.projectId===projectId&&run.execution==='lost').map(run=>this.recovery(run.id)!);
+  }
+  /**
+   * Explicit user recovery of a lost run, mirroring PlanningAgentService.recover/ReviewService.recover/VerificationService.acknowledgeStopped:
+   * the user must confirm the process stopped. It only releases the dispatch block; the run stays lost, is never retried
+   * or marked successful, and a new run needs a new requestId.
+   */
+  recover(projectId:string,runId:string,input:{requestId:string;confirmedStopped:boolean}):ClaudeRunRecovery{
+    if(typeof input?.requestId!=='string'||!/^[a-zA-Z0-9-]{8,80}$/.test(input.requestId))throw new AppError('INVALID_REQUEST_ID',400);
+    if(typeof input.confirmedStopped!=='boolean')throw new AppError('INVALID_FIELDS',400);
+    const prior=this.store.db.prepare("SELECT run_id FROM events WHERE kind=? AND json_extract(data,'$.requestId')=? LIMIT 1").get(RECOVERY,input.requestId);
+    const run=this.store.getRun(runId);
+    if(!run||run.runtime!=='claude-code'||run.projectId!==projectId)throw new AppError('RUN_NOT_FOUND',404);
+    if(prior){if(prior.run_id!==runId)throw new AppError('IDEMPOTENCY_CONFLICT',409);return this.recovery(runId)!;}
+    if(this.closing)throw new AppError('SESSION_BUSY',409);
+    // This server still owns the child: its exit will be observed, so a confirmation cannot replace it.
+    if(this.active.has(runId))throw new AppError('CLAUDE_RUN_STILL_OWNED',409);
+    if(run.execution!=='lost')throw new AppError('CLAUDE_RUN_NOT_LOST',409);
+    const view=this.recovery(runId)!;
+    if(view.state==='released')return view;
+    if(!input.confirmedStopped)throw new AppError('CLAUDE_STOP_CONFIRMATION_REQUIRED',409);
+    this.store.append(RECOVERY,runId,{requestId:input.requestId,basis:view.exitObserved?'exit_observed':'user_confirmed_stopped',lostReason:view.lostReason});
+    return this.recovery(runId)!;
   }
   interrupt(id:string):void {
     const run=this.store.getRun(id);if(!run||run.runtime!=='claude-code')throw new AppError('RUN_NOT_FOUND',404);

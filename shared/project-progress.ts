@@ -19,7 +19,11 @@ export type TaskStage='not_started'|'quota_wait'|'running'|'interrupt_requested'
   |'verification_failed'|'revalidation_required'|'verified'|'interrupted'|'error'|'lost';
 export type ProgressVerification='not_run'|'running'|'passed'|'failed'|'stale'|'lost';
 export type ConnectionFreshness='live'|'quiet'|'offline';
-export interface ProgressSignals {provider?:ProviderStatus;quota?:'available'|'exhausted'|'unknown';recoveryRequired?:boolean}
+export interface ProgressSignals {provider?:ProviderStatus;quota?:'available'|'exhausted'|'unknown';recoveryRequired?:boolean;
+  /** Expected reset of the exhausted observed window; null means unknown. Absent when the runtime reports none. */quotaResetsAt?:string|null}
+/** Explicit recovery state of a lost Claude Code run. `released` only lifts the dispatch block; the run stays lost. */
+export interface ClaudeRunRecovery {runId:string;taskId:string|null;state:'required'|'released';lostReason:string|null;exitObserved:boolean;
+  basis:'exit_observed'|'user_confirmed_stopped'|null;releasedAt:string|null}
 export interface ProgressInput {
   projectId:string;tasks:readonly SavedTask[];runs:readonly Run[];checks:readonly CheckRecord[];
   plans:readonly PlanningVersion[];currentPlanIds:readonly string[];signals:ProgressSignals;
@@ -42,13 +46,14 @@ export interface ProgressTask {
   latestRunId:string|null;startedAt:string|null;lastObservedAt:string|null;verification:ProgressVerification;
   criteria:{total:number;verified:number};runs:ProgressRun[];runsTotal:number;
 }
-export interface ProgressBlocker {code:'RECOVERY_REQUIRED'|'LOGIN_REQUIRED'|'RUNTIME_NOT_INSTALLED'|'RUNTIME_ERROR'|'QUOTA_EXHAUSTED';scope:'project'}
+export interface ProgressBlocker {code:'RECOVERY_REQUIRED'|'LOGIN_REQUIRED'|'RUNTIME_NOT_INSTALLED'|'RUNTIME_ERROR'|'QUOTA_EXHAUSTED';scope:'project';resetsAt?:string|null}
 export interface ProjectProgress {
   projectId:string;
   plan:{id:string;revision:number;state:PlanningVersion['state'];contentHash:string;title:string;goal:string}|null;
   totals:{tasks:number;verifiedTasks:number;basis:'tasks'};
   criteria:{total:number;verified:number;basis:'acceptance_criteria'};
   blockers:ProgressBlocker[];tasks:ProgressTask[];untaskedRuns:number;lastObservedAt:string|null;
+  claudeRecovery?:ClaudeRunRecovery[];
 }
 
 /** Existing Run records are Codex App Server turns; other runtimes add their own label later. */
@@ -106,7 +111,7 @@ export function buildProjectProgress(input:ProgressInput):ProjectProgress{
   if(signals.provider==='auth_required')blockers.push({code:'LOGIN_REQUIRED',scope:'project'});
   if(signals.provider==='not_installed')blockers.push({code:'RUNTIME_NOT_INSTALLED',scope:'project'});
   if(signals.provider==='error')blockers.push({code:'RUNTIME_ERROR',scope:'project'});
-  if(signals.quota==='exhausted')blockers.push({code:'QUOTA_EXHAUSTED',scope:'project'});
+  if(signals.quota==='exhausted')blockers.push({code:'QUOTA_EXHAUSTED',scope:'project',...(signals.quotaResetsAt!==undefined?{resetsAt:signals.quotaResetsAt}:{})});
   const plans=input.plans.filter(plan=>plan.projectId===input.projectId&&current.has(plan.id)&&plan.state==='approved');
   const plan=plans.sort((a,b)=>(a.approvedAt??a.createdAt??'').localeCompare(b.approvedAt??b.createdAt??'')).at(-1);
   return {projectId:input.projectId,

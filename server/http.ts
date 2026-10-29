@@ -31,6 +31,7 @@ import {AppPreviewHost} from './app-preview.ts';
 import {assertGitProject} from './projects.ts';
 import {quotaSignal,type ProgressSignals} from '../shared/project-progress.ts';
 import {quotaFromClaudeWindows} from './runtimes/claude-task.ts';
+import {claudeQuotaResetsAt} from './claude-task-service.ts';
 
 function json(res:ServerResponse,status:number,value:unknown){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(value));}
 async function body(req:IncomingMessage,limit=18000):Promise<Record<string,unknown>>{
@@ -421,6 +422,13 @@ export function createHttpServer(controller:Controller,assets:string,options:{wo
           if((studioRoute[4]==='replan'||studioRoute[4]==='diff')&&url.search)throw new AppError('INVALID_FIELDS',400);
           json(res,200,studio.mutate(studioRoute[1],studioRoute[2],studioRoute[3],studioRoute[4],data));return;
         }
+        const claudeRecover=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/claude-runs\/([a-f0-9-]{36})\/recover$/);
+        if(claudeRecover){
+          if(url.search)throw new AppError('INVALID_FIELDS',400);
+          exact(data,['requestId','confirmedStopped']);
+          if(typeof data.requestId!=='string'||typeof data.confirmedStopped!=='boolean')throw new AppError('INVALID_FIELDS',400);
+          json(res,200,controller.recoverClaudeRun(claudeRecover[1],claudeRecover[2],{requestId:data.requestId,confirmedStopped:data.confirmedStopped}));return;
+        }
         const taskRun=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/tasks\/([a-f0-9-]{36})\/run$/);
         if(taskRun){
           // A workspace-bound request keeps the code-project path, which answers GIT_REQUIRED for general projects.
@@ -494,8 +502,10 @@ export function createHttpServer(controller:Controller,assets:string,options:{wo
         const current=(runtimeId:string,quota:NonNullable<ProgressSignals['quota']>)=>quota==='available'&&!(controller.subscriptionUsage?.snapshot()??[]).some(entry=>entry.observation.runtimeId===runtimeId&&entry.observation.freshness==='fresh')?'unknown':quota;
         // Signals follow the project's runtime: general projects run on Claude Code, code projects on Codex.
         const general=controller.store.projects().some(project=>project.id===progressRoute[1]&&project.kind==='general');
-        json(res,200,progress.read(progressRoute[1],general?{recoveryRequired:!!state.soloRecoveryRequired,quota:current('claude-code',quotaFromClaudeWindows(controller.claudeQuota()))}
-          :{provider:state.provider,recoveryRequired:!!state.soloRecoveryRequired,quota:current('codex',quotaSignal(controller.usageSnapshot()))}));return;
+        if(!general){json(res,200,progress.read(progressRoute[1],{provider:state.provider,recoveryRequired:!!state.soloRecoveryRequired,quota:current('codex',quotaSignal(controller.usageSnapshot()))}));return;}
+        const claudeQuota=controller.claudeQuota();
+        json(res,200,{...progress.read(progressRoute[1],{recoveryRequired:!!state.soloRecoveryRequired,quota:current('claude-code',quotaFromClaudeWindows(claudeQuota)),quotaResetsAt:claudeQuotaResetsAt(claudeQuota)}),
+          claudeRecovery:controller.claudeRecoveries(progressRoute[1])});return;
       }
       if(req.method==='GET'&&registryRoute&&!registryRoute[2]){
         if(url.search)throw new AppError('INVALID_FIELDS',400);
