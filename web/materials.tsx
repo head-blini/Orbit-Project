@@ -12,8 +12,8 @@ const messages:Record<string,string>={
   INVALID_MATERIAL:'파일 이름은 문자·숫자로 시작하는 일반 이름이고, 내용은 UTF-8 텍스트여야 합니다.',
   MATERIAL_EXISTS:'같은 이름의 다른 자료가 이미 있습니다. 바꾸려면 그 자료의 ‘새 버전으로 교체’를 사용하세요.',
   MATERIAL_CHANGED:'자료가 그 사이에 바뀌었습니다. 목록을 새로 본 뒤 다시 교체하세요.',MATERIAL_NOT_FOUND:'교체할 자료를 찾지 못했습니다.',
-  MATERIAL_HISTORY_FULL:'이전 버전 보관 한도에 도달해 교체하지 않았습니다.',MATERIALS_QUOTA:'자료 개수 한도에 도달했습니다.',
-  RUN_ACTIVE:'실행 중인 작업이 끝난 뒤 다시 시도하세요.',
+  MATERIAL_HISTORY_FULL:'이전 버전 보관 한도(프로젝트당 50개)에 도달해 교체하지 않았습니다.',MATERIAL_TOO_LARGE:'지금 자료가 128 KB보다 커서 이전 버전을 보관할 수 없어 교체하지 않았습니다.',MATERIALS_QUOTA:'자료 개수 한도에 도달했습니다.',
+  RUN_ACTIVE:'실행 중인 작업이 끝난 뒤 다시 시도하세요.',PLANNING_BUSY:'AI 기획 제안이 진행 중입니다. 끝난 뒤 다시 시도하세요.',PLANNING_RECOVERY_REQUIRED:'종료를 확인하지 못한 기획 제안이 있어 자료를 바꾸지 않았습니다.',
 };
 
 export function MaterialsCard({projectId,materials,online,locked,post,onChange}:{projectId:string;materials:Material[];online:boolean;locked:boolean;
@@ -44,7 +44,7 @@ export function MaterialsCard({projectId,materials,online,locked,post,onChange}:
       onChange={event=>{const files=[...(event.target.files??[])];event.target.value='';if(files.length)void send(files,null);}}/>
     <input ref={replace} className="sr-only" type="file" accept={extensions.join(',')} disabled={disabled} aria-label="교체할 새 버전 선택" tabIndex={-1}
       onChange={event=>{const files=[...(event.target.files??[])];event.target.value='';const material=target.current;target.current=null;if(material&&files.length===1)void send(files,material);}}/>
-    <p className="work-muted">텍스트 자료({extensions.join(' ')}) · 파일당 128 KB. 같은 이름은 덮어쓰지 않고, 교체하면 이전 버전을 보관합니다. 비밀번호·API 키·개인정보는 넣지 마세요.</p>
+    <p className="work-muted">텍스트 자료({extensions.join(' ')}) · 파일당 128 KB. 같은 이름은 덮어쓰지 않고, 교체하면 이전 버전을 보관합니다(프로젝트당 최대 50개). 비밀번호·API 키·개인정보는 넣지 마세요.</p>
     {note&&<p className="hint" role="status">{note}</p>}
     {issue&&<p role="alert" className="notice">{issue}</p>}
   </>;

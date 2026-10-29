@@ -56,8 +56,13 @@ export class Projects {
   createProject(input:CreateProjectInput):CreatedProject{if(!this.creation)throw new AppError('PROJECT_CREATION_UNAVAILABLE',503);return this.creation.create(input,(project,id)=>this.prepareWorktree(project,id),id=>this.validate(id));}
   /** An existing folder becomes a general project only when its exact path is in ORBIT_ALLOWED_PROJECTS. */
   registerGeneralFolder(input:RegisterFolderInput):CreatedProject{if(!this.folders)throw new AppError('PROJECT_CREATION_UNAVAILABLE',503);return this.folders.register(input,this.allowed);}
+  /** A registered user folder: AI runtimes may run there only inside an isolated worker space. Fails closed. */
+  isRegisteredFolder(projectId:string){
+    if(this.folders?.isRegistered(projectId))return true;
+    const project=this.store.projects().find(p=>p.id===projectId);return !!project&&project.kind==='general'&&!this.creation?.owns(project);
+  }
   private registeredFolder(project:Project){return this.allowed.some(a=>same(a,project.path))&&!!this.folders?.owns(project);}
-  list():Project[]{return this.store.projects().map(p=>({...p,writeEnabled:this.allowed.some(a=>same(a,p.path))||!!this.creation?.owns(p)}));}
+  list():Project[]{return this.store.projects().map(p=>({...p,writeEnabled:this.allowed.some(a=>same(a,p.path))||!!this.creation?.owns(p),...(p.kind==='general'&&this.folders?.isRegistered(p.id)?{registeredFolder:true}:{})}));}
   workspaces(){return this.store.workspaces();}
   register(path:string):Project {
     const {root}=repository(path);if(same(root,this.managed)||inside(root,this.managed)||inside(this.managed,root))throw new AppError('PROJECT_OVERLAP');

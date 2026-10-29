@@ -1,5 +1,5 @@
 import {createHash,randomUUID} from 'node:crypto';
-import {closeSync,constants,lstatSync,mkdirSync,openSync,readFileSync,readdirSync,renameSync,rmSync,writeSync} from 'node:fs';
+import {closeSync,constants,fchmodSync,lstatSync,mkdirSync,openSync,readFileSync,readdirSync,renameSync,rmSync,writeSync} from 'node:fs';
 import {extname,join} from 'node:path';
 import type {Material} from '../shared/deliverables.ts';
 import {containsCredential} from './privacy.ts';
@@ -15,7 +15,7 @@ import type {Store} from './store.ts';
 export const MATERIALS_DIR='inputs';
 const allowed=new Set(['.csv','.md','.txt','.json']);
 export const MAX_MATERIAL_FILES=10,MAX_MATERIAL_BYTES=128*1024;
-const sha=(text:string)=>createHash('sha256').update(text).digest('hex');
+const sha=(text:string|Buffer)=>createHash('sha256').update(text).digest('hex');
 
 export function validMaterialName(name:unknown):name is string{
   return typeof name==='string'&&name.length>=3&&name.length<=80&&/^[\p{L}\p{N}][\p{L}\p{N} ._()-]*$/u.test(name)&&!name.includes('..')&&allowed.has(extname(name).toLowerCase());
@@ -66,21 +66,23 @@ export function addMaterials(root:string,input:unknown):Material[]{
 }
 
 export const MAX_MATERIAL_VERSIONS=50;
-export type PriorMaterial={path:string;sha256:string;text:string};
+export type PriorMaterial={path:string;sha256:string;bytes:Buffer};
 /** Append-only previous bytes of replaced materials; kept in Orbit's store, never in the user's folder. */
 export class MaterialHistory {
   private store:Store;
   constructor(store:Store){
     this.store=store;
-    store.db.exec(`CREATE TABLE IF NOT EXISTS material_versions(id INTEGER PRIMARY KEY AUTOINCREMENT,project_id TEXT NOT NULL,path TEXT NOT NULL,sha256 TEXT NOT NULL,text TEXT NOT NULL,replaced_at TEXT NOT NULL);
+    store.db.exec(`CREATE TABLE IF NOT EXISTS material_versions(id INTEGER PRIMARY KEY AUTOINCREMENT,project_id TEXT NOT NULL,path TEXT NOT NULL,sha256 TEXT NOT NULL,bytes BLOB NOT NULL,replaced_at TEXT NOT NULL);
       CREATE TRIGGER IF NOT EXISTS material_versions_no_update BEFORE UPDATE ON material_versions BEGIN SELECT RAISE(ABORT,'APPEND_ONLY'); END;
       CREATE TRIGGER IF NOT EXISTS material_versions_no_delete BEFORE DELETE ON material_versions BEGIN SELECT RAISE(ABORT,'APPEND_ONLY'); END;`);
   }
-  keep(projectId:string,prior:PriorMaterial){
+  /** Records the prior bytes and swaps the file in one transaction: a failed swap leaves no history row. */
+  keep(projectId:string,prior:PriorMaterial,swap:()=>void){
     this.store.transaction(()=>{
       // shortcut: a fixed per-project cap instead of pruning; raise it or add export when users hit it.
       if(Number(this.store.db.prepare('SELECT COUNT(*) AS n FROM material_versions WHERE project_id=?').get(projectId)!.n)>=MAX_MATERIAL_VERSIONS)throw new AppError('MATERIAL_HISTORY_FULL',409);
-      this.store.db.prepare('INSERT INTO material_versions(project_id,path,sha256,text,replaced_at) VALUES(?,?,?,?,?)').run(projectId,prior.path,prior.sha256,prior.text,new Date().toISOString());
+      this.store.db.prepare('INSERT INTO material_versions(project_id,path,sha256,bytes,replaced_at) VALUES(?,?,?,?,?)').run(projectId,prior.path,prior.sha256,prior.bytes,new Date().toISOString());
+      swap();
     });
   }
   counts(projectId:string){
@@ -88,30 +90,45 @@ export class MaterialHistory {
   }
 }
 
+const temporaryName=/^\.orbit-replace-[0-9a-f-]{36}$/;
+/** Writes bytes beside the target with the given mode; the caller renames it into place. */
+function stage(dir:string,bytes:Buffer,mode:number){
+  const temporary=join(dir,'.orbit-replace-'+randomUUID());
+  try{
+    const fd=openSync(temporary,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|(process.platform==='win32'?0:constants.O_NOFOLLOW),0o600);
+    try{writeSync(fd,bytes);if(process.platform!=='win32')fchmodSync(fd,mode);}finally{closeSync(fd);}
+  }catch(error){rmSync(temporary,{force:true});throw error;}
+  return temporary;
+}
+
 /**
  * Explicitly replaces one existing material with a new version. The caller's
- * expected digest guards against replacing bytes the user has not seen; the
- * previous bytes are archived first, so a failed archive leaves the file as is.
+ * expected digest guards against replacing bytes the user has not seen. The
+ * prior bytes are recorded in the same transaction that swaps the file; if that
+ * transaction fails after the swap, the prior bytes are put back.
  */
-export function replaceMaterial(root:string,input:unknown,archive:(prior:PriorMaterial)=>void):Material[]{
+export function replaceMaterial(root:string,input:unknown,archive:(prior:PriorMaterial,swap:()=>void)=>void):Material[]{
   if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).sort().join(',')!=='expectedSha256,name,text')throw new AppError('INVALID_FIELDS',400);
   const {expectedSha256}=input as {expectedSha256:unknown};
   if(typeof expectedSha256!=='string'||!/^[a-f0-9]{64}$/.test(expectedSha256))throw new AppError('INVALID_FIELDS',400);
   const {name,text}=checkMaterial(input as {name:unknown;text:unknown});
   const path=MATERIALS_DIR+'/'+name,current=listMaterials(root).find(item=>item.path===path);
   if(!current)throw new AppError('MATERIAL_NOT_FOUND',404);
-  const target=join(root,MATERIALS_DIR,name),stat=lstatSync(target);
+  const dir=join(root,MATERIALS_DIR),target=join(dir,name),stat=lstatSync(target);
   if(!stat.isFile()||stat.isSymbolicLink()||stat.nlink>1)throw new AppError('MATERIALS_UNAVAILABLE',409);
   if(current.sha256===sha(text))return listMaterials(root);
   if(current.sha256!==expectedSha256)throw new AppError('MATERIAL_CHANGED',409);
-  const prior=readFileSync(target,'utf8');if(sha(prior)!==expectedSha256)throw new AppError('MATERIAL_CHANGED',409);
-  archive({path,sha256:expectedSha256,text:prior});
-  // Dot-prefixed names are never listed as materials; rename swaps the entry without following links.
-  const temporary=join(root,MATERIALS_DIR,'.orbit-replace-'+randomUUID());
-  try{
-    const fd=openSync(temporary,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|(process.platform==='win32'?0:constants.O_NOFOLLOW),0o600);
-    try{writeSync(fd,text);}finally{closeSync(fd);}
-    renameSync(temporary,target);
-  }catch(error){rmSync(temporary,{force:true});throw error;}
+  if(stat.size>MAX_MATERIAL_BYTES)throw new AppError('MATERIAL_TOO_LARGE',409);
+  const prior=readFileSync(target);if(sha(prior.toString('utf8'))!==expectedSha256)throw new AppError('MATERIAL_CHANGED',409);
+  // Leftovers of an interrupted replace; dot-prefixed names are never listed as materials.
+  for(const entry of readdirSync(dir,{withFileTypes:true}))if(entry.isFile()&&temporaryName.test(entry.name))rmSync(join(dir,entry.name),{force:true});
+  const mode=stat.mode&0o777,temporary=stage(dir,Buffer.from(text),mode);let swapped=false;
+  try{archive({path,sha256:createHash('sha256').update(prior).digest('hex'),bytes:prior},()=>{renameSync(temporary,target);swapped=true;});}
+  catch(error){
+    rmSync(temporary,{force:true});
+    // The history row was rolled back, so the prior bytes must not be lost.
+    if(swapped)renameSync(stage(dir,prior,mode),target);
+    throw error;
+  }
   return listMaterials(root);
 }

@@ -892,13 +892,15 @@ export class Controller {
     if(!this.projects)throw new AppError('PROJECT_CREATION_UNAVAILABLE',409);
     // AI runtimes read this folder; do not change it under an active run of this project.
     if(this.store.runs().some(run=>run.projectId===projectId&&!terminal(run.execution)))throw new AppError('RUN_ACTIVE',409);
+    // Planning suggestions are not runs; a pending one also reads these materials.
+    this.planningSuggestions.ensureAvailable(projectId);
     change(this.projects.generalProject(projectId).path);
     const items=this.materials(projectId);
     this.store.append('project.materials',null,{projectId,paths:items.map(item=>item.path)});return items;
   }
   addMaterials(projectId:string,input:unknown){return this.changeMaterials(projectId,root=>addMaterials(root,input));}
   /** A new version in place of the named material; approved worker batches then fail WORKER_INPUTS_CHANGED. */
-  replaceMaterial(projectId:string,input:unknown){return this.changeMaterials(projectId,root=>replaceMaterial(root,input,prior=>this.materialHistory.keep(projectId,prior)));}
+  replaceMaterial(projectId:string,input:unknown){return this.changeMaterials(projectId,root=>replaceMaterial(root,input,(prior,swap)=>this.materialHistory.keep(projectId,prior,swap)));}
   deliverablePreview(projectId:string,path:string){if(!this.projects)throw new AppError('PROJECT_CREATION_UNAVAILABLE',409);return previewDeliverable(this.projects.generalProject(projectId).path,path);}
   /** Switch only the existing Codex channel. Claude attempts keep their own runners. */
   async prepareWorkerWorkspace(worker:WorkerDispatchContext){

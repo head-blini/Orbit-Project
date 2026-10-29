@@ -135,7 +135,7 @@ export class ManagedProjectCreation {
 type Registration={requestId:string;digest:string;name:string;path:string;identity:Directory[];projectId:string;createdAt:string};
 const registrationDigest=(name:string,path:string)=>hash({register:'general-folder',name,path});
 // Exact system folders and their contents; the OS temp root stays usable (it lives under /private/var on macOS).
-const systemRoots=process.platform==='win32'?[/^[a-z]:\\(?:windows|program files(?: \(x86\))?|programdata)(?:\\|$)/i]:[/^\/(?:System|Library|Applications|usr|bin|sbin|etc|dev|opt|cores|Volumes)(?:\/|$)/];
+const systemRoots=process.platform==='win32'?[/^[a-z]:\\(?:windows|program files(?: \(x86\))?|programdata)(?:\\|$)/i]:[/^\/(?:System|Library|Applications|usr|bin|sbin|etc|dev|opt|cores|Volumes)(?:\/|$)/i];
 // Runtime config an AI CLI would load from its working folder, and folders Orbit itself owns.
 const runtimeConfig=/^(?:\.git|\.claude|\.codex|\.agents|\.mcp\.json)$/i,reserved=/^(?:inputs|output|\.orbit-workers)$/i;
 /** Read-only checks of an existing folder; nothing here writes, moves or follows links. */
@@ -151,6 +151,12 @@ function inspectFolder(root:string){
   }};
   walk(root);
 }
+const key=(d:Directory)=>d.device+':'+d.inode;
+// True when `ancestor` is `path` or one of its ancestors, by identity. Unresolvable paths fall back to the string checks.
+function ancestorOf(ancestor:Directory,path:string){try{return chain(path).some(d=>key(d)===key(ancestor));}catch{return false;}}
+function related(identity:Directory[],other:string){
+  try{const own=chain(other)[0];return identity.some(d=>key(d)===key(own))||ancestorOf(identity[0],other);}catch{return false;}
+}
 function normalizeRegistration(input:RegisterFolderInput){
   if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).sort().join(',')!=='name,path,requestId'||typeof input.path!=='string')throw new AppError('INVALID_FIELDS',400);
   const {requestId,name}=normalize({requestId:input.requestId,name:input.name,kind:'general'});
@@ -159,7 +165,9 @@ function normalizeRegistration(input:RegisterFolderInput){
 
 /**
  * Registers an existing, operator-allowlisted folder as a general project. The
- * folder is only inspected; Orbit later writes only its own inputs/ and output/.
+ * folder is only inspected here. Afterwards Orbit writes materials to inputs/
+ * and worker spaces to .orbit-workers/; AI runtimes may run there only inside
+ * an isolated worker space (see isRegistered and ISOLATION_REQUIRED).
  */
 export class GeneralFolderRegistration {
   private store:Store;private blocked:string[];
@@ -177,6 +185,8 @@ export class GeneralFolderRegistration {
       &&equal(chain(r.path),r.identity)&&lstatSync(join(r.path,'.git'),{throwIfNoEntry:false})===undefined;}catch{return false;}
   }
   owns(project:Project){return this.receipts().some(r=>this.matches(r,project));}
+  /** Provenance only, valid or not: callers use it to fail closed. */
+  isRegistered(projectId:string){return this.store.db.prepare('SELECT body FROM project_registration_receipts').all().some(row=>{try{return JSON.parse(String(row.body)).projectId===projectId;}catch{return true;}});}
   register(input:RegisterFolderInput,allowed:readonly string[]):CreatedProject{
     const {requestId,name,path}=normalizeRegistration(input),digest=registrationDigest(name,path);
     const prior=this.store.db.prepare('SELECT digest,body FROM project_registration_receipts WHERE request_id=?').get(requestId);
@@ -188,16 +198,20 @@ export class GeneralFolderRegistration {
     }
     if(!lstatSync(path).isDirectory())throw new AppError('INVALID_PROJECT',400);
     if(!allowed.some(entry=>process.platform==='win32'?entry.toLowerCase()===path.toLowerCase():entry===path))throw new AppError('FOLDER_NOT_ALLOWED',403);
-    const home=resolve(homedir());
-    if(path===parse(path).root||contains(path,home)||systemRoots.some(pattern=>pattern.test(path)))throw new AppError('FOLDER_NOT_ALLOWED',403);
-    if([...this.blocked,...this.store.projects().map(project=>project.path)].some(other=>contains(other,path)||contains(path,other)))throw new AppError('PROJECT_OVERLAP',409);
+    const home=resolve(homedir()),identity=chain(path);
+    // String checks plus device/inode checks, so case-folded or Unicode-normalized aliases cannot slip past.
+    const overlaps=(other:string)=>contains(other,path)||contains(path,other)||related(identity,other);
+    if(path===parse(path).root||contains(path,home)||ancestorOf(identity[0],home)||systemRoots.some(pattern=>pattern.test(path)))throw new AppError('FOLDER_NOT_ALLOWED',403);
+    if([...this.blocked,...this.store.projects().map(project=>project.path)].some(overlaps))throw new AppError('PROJECT_OVERLAP',409);
     try{accessSync(path,constants.R_OK|constants.W_OK);}catch{throw new AppError('PATH_UNAVAILABLE',400);}
     inspectFolder(path);
-    const r:Registration={requestId,digest,name,path,identity:chain(path),projectId:randomUUID(),createdAt:new Date().toISOString()};
+    // The folder (or an ancestor) must not have been swapped while it was inspected.
+    if(!equal(chain(path),identity))throw new AppError('FOLDER_CHANGED',409);
+    const r:Registration={requestId,digest,name,path,identity,projectId:randomUUID(),createdAt:new Date().toISOString()};
     const project:Project={id:r.projectId,name,kind:'general',path,createdAt:r.createdAt,writeEnabled:false};
     this.store.transaction(()=>{
       // Recheck under the write lock: another request may have claimed this folder meanwhile.
-      if(this.store.projects().some(other=>contains(other.path,path)||contains(path,other.path)))throw new AppError('PROJECT_OVERLAP',409);
+      if(this.store.projects().some(other=>overlaps(other.path)))throw new AppError('PROJECT_OVERLAP',409);
       this.store.db.prepare('INSERT INTO project_registration_receipts VALUES(?,?,?)').run(requestId,digest,JSON.stringify(r));
       this.store.saveProject(project);this.store.append('project.folder.registered',null,{projectId:r.projectId});
     });

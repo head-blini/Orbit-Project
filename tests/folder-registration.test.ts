@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdirSync,mkdtempSync,readdirSync,readFileSync,statSync,symlinkSync,writeFileSync} from 'node:fs';
+import {chmodSync,mkdirSync,mkdtempSync,readdirSync,readFileSync,statSync,symlinkSync,writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {Store} from '../server/store.ts';
@@ -68,8 +68,9 @@ test('registration refuses unlisted, Git, reserved, runtime-config, linked, over
 
 test('replacing a material keeps the previous bytes, needs the current digest and never overwrites by add',()=>{
   const root=mkdtempSync(join(tmpdir(),'orbit-replace-')),store=new Store(':memory:');try{
-    const history=new MaterialHistory(store),keep=(prior:Parameters<MaterialHistory['keep']>[1])=>history.keep('p',prior);
-    const [first]=addMaterials(root,{files:[{name:'data.csv',text:'a,1\n'}]});
+    const history=new MaterialHistory(store),keep=(prior:Parameters<MaterialHistory['keep']>[1],swap:()=>void)=>history.keep('p',prior,swap);
+    const [first]=addMaterials(root,{files:[{name:'data.csv',text:'a,1\n'}]});chmodSync(join(root,'inputs','data.csv'),0o640);
+    writeFileSync(join(root,'inputs','.orbit-replace-'+randomUUID()),'stale');
     assert.throws(()=>addMaterials(root,{files:[{name:'data.csv',text:'a,2\n'}]}),/MATERIAL_EXISTS/);
     assert.throws(()=>replaceMaterial(root,{name:'data.csv',text:'a,2\n',expectedSha256:'0'.repeat(64)},keep),/MATERIAL_CHANGED/);
     assert.throws(()=>replaceMaterial(root,{name:'missing.csv',text:'a,2\n',expectedSha256:first.sha256},keep),/MATERIAL_NOT_FOUND/);
@@ -78,14 +79,29 @@ test('replacing a material keeps the previous bytes, needs the current digest an
     assert.equal(history.counts('p').size,0);assert.equal(readFileSync(join(root,'inputs','data.csv'),'utf8'),'a,1\n');
     const [second]=replaceMaterial(root,{name:'data.csv',text:'a,2\n',expectedSha256:first.sha256},keep);
     assert.notEqual(second.sha256,first.sha256);assert.equal(readFileSync(join(root,'inputs','data.csv'),'utf8'),'a,2\n');
-    assert.deepEqual(readdirSync(join(root,'inputs')),['data.csv']);
+    assert.deepEqual(readdirSync(join(root,'inputs')),['data.csv'],'stale temporary removed, no leftovers');
+    assert.equal(statSync(join(root,'inputs','data.csv')).mode&0o777,0o640,'original mode preserved');
     // Replaying the same replacement is a no-op and archives nothing more.
     assert.deepEqual(replaceMaterial(root,{name:'data.csv',text:'a,2\n',expectedSha256:first.sha256},keep),listMaterials(root));
     assert.equal(history.counts('p').get('inputs/data.csv'),1);
-    assert.equal(String(store.db.prepare('SELECT text FROM material_versions').get()!.text),'a,1\n');
+    assert.equal(Buffer.from(store.db.prepare('SELECT bytes FROM material_versions').get()!.bytes as Uint8Array).toString('utf8'),'a,1\n');
     assert.throws(()=>store.db.prepare('DELETE FROM material_versions').run(),/APPEND_ONLY/);
     // If history cannot be kept, the file stays unchanged.
     assert.throws(()=>replaceMaterial(root,{name:'data.csv',text:'a,3\n',expectedSha256:second.sha256},()=>{throw new Error('MATERIAL_HISTORY_FULL');}),/MATERIAL_HISTORY_FULL/);
     assert.equal(readFileSync(join(root,'inputs','data.csv'),'utf8'),'a,2\n');
+    // A failed swap rolls the history row back; nothing records the current version as history.
+    assert.throws(()=>replaceMaterial(root,{name:'data.csv',text:'a,3\n',expectedSha256:second.sha256},(prior,swap)=>history.keep('p',prior,()=>{throw new Error('SWAP_FAILED');})),/SWAP_FAILED/);
+    assert.equal(history.counts('p').get('inputs/data.csv'),1);assert.equal(readFileSync(join(root,'inputs','data.csv'),'utf8'),'a,2\n');
+    // If the transaction fails after the swap, the prior bytes are restored.
+    assert.throws(()=>replaceMaterial(root,{name:'data.csv',text:'a,3\n',expectedSha256:second.sha256},(prior,swap)=>{swap();throw new Error('COMMIT_FAILED');}),/COMMIT_FAILED/);
+    assert.equal(readFileSync(join(root,'inputs','data.csv'),'utf8'),'a,2\n');assert.deepEqual(readdirSync(join(root,'inputs')),['data.csv']);
+    // Prior bytes are archived verbatim, including bytes that are not valid UTF-8.
+    const raw=Buffer.from([0x61,0x2c,0xff,0x0a]);writeFileSync(join(root,'inputs','data.csv'),raw);
+    const listed=listMaterials(root)[0];replaceMaterial(root,{name:'data.csv',text:'a,4\n',expectedSha256:listed.sha256},keep);
+    assert.deepEqual(Buffer.from(store.db.prepare('SELECT bytes FROM material_versions ORDER BY id DESC').get()!.bytes as Uint8Array),raw);
+    // A prior file too large to archive is refused, unchanged.
+    writeFileSync(join(root,'inputs','data.csv'),'x'.repeat(128*1024+1));
+    assert.throws(()=>replaceMaterial(root,{name:'data.csv',text:'a,5\n',expectedSha256:listMaterials(root)[0].sha256},keep),/MATERIAL_TOO_LARGE/);
+    assert.equal(readFileSync(join(root,'inputs','data.csv'),'utf8').length,128*1024+1);
   }finally{store.close();}
 });

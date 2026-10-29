@@ -148,7 +148,7 @@ const folderMessages:Record<string,string>={
   PROJECT_OVERLAP:'이미 등록된 프로젝트와 겹치는 폴더입니다.',GIT_FOLDER_REJECTED:'Git 저장소가 들어 있는 폴더는 일반 프로젝트로 등록할 수 없습니다. 코드 작업 프로젝트로 등록하세요.',
   FOLDER_UNSUPPORTED:'AI 도구 설정 폴더(.claude, .codex 등)가 들어 있어 등록하지 않았습니다.',
   FOLDER_RESERVED_NAME:'폴더에 이미 inputs, output 또는 .orbit-workers가 있어 등록하지 않았습니다. 기존 파일을 지키기 위해 Orbit은 이 이름을 덮어쓰지 않습니다.',
-  TREE_TOO_LARGE:'파일이 너무 많은 폴더입니다.',IDEMPOTENCY_CONFLICT:'저장된 등록 요청과 입력이 다릅니다. 이전 요청을 취소한 뒤 다시 시도하세요.',
+  TREE_TOO_LARGE:'파일이 너무 많은 폴더입니다.',FOLDER_CHANGED:'확인하는 동안 폴더가 바뀌었습니다. 다시 시도하세요.',IDEMPOTENCY_CONFLICT:'저장된 등록 요청과 입력이 다릅니다. 이전 요청을 취소한 뒤 다시 시도하세요.',
   RUN_ACTIVE:'다른 실행이 끝난 뒤 다시 시도하세요.',
 };
 function readFolderReceipt():FolderReceipt|null{try{const value=JSON.parse(sessionStorage.getItem(folderKey)??'null');return value&&uuid(value.requestId)&&typeof value.name==='string'&&typeof value.path==='string'?value:null;}catch{return null;}}
@@ -176,7 +176,7 @@ export function FolderRegisterPanel({online,locked,post,onProject}:{online:boole
   }
   function cancel(){try{sessionStorage.removeItem(folderKey);}catch{}setPending(null);setIssue('');}
   return <section aria-label="기존 폴더 등록">
-    <p className="hint">이미 자료가 있는 폴더를 일반 작업 프로젝트로 씁니다. 기존 파일은 옮기거나 바꾸지 않고, Orbit은 그 안의 inputs(자료)와 output(결과물) 폴더에만 씁니다.</p>
+    <p className="hint">이미 자료가 있는 폴더를 일반 작업 프로젝트로 씁니다. 기존 파일은 옮기거나 바꾸지 않고, Orbit은 그 안의 inputs(자료)·output(결과물)·.orbit-workers(격리 작업 공간)에만 씁니다. 기존 파일 보호를 위해 격리된 작업 공간 없이는 AI 기획·실행을 하지 않습니다.</p>
     <form className="register-project" onSubmit={event=>{event.preventDefault();void register();}}>
       <label htmlFor="folder-project-name">프로젝트 이름</label>
       <input id="folder-project-name" value={name} maxLength={80} autoComplete="off" disabled={disabled||!!pending} onChange={event=>setName(event.target.value)}/>

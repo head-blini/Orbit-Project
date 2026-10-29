@@ -83,6 +83,7 @@ function GeneralWork(props:Props&{name:string}){
     <Header name={props.name} kind="general" progress={progress} steps={steps} action={action} onAction={act}/>
     <div className="work-grid">
       <div className="work-main">
+        {props.state?.projects?.find(p=>p.id===projectId)?.registeredFolder&&<p className="notice" role="note">이 프로젝트는 내 컴퓨터의 기존 폴더를 등록한 것입니다. 기존 파일을 AI가 읽거나 바꾸지 않도록, 지금은 AI 기획과 실행을 시작하지 않습니다(격리된 작업 공간이 준비되면 열립니다). 자료 추가·교체와 결과물 확인은 그대로 할 수 있습니다.</p>}
         {!progress?.plan&&!saved&&followup}
         <section id="work-plan" className="work-section" aria-labelledby="work-plan-title">
           <h3 id="work-plan-title">기획</h3>
