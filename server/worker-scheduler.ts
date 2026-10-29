@@ -9,7 +9,8 @@ import type {CapabilityExecutionService} from './capability-execution.ts';
 import type {CapabilityExecutionApproval,CapabilityExecutionRecord} from '../shared/capability-execution.ts';
 import type {ApprovedExecutionBatch,WorkerFence,WorkerReservation,WorkerResourceClaim} from '../shared/parallel-workers.ts';
 import {ParallelWorkerService} from './parallel-workers.ts';
-import {WorkerSpaces,resolveWorkerPath,type ApprovedWorkerBase,type WorkerSpace} from './worker-spaces.ts';
+import {WorkerSpaces,resolveWorkerPath,type ApprovedWorkerBase,type WorkerHandoff,type WorkerSpace} from './worker-spaces.ts';
+import {isAncestor,inspectIntegrationTarget} from './merge-git.ts';
 import {Studio} from './studio.ts';
 import {AppError} from './errors.ts';
 
@@ -35,7 +36,7 @@ export interface WorkerSubmission {
 
 /** The approved execution plan names the workspace; its persisted base is the source,
  * never current repository HEAD. PW-3 freezes this binding in worker_space_bases. */
-export function approvedWorkerBase(store:Store,projects:Projects,batch:ApprovedExecutionBatch,plan:CapabilityExecutionRecord):ApprovedWorkerBase|undefined {
+export function approvedWorkerBase(store:Store,projects:Projects,batch:ApprovedExecutionBatch,plan:CapabilityExecutionRecord,handoff?:WorkerHandoff):ApprovedWorkerBase|undefined {
  const brief=new Studio(store).execution(batch.projectId,plan.taskId);
  if(brief.planningVersionId!==batch.planningVersionId||brief.planningContentHash!==batch.planningHash)fail('BASELINE_CHANGED');
  if(store.projects().find(p=>p.id===batch.projectId)?.kind!=='code')return;
@@ -43,7 +44,26 @@ export function approvedWorkerBase(store:Store,projects:Projects,batch:ApprovedE
  if(!workspace)fail('APPROVED_BASE_REQUIRED');
  const resource=projects.repositoryResource(workspace.id);
  if(resource.baseRevision!==workspace.baseSha)fail('BASELINE_CHANGED');
- return {batchId:batch.id,projectId:batch.projectId,repositoryId:resource.repositoryId,baseSha:workspace.baseSha};
+ let baseSha=workspace.baseSha;
+ if(handoff?.predecessors.length){
+  const project=store.projects().find(p=>p.id===batch.projectId)!;
+  const items=store.db.prepare('SELECT body FROM integration_queue').all().map(row=>JSON.parse(String(row.body)) as IntegrationItem);
+  const predecessors=handoff.predecessors.map(p=>{
+   const matches=items.filter(item=>item.id===p.integrationId&&item.projectId===batch.projectId&&item.status==='applied'&&item.released===true&&item.candidate?.commitSha===p.commitSha);
+   if(matches.length!==1||!p.commitSha)fail('DEPENDENCY_OUTPUT_NOT_INTEGRATED');return matches[0];
+  });
+  // The newest direct predecessor is the one containing every other predecessor.
+  // Never derive the base from the moving target ref.
+  const latest=predecessors.find(item=>predecessors.every(other=>isAncestor(project.path,other.candidate!.commitSha,item.candidate!.commitSha)));
+  if(!latest||!isAncestor(project.path,workspace.baseSha,latest.candidate!.commitSha))fail('BASELINE_CHANGED');
+  baseSha=latest.candidate!.commitSha;
+  for(const item of predecessors){
+   if(!item.targetBranch||item.targetBranch!==latest.targetBranch)fail('BASELINE_CHANGED');
+   const target=inspectIntegrationTarget(project.path,item.targetBranch,item.defaultBranch);
+   if(!isAncestor(project.path,baseSha,target.head))fail('DEPENDENCY_OUTPUT_CHANGED');
+  }
+ }
+ return {batchId:batch.id,projectId:batch.projectId,repositoryId:resource.repositoryId,baseSha};
 }
 
 /** Reuses PW-1 intent and CapabilityExecution's request journal. No timers, polling,
@@ -66,7 +86,7 @@ export class WorkerScheduler {
  }
  list(){return this.workers.list();}
  read(id:string){return this.workers.read(id);}
- private baseline(input:WorkerSubmission,plan:CapabilityExecutionRecord,space?:WorkerSpace){
+ private baseline(input:WorkerSubmission,plan:CapabilityExecutionRecord,space?:WorkerSpace):WorkerHandoff{
   const b=input.batch,snapshot=this.completion.graph(b.projectId,b.planningVersionId),g=snapshot.graph;
   if(g.revision!==b.graphRevision||g.contentHash!==b.planningHash||plan.projectId!==b.projectId||plan.baseline.planningVersionId!==b.planningVersionId||plan.baseline.planningContentHash!==b.planningHash
    ||!b.taskIds.includes(plan.taskId)||!b.runtimeChoices.some(c=>c.taskId===plan.taskId&&c.runtimeId===plan.runtimeId)||b.taskIds.some(id=>!g.nodes.some(n=>n.taskId===id)))fail('BASELINE_CHANGED');
@@ -74,6 +94,7 @@ export class WorkerScheduler {
   const state=snapshot.state;
   if(state.stale)fail('BASELINE_CHANGED');
   if(state.nodes.find(n=>n.taskId===plan.taskId)?.state!=='ready')fail('DEPENDENCIES_WAITING');
+  const handoff:WorkerHandoff={predecessors:[]};
   for(const edge of g.edges.filter(e=>e.taskId===plan.taskId)){
    const completion=snapshot.progress.tasks.find(t=>t.id===edge.dependsOn)?.completion;
    if(!completion?.verifiedDone)fail('DEPENDENCIES_WAITING');
@@ -82,9 +103,11 @@ export class WorkerScheduler {
    const applied=rows.map(row=>JSON.parse(String(row.body)) as IntegrationItem).filter(item=>item.projectId===b.projectId&&item.status==='applied'
     &&(item.space.workspaceId===completion.binding.artifactId||item.space.attemptId===completion.binding.artifactId));
    if(applied.length!==1)fail('DEPENDENCY_OUTPUT_NOT_INTEGRATED');
+   if(applied[0].released!==true)fail('DEPENDENCY_OUTPUT_NOT_INTEGRATED');
    const item=applied[0],hash=(v:unknown)=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
    if((item.space.kind==='code'?item.manifest.sourceDigest:hash(item.manifest))!==completion.binding.artifactDigest)fail('DEPENDENCY_OUTPUT_CHANGED');
    const project=this.store.projects().find(p=>p.id===b.projectId)!;
+   const predecessor:WorkerHandoff['predecessors'][number]={taskId:edge.dependsOn,integrationId:item.id,commitSha:item.candidate?.commitSha??null,files:[]};
    for(const file of item.manifest.files){
     if(file.status!=='present'||!file.sha256||file.outOfScope)fail('DEPENDENCY_OUTPUT_UNAVAILABLE');
     const verify=(root:string,path:string)=>{
@@ -93,12 +116,14 @@ export class WorkerScheduler {
      }catch{fail('DEPENDENCY_OUTPUT_CHANGED');}
     };
     verify(project.path,file.path);
-    // PW-3 currently freezes only project inputs for general workers. Never claim
-    // an output is handed off unless those exact bytes are in the frozen input.
+    // Both project bytes and the frozen worker input must still match completion evidence.
     if(space)verify(space.path,space.kind==='code'?file.path:join('inputs',file.path));
+    predecessor.files.push({path:file.path,sha256:file.sha256});
    }
+   handoff.predecessors.push(predecessor);
   }
   if(this.quota(plan.runtimeId)==='exhausted')fail('QUOTA_EXHAUSTED');
+  return handoff;
  }
  async submit(raw:WorkerSubmission):Promise<WorkerReservation>{
   const input=structuredClone(raw),b=input.batch;
@@ -110,18 +135,20 @@ export class WorkerScheduler {
    return prior;
   }
   if(plan.status!=='awaiting_approval')fail('EXECUTION_ALREADY_STARTED');
-  this.baseline(input,plan);this.execution.assertWorkerPlan(b.projectId,plan.id,input.approval);
-  const base=approvedWorkerBase(this.store,this.projects,b,plan);
+  const handoff=this.baseline(input,plan);this.execution.assertWorkerPlan(b.projectId,plan.id,input.approval);
+  const base=approvedWorkerBase(this.store,this.projects,b,plan,handoff);
   const r=this.workers.reserve({requestId:plan.requestId,ownerIncarnation:this.owner,batch:b,attempt:{id:plan.id,taskId:plan.taskId,runtimeId:plan.runtimeId,dispatchRequestId:plan.dispatchRequestId},claims:input.claims});
   let space:WorkerSpace|undefined;
   const check=()=>{
    const latest=this.read(r.reservationId);
    if(latest.ownerIncarnation!==r.ownerIncarnation||latest.fencingGeneration!==r.fencingGeneration||!['reserved','dispatched','running'].includes(latest.state))fail('FENCE_STALE');
-   this.baseline(input,plan,space);this.execution.assertWorkerPlan(b.projectId,plan.id,input.approval,plan);
-   if(JSON.stringify(approvedWorkerBase(this.store,this.projects,b,plan))!==JSON.stringify(base))fail('BASELINE_CHANGED');
+   const currentHandoff=this.baseline(input,plan,space);
+   if(JSON.stringify(currentHandoff)!==JSON.stringify(handoff))fail('DEPENDENCY_OUTPUT_CHANGED');
+   this.execution.assertWorkerPlan(b.projectId,plan.id,input.approval,plan);
+   if(JSON.stringify(approvedWorkerBase(this.store,this.projects,b,plan,currentHandoff))!==JSON.stringify(base))fail('BASELINE_CHANGED');
   };
   try{
-  check();space=this.spaces.create(r,base);check();
+  check();space=this.spaces.create(r,base,handoff);check();
   const readySpace=space;
   const context:WorkerDispatchContext={fence:r,space:readySpace,dispatchRequestId:plan.dispatchRequestId,beforeDispatch:()=>{
    check();const stat=lstatSync(readySpace.path,{bigint:true});

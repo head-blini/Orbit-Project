@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {randomUUID} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {chmodSync,existsSync,linkSync,lstatSync,mkdirSync,mkdtempSync,readFileSync,readdirSync,rmSync,symlinkSync,writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from './temp.ts';
@@ -155,4 +155,59 @@ test('worker Git entry points refuse calls outside the serialized Store transact
     assert.throws(()=>f.projects.removeWorkerWorkspace(s.workspaceId!),/SERIALIZATION_REQUIRED/);
     assert.ok(existsSync(s.path));
   }finally{f.close();}
+});
+
+function handoffFile(f:ReturnType<typeof fixture>,content='predecessor'){
+  mkdirSync(join(f.project.path,'output'),{recursive:true});writeFileSync(join(f.project.path,'output/report.txt'),content);
+  return {predecessors:[{taskId:'parent',integrationId:'integration',commitSha:null,files:[{path:'output/report.txt',sha256:createHash('sha256').update(content).digest('hex')}]}]};
+}
+test('CQG-6b: direct handoff is read-only, digest-bound and excluded from output manifest',()=>{
+ const f=fixture();try{
+  const handoff=handoffFile(f),r=f.reserve(),s=f.spaces.create(r,undefined,handoff);
+  assert.equal(readFileSync(join(s.path,'inputs/output/report.txt'),'utf8'),'predecessor');
+  assert.equal(lstatSync(join(s.path,'inputs/output/report.txt')).mode&0o777,0o444);
+  assert.deepEqual(s.inputManifest,handoff.predecessors[0].files);
+  const other=f.spaces.create(f.reserve('b'));assert.notEqual(s.inputDigest,other.inputDigest);
+  f.terminal(r);assert.deepEqual(f.spaces.finish(r).files,[]);
+  chmodSync(join(s.path,'inputs/output/report.txt'),0o644);writeFileSync(join(s.path,'inputs/output/report.txt'),'changed');
+  assert.equal(f.spaces.finish(r).inputsUnchanged,false);
+ }finally{f.close();}
+});
+test('CQG-6b: handoff colliding with project inputs refuses even identical bytes',()=>{
+ const f=fixture();try{
+  const handoff=handoffFile(f);mkdirSync(join(f.project.path,'inputs/output'),{recursive:true});writeFileSync(join(f.project.path,'inputs/output/report.txt'),'predecessor');
+  assert.throws(()=>f.spaces.create(f.reserve(),undefined,handoff),/WORKER_SPACE_INPUT_CONFLICT/);
+ }finally{f.close();}
+});
+test('CQG-6b: attempt handoff pin survives restart and rejects changed or omitted handoff',()=>{
+ const f=fixture();try{
+  const handoff=handoffFile(f),r=f.reserve(),s=f.spaces.create(r,undefined,handoff);
+  const spaces=new WorkerSpaces(f.store,f.projects,f.workers);
+  assert.deepEqual(spaces.create(r,undefined,handoff),s);
+  assert.throws(()=>spaces.create(r,undefined,{predecessors:[{...handoff.predecessors[0],integrationId:'other'}]}),/WORKER_SPACE_HANDOFF_CONFLICT/);
+  assert.throws(()=>spaces.create(r),/WORKER_SPACE_HANDOFF_CONFLICT/);
+ }finally{f.close();}
+});
+test('CQG-6b: source changed during handoff copy fails closed',async t=>{
+ const fs=(await import('node:fs')).default,{syncBuiltinESMExports}=await import('node:module');
+ const f=fixture();try{
+  const handoff=handoffFile(f),r=f.reserve(),write=fs.writeFileSync;let copied=false;
+  t.mock.method(fs,'writeFileSync',((path:any,...args:any[])=>{
+   const result=Reflect.apply(write,fs,[path,...args]);
+   if(String(path)===join(generalAttemptPath(f.project.path,r.attempt.id),'inputs/output/report.txt')){copied=true;write(join(f.project.path,'output/report.txt'),'changed');}
+   return result;
+  }) as typeof fs.writeFileSync);syncBuiltinESMExports();
+  assert.throws(()=>f.spaces.create(r,undefined,handoff),/WORKER_SPACE_INPUT_CHANGED/);assert.equal(copied,true);
+ }finally{t.mock.restoreAll();syncBuiltinESMExports();f.close();}
+});
+
+test('CQG-6b: code dependent pins independently of batch and omitted handoff is HANDOFF_CONFLICT',()=>{
+ const f=fixture('code');try{
+  const a=f.reserve('a',['first.txt']);f.spaces.create(a,f.base);
+  trustedGit(f.project.path,['commit','--allow-empty','-m','predecessor'],{identity:true});
+  const base={...f.base!,baseSha:trustedGit(f.project.path,['rev-parse','HEAD']).toString().trim()};
+  const handoff={predecessors:[{taskId:'a',integrationId:'applied',commitSha:base.baseSha,files:[]}]};
+  const b=f.reserve('b',['second.txt']),s=f.spaces.create(b,base,handoff);assert.equal(s.baseSha,base.baseSha);
+  assert.throws(()=>f.spaces.create(b,base),/WORKER_SPACE_HANDOFF_CONFLICT/);
+ }finally{f.close();}
 });

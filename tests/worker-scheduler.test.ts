@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash,randomUUID} from 'node:crypto';
 import {join} from 'node:path';
-import {chmodSync,readdirSync,mkdirSync,writeFileSync} from 'node:fs';
+import {chmodSync,readFileSync,rmSync,readdirSync,mkdirSync,writeFileSync} from 'node:fs';
 import {claudeFixture,FakeClaudeRun,outcome,tick,planningInput} from './claude-task-fixture.ts';
 import {CapabilityExecutionService} from '../server/capability-execution.ts';
 import {CapabilityRoutingService} from '../server/capability-routing.ts';
@@ -226,19 +226,19 @@ test('late output path substitution is refused immediately before runtime dispat
  }finally{await f.close();}
 });
 
-for(const scenario of [{staleAt:0,fault:''},{staleAt:2,fault:''},{staleAt:4,fault:''},{staleAt:0,fault:'not-integrated'},{staleAt:0,fault:'hash-changed'},{staleAt:0,fault:'input-missing'}])test(`fresh completion reader: stale at ${scenario.staleAt}, output ${scenario.fault||'valid'}`,async()=>{
+for(const scenario of [{staleAt:0,fault:''},{staleAt:2,fault:''},{staleAt:4,fault:''},{staleAt:0,fault:'not-integrated'},{staleAt:0,fault:'hash-changed'},{staleAt:0,fault:'input-missing'},{staleAt:0,fault:'unreleased'},{staleAt:0,fault:'refused'}])test(`fresh completion reader: stale at ${scenario.staleAt}, output ${scenario.fault||'valid'}`,async()=>{
  const {staleAt,fault}=scenario;
  const f=setup();try{
   const progress=new ProjectProgressService(f.store,f.studio),hash=(v:unknown)=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
-  mkdirSync(join(f.project.path,'inputs/output'),{recursive:true});if(fault!=='input-missing')writeFileSync(join(f.project.path,'inputs/output/report.txt'),'bound output');
   mkdirSync(join(f.project.path,'output'),{recursive:true});writeFileSync(join(f.project.path,'output/report.txt'),'bound output');
   const manifest={files:[{path:'output/report.txt',status:'present',sha256:createHash('sha256').update('bound output').digest('hex'),outOfScope:false}],sourceDigest:'source',reservationId:'predecessor',inputsUnchanged:true,outOfScope:false};
   f.store.db.exec('CREATE TABLE IF NOT EXISTS integration_queue(body TEXT)');
-  f.store.db.prepare('INSERT INTO integration_queue(body) VALUES(?)').run(JSON.stringify({projectId:f.project.id,status:fault==='not-integrated'?'queued':'applied',space:{attemptId:'predecessor',kind:'general'},manifest}));
+  f.store.db.prepare('INSERT INTO integration_queue(body) VALUES(?)').run(JSON.stringify({id:'integration',released:fault!=='unreleased',projectId:f.project.id,status:fault==='not-integrated'?'queued':fault==='refused'?'refused':'applied',space:{attemptId:'predecessor',kind:'general'},manifest}));
   if(fault==='hash-changed')writeFileSync(join(f.project.path,'output/report.txt'),'changed');
   let reads=0;
   const reader={graph:(project:string,version:string)=>{
    const snapshot=progress.graph(project,version);reads++;
+   if(fault==='input-missing'&&reads===3){const path=join(generalAttemptPath(f.project.path,f.plans[2].id),'inputs/output');chmodSync(path,0o755);rmSync(join(path,'report.txt'));}
    if(staleAt&&reads>=staleAt)return snapshot;
    const completion=snapshot.progress.tasks[0].completion!;
    completion.verifiedDone=true;completion.binding.artifactId='predecessor';completion.binding.artifactDigest=hash(manifest);
@@ -250,6 +250,80 @@ for(const scenario of [{staleAt:0,fault:''},{staleAt:2,fault:''},{staleAt:4,faul
    if(fault==='input-missing'){assert.equal(scheduler.list()[0].state,'released');assert.equal(scheduler.list()[0].evidence?.kind,'not_dispatched');}
    else assert.equal(scheduler.list().length,0);
   }else if(staleAt){await assert.rejects(f.submit(2,scheduler),/DEPENDENCIES_WAITING/);assert.equal(f.runners.length,0);assert.equal(scheduler.list()[0].state,'released');assert.equal(scheduler.list()[0].evidence?.kind,'not_dispatched');}
-  else{await f.submit(2,scheduler);assert.equal(f.runners.length,1);assert.ok(reads>=4);}
+  else{
+   const result=await f.submit(2,scheduler);await f.submit(2,scheduler);assert.equal(f.runners.length,1);assert.ok(reads>=4);
+   assert.equal(readFileSync(join(f.paths[0],'inputs/output/report.txt'),'utf8'),'bound output');
+   const pinned=f.store.db.prepare('SELECT body FROM worker_space_handoffs WHERE attempt_id=?').get(f.plans[2].id);
+   assert.ok(pinned);
+   const restarted=new WorkerScheduler(f.store,f.projects,f.execution,undefined,reader);
+   assert.equal((await f.submit(2,restarted)).reservationId,result.reservationId);assert.equal(f.runners.length,1);
+   assert.equal(restarted.read(result.reservationId).state,'lost_unknown');
+   assert.deepEqual(f.store.db.prepare('SELECT body FROM worker_space_handoffs WHERE attempt_id=?').get(f.plans[2].id),pinned);
+  }
  }finally{await f.close();}
+});
+
+function appliedGeneral(f:ReturnType<typeof setup>,beforeRead?:(reads:number)=>void){
+ const progress=new ProjectProgressService(f.store,f.studio),hash=(v:unknown)=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
+ mkdirSync(join(f.project.path,'output'),{recursive:true});writeFileSync(join(f.project.path,'output/report.txt'),'bound output');
+ const manifest={files:[{path:'output/report.txt',status:'present',sha256:createHash('sha256').update('bound output').digest('hex'),outOfScope:false}],sourceDigest:'source',reservationId:'predecessor',inputsUnchanged:true,outOfScope:false};
+ f.store.db.exec('CREATE TABLE IF NOT EXISTS integration_queue(id TEXT PRIMARY KEY,request_id TEXT UNIQUE NOT NULL,input_digest TEXT NOT NULL,slot INTEGER UNIQUE CHECK(slot=1),body TEXT NOT NULL)');
+ f.store.db.prepare('INSERT INTO integration_queue VALUES(?,?,?,NULL,?)').run('integration','integration','fixture',JSON.stringify({id:'integration',projectId:f.project.id,status:'applied',released:true,space:{attemptId:'predecessor',kind:'general'},manifest}));
+ let reads=0;
+ const reader={graph:(project:string,version:string)=>{
+  beforeRead?.(++reads);const snapshot=progress.graph(project,version),completion=snapshot.progress.tasks[0].completion!;
+  completion.verifiedDone=true;completion.binding.artifactId='predecessor';completion.binding.artifactDigest=hash(manifest);
+  snapshot.state.nodes=snapshot.state.nodes.map(n=>n.taskId===f.tasks[2].id?{taskId:n.taskId,state:'ready'}:n);
+  return snapshot;
+ }};
+ return new WorkerScheduler(f.store,f.projects,f.execution,undefined,reader);
+}
+
+for(const change of ['identical bytes','different bytes','unrelated file'] as const)test(`CQG-6b: general handoff revalidates ${change} after pinning`,async()=>{
+ const f=setup();try{
+  const scheduler=appliedGeneral(f,reads=>{if(reads===3)writeFileSync(join(f.project.path,'output',change==='unrelated file'?'unrelated.txt':'report.txt'),change==='identical bytes'?'bound output':'changed');});
+  if(change==='different bytes'){
+   await assert.rejects(f.submit(2,scheduler),/WORKER_DEPENDENCY_OUTPUT_CHANGED/);
+   assert.equal(f.runners.length,0);assert.equal(scheduler.list()[0].evidence?.kind,'not_dispatched');
+  }else{
+   const r=await f.submit(2,scheduler);assert.equal(f.runners.length,1);
+   const space=JSON.parse(String(f.store.db.prepare('SELECT body FROM worker_spaces WHERE reservation_id=?').get(r.reservationId)!.body));
+   assert.equal(readFileSync(join(space.path,'inputs/output/report.txt'),'utf8'),'bound output');
+   assert.deepEqual(space.inputManifest,[{path:'output/report.txt',sha256:createHash('sha256').update('bound output').digest('hex')}]);
+  }
+ }finally{await f.close();}
+});
+
+test('CQG-6b: consumed plan cannot redispatch after bytes recover; a new plan requires its own approval',async()=>{
+ const f=setup();try{
+  const scheduler=appliedGeneral(f,reads=>{if(reads===3)writeFileSync(join(f.project.path,'output/report.txt'),'changed');});
+  await assert.rejects(f.submit(2,scheduler),/WORKER_DEPENDENCY_OUTPUT_CHANGED/);
+  const consumed=scheduler.list()[0];assert.equal(consumed.state,'released');assert.equal(consumed.evidence?.kind,'not_dispatched');
+  writeFileSync(join(f.project.path,'output/report.txt'),'bound output');
+  assert.equal((await f.submit(2,scheduler)).reservationId,consumed.reservationId);assert.equal(f.runners.length,0);
+  const fresh=f.execution.plan(f.project.id,{requestId:randomUUID(),routeId:f.plans[2].routeId});
+  const input={batch:f.batch,executionId:fresh.id,approval:{confirmed:true as const,expectedPlanDigest:f.plans[2].planDigest},claims:[{kind:'isolated_folder' as const,host:'local',path:resolveWorkerPath(f.project.path,join(generalAttemptPath(f.project.path,fresh.id),'output'),true)}]};
+  await assert.rejects(scheduler.submit(input),/WORKER_APPROVAL_REQUIRED/);assert.equal(f.runners.length,0);
+  input.approval.expectedPlanDigest=fresh.planDigest;
+  const result=await scheduler.submit(input);assert.notEqual(result.reservationId,consumed.reservationId);assert.equal(f.runners.length,1);
+  await scheduler.submit(input);assert.equal(f.runners.length,1);
+ }finally{await f.close();}
+});
+
+test('CQG-6b open item: controller batch input hash gate blocks general dependent dispatch',async()=>{
+ const f=setup();try{
+  f.controller.initializeWorkers(f.execution);
+  const view=f.controller.createWorkerBatch(f.project.id,{requestId:randomUUID(),planningVersionId:f.version.id,graphRevision:1,planningHash:f.version.contentHash,confirmed:true,executions:f.plans.map(p=>({executionId:p.id,expectedPlanDigest:p.planDigest}))});
+  Object.assign(f.batch,JSON.parse(String(f.store.db.prepare('SELECT body FROM worker_http_batches WHERE id=?').get(view.id)!.body)).batch);
+  let dispatchFailure='';const submitTask=f.controller.submitTask.bind(f.controller);
+  f.controller.submitTask=async(...args)=>{try{return await submitTask(...args);}catch(error){dispatchFailure=(error as Error).message;throw error;}};
+  const scheduler=appliedGeneral(f),result=await f.submit(2,scheduler);
+  assert.equal(dispatchFailure,'WORKER_INPUTS_CHANGED');assert.equal(f.runners.length,0);
+  assert.equal(f.store.findRequest(result.attempt.dispatchRequestId),null);
+  const space=JSON.parse(String(f.store.db.prepare('SELECT body FROM worker_spaces WHERE reservation_id=?').get(result.reservationId)!.body));
+  assert.equal(readFileSync(join(space.path,'inputs/output/report.txt'),'utf8'),'bound output');
+  assert.equal(space.inputManifest.length,1,'handoff remains visible to the input hash gate');
+  assert.equal(f.execution.record(f.project.id,f.plans[2].id).status,'recovery_required');
+  await f.submit(2,scheduler);assert.equal(f.runners.length,0);
+ }finally{await f.controller.stopWorkers();await f.close();}
 });
