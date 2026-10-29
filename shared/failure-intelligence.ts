@@ -51,6 +51,11 @@ export const FAILURE_CODE_TABLE:Readonly<Record<FailureSource,Readonly<Record<st
     INTEGRATION_INTERRUPTED_NOT_APPLIED:'tool_environment', INTEGRATION_RESTART_RECOVERY_REQUIRED:'tool_environment',
     INTEGRATION_VERIFICATION_FAILED:'output_rejected', INTEGRATION_CANDIDATE_REFUSED:'unknown',
     INTEGRATION_REQUIRED_CHECK_BLOCKED:'unknown', INTEGRATION_REBUILD_LIMIT:'unknown',
+    // CQG-6a/6c candidate completion refusals. 'INTEGRATION_COMPLETION_' is only the refusal prefix;
+    // stored 'INTEGRATION_COMPLETION_REFUSED:<codes>' reasons normalize to UNCLASSIFIED.
+    INTEGRATION_COMPLETION_POLICY_REQUIRED:'policy_refusal', INTEGRATION_COMPLETION_SUBJECT_MISMATCH:'policy_refusal',
+    INTEGRATION_COMPLETION_BINDING_MISMATCH:'policy_refusal', INTEGRATION_COMPLETION_CONFIG_MISMATCH:'policy_refusal',
+    INTEGRATION_COMPLETION_EVIDENCE_REQUIRED:'unknown', INTEGRATION_COMPLETION_:'unknown',
   }),
   worker:Object.freeze({LOST_UNKNOWN:'tool_environment', INTEGRATION_BASELINE_CHANGED:'policy_refusal'}),
   capability:Object.freeze({
