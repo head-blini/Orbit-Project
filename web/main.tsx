@@ -29,6 +29,7 @@ import { WorkflowsPanel } from './workflows.tsx';
 import { GoalTrackingPanel } from './goals.tsx';
 import {TaskVerificationPreviewPanel} from './task-verification-preview.tsx';
 import {FailureIndexPanel} from './failure-index.tsx';
+import {HarnessPanel} from './harness.tsx';
 import {ProjectProgressPanel,lastEventTime} from './project-progress.tsx';
 import {DeliverablesPanel} from './deliverables.tsx';
 import {AiPreferencesPanel} from './ai-preferences.tsx';
@@ -162,6 +163,7 @@ export function App(){
       {page==='progress'&&advanced&&selectedProject&&<AiPreferencesPanel key={'ai:'+projectId} projectId={projectId} kind={selectedProject.kind} online={online} post={rawPost}/>}
       {page==='progress'&&<ProjectProgressPanel key={projectId} projectId={projectId} projectKind={selectedProject?.kind??null} post={rawPost} online={online} lastSeq={state?.lastSeq??0} lastEventAt={lastEventTime(events)} freshness={freshness}/>}
       {page==='progress'&&projectId&&<FailureIndexPanel key={'failures:'+projectId} projectId={projectId} online={online} advanced={advanced} post={rawPost}/>}
+      {page==='progress'&&projectId&&<HarnessPanel key={'harness:'+projectId} projectId={projectId} online={online} advanced={advanced} post={rawPost}/>}
       {page==='progress'&&advanced&&selectedProject?.kind==='general'&&<DeliverablesPanel key={'deliverables:'+projectId} projectId={projectId} online={online} lastSeq={state?.lastSeq??0}/>}
       {page==='progress'&&!advanced&&selectedProject&&<div className="page-links"><button onClick={()=>navigate('projects')}>프로젝트 화면으로</button>{selectedProject.kind==='general'&&<button onClick={()=>navigate('results')}>결과물 보기</button>}</div>}
       {page==='dashboard'&&<Dashboard key={projectId} state={state} projectId={projectId} onNavigate={navigate}/>}

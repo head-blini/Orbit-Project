@@ -32,6 +32,7 @@ import { Projects,assertGitProject } from './projects.ts';
 import { evaluateLaunch,outboundDenial,providerConnections } from './providers/policy.ts';
 import {HarnessStore} from './harness-store.ts';
 import {harnessV0} from './harness-policy.ts';
+import {HarnessService,type HarnessServiceOptions} from './harness-service.ts';
 import {briefPiiInspectionText,activeCodexHarness,type CodexHarnessContext} from './planning/execution.ts';
 import {repairPiiInspectionText} from './repair-pii.ts';
 import { Studio,exact } from './studio.ts';
@@ -96,6 +97,8 @@ export interface ControllerRegistryOptions {
   transports?:ModelHubTransports;
   completion?:CompletionReaders;
   candidateCompletion?:IntegrationCompletionReader;
+  /** HE-7: evaluation runner/suites; server/main.ts injects none (no live runner exists). */
+  harness?:HarnessServiceOptions;
 }
 export { AppError } from './errors.ts';
 export class Controller {
@@ -133,6 +136,8 @@ export class Controller {
   readonly reviews:ReviewService;
   readonly planningSuggestions:PlanningAgentService;
   readonly aiPreferences:ProjectAiPreferencesService;
+  /** Sole HarnessStore wired with the HE-4 approval port; the only promotion path. */
+  readonly harness:HarnessService;
   readonly subscriptionUsage:SubscriptionUsageStore;
   private usage:CodexUsage=unknownUsage();private usagePending:Promise<CodexUsage>|null=null;
   private extensionCache:ExtensionInventory|null=null;private extensionPending:Promise<ExtensionInventory>|null=null;
@@ -161,6 +166,7 @@ export class Controller {
     this.subscriptionUsage=new SubscriptionUsageStore(store);
     this.claudeTasks=new ClaudeTaskService(store,projects,claudeOptions,this.subscriptionUsage);
     this.aiPreferences=new ProjectAiPreferencesService(store);
+    this.harness=new HarnessService(store,registryOptions.harness);
     this.soloLost=store.unresolvedNativeConnections();
     this.telemetry=new RunTelemetry(metrics=>this.store.saveRunMetrics(metrics));
     this.modelTracker=new CodexModelTracker((runId,value)=>this.store.saveCodexModelAttribution(runId,value));

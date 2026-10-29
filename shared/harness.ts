@@ -54,3 +54,27 @@ export function renderOverlay(version: Pick<HarnessVersion, 'revision' | 'lines'
   if (text.length > HARNESS_MAX_OVERLAY_CHARS) throw new Error('HARNESS_RENDER_INVALID');
   return text;
 }
+
+/** HE-7 read model (GET /api/projects/:id/harness): HE-6 effects plus line text, AX06 status and approval freshness. */
+export type HarnessEffectStatus = 'baseline' | 'no_evidence' | 'unknown' | 'insufficient_baseline' | 'recurrence_observed' | 'no_recurrence_observed' | 'unverified';
+export interface HarnessEvaluationView {
+  evaluationId: string; state: 'ok' | 'invalid'; verdict: 'passed' | 'not_improved' | 'regressed' | 'unverified' | null;
+  runnerMode: 'fake' | 'live' | null; reasons: string[]; createdAt: string | null; evaluationDigest: string | null;
+  /** True only for a live, passed evaluation. */
+  verified: boolean;
+}
+export interface HarnessApprovalView {requestId: string; evaluationId: string; approvedAt: string; evaluationDigest: string; candidateDigest: string; fresh: boolean}
+export interface HarnessVersionView {
+  versionId: string; revision: number; digest: string; parentId: string | null; origin: 'rule' | 'user' | 'baseline'; createdAt: string | null;
+  lines: string[]; evidence: HarnessEvidence | null; classification: HarnessClassification;
+  evaluations: HarnessEvaluationView[]; approvals: HarnessApprovalView[];
+  windows: Array<{startSequence: number; startedAt: string; endedAt: string | null; status: HarnessEffectStatus; rollbackProposed: boolean;
+    families: Array<{familyId: string; before: Record<'real' | 'mock' | 'unknown' | 'undated', number> | null; after: Record<'real' | 'mock' | 'unknown' | 'undated', number> | null}>}>;
+}
+export interface HarnessTargetView {
+  target: HarnessTarget; state: 'ok' | 'error'; error: string | null;
+  activeVersionId: string | null; activeRevision: number | null; pointerSequence: number | null;
+  history: Array<{sequence: number; kind: 'promotion' | 'rollback'; versionId: string; fromVersionId: string; requestId: string; createdAt: string}>;
+  versions: HarnessVersionView[];
+}
+export interface HarnessProjectView {projectId: string; runnerMode: 'fake' | 'live' | null; targets: HarnessTargetView[]}
