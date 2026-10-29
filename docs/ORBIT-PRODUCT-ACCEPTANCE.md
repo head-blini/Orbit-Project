@@ -12,7 +12,7 @@
 
 라이브 증거 대부분은 현재 HEAD 이전에 수집했다. 이후 PW·CQG·USAGE·REGISTRY가 병합되었다. 그래서 출시 판정 전에 현재 HEAD에서 다시 실행해야 하고, 실호출에는 사용자 승인이 필요하다.
 
-**2026-10-30 갱신(RELEASE-DOCS)**: 개발 브랜치 HEAD `ea59619`(배치 1~19), 마지막 전체 verify 2084 tests / 2082 pass / 0 fail / 2 skip(`.local/orchestrator/STATE.md` 기록). 아래 갱신된 mock 행은 fake/mock 테스트 증거이며 live 검증이 아니다. mock 성공은 Provider 성공이 아니다. `native`·`integ` live 증거는 표기된 구 HEAD 기준이고 `ea59619`에서 재실행하지 않았다. 열린 승인·결정 항목은 [STATUS의 "남은 차단·승인 필요"](ORBIT-STATUS.md)에 모았다.
+**2026-10-30 갱신(RELEASE-DOCS)**: 개발 브랜치 HEAD `ea59619`(배치 1~19), 마지막 전체 verify 2086 tests / 2084 pass / 0 fail / 2 skip(`.local/orchestrator/STATE.md` 기록). 아래 갱신된 mock 행은 fake/mock 테스트 증거이며 live 검증이 아니다. mock 성공은 Provider 성공이 아니다. `native`·`integ` live 증거는 표기된 구 HEAD 기준이고 `ea59619`에서 재실행하지 않았다. 열린 승인·결정 항목은 [STATUS의 "남은 차단·승인 필요"](ORBIT-STATUS.md)에 모았다.
 
 | ID | 수준 | 증거 / 공백 |
 |---|---|---|

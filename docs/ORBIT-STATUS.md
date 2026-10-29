@@ -1,7 +1,7 @@
 # 릴리스 문서 정합 재개 상태 (2026-10-30 · Claude Code 문서 정합 작업 RELEASE-DOCS)
 
 - 기준: 개발 브랜치 `codex/orbit-mac-handoff-2026-10-26` HEAD `ea59619`(배치 1~19 fast-forward 반영, Push·main 병합·배포 없음). 오케스트레이터 기록 `.local/orchestrator/STATE.md`(gitignored)의 배치별 기록을 근거로 한다. 이 갱신은 문서 정합만 하며 코드·테스트를 실행하지 않았다.
-- 마지막 전체 검증(STATE.md 기록): Node24 `npm run verify` exit0 **2084 tests / 2082 pass / 0 fail / 2 skip**(배치 19). 이 수치는 mock/fake 테스트 기준이다. 실제 모델·Provider 성공을 뜻하지 않는다.
+- 마지막 전체 검증(STATE.md 기록): Node24 `npm run verify` exit0 **2086 tests / 2084 pass / 0 fail / 2 skip**(배치 19). 이 수치는 mock/fake 테스트 기준이다. 실제 모델·Provider 성공을 뜻하지 않는다.
 - 배치 요약(커밋은 STATE.md): 1 TOOLS T3~T6·PRODUCT P1~P3 / 2 CQG-6a·6c·5, FE-1~3, HE-1 / 3 CQG-6b·PLAN-DEPTH(`38c1d08`)·ORCH-REGSEL / 4 GENERAL-ACCEPT-A·HE-2·HE-3·P7(`c0c6ab9`) / 5 HE-4·HE-6·TOOLS-T7(`c9b6eb9`) / 6 HE-5a / 7~9 PII 오탐 수정(`9b2f3f2`, `2cbff45`)·P4~P6(`f0cc85e`) / 10 P8 fake E2E(`f55fdf5`) / 11 RECOVERY-UX(`ce66c15`, `787e093`) / 12 CODE-RUN-PROJECT(`1cfe368`) / 13 CODE-SOURCE-DIGEST(`3fcbe19`) / 14 HANDOFF-RECEIPT(`726bb48`)·T7-FOLLOWUP(`be88ce8`) / 15 ORCH-REGSEL-WEB / 16 F02-REG(`c455fae`, `3e38aad`, `b7ec6b9`) / 17 FE-4(`27352d8`) / 19 HE-5b(`9fdf007`)·HE-7(`d42c213`, `93be2f9`)·SAVEPOINT 수정(`ea59619`). 배치 18은 HE-5b NESTED_TRANSACTION으로 중단되어 19로 대체했다.
 - 근거 구분(엄격):
   - **live 검증됨**: LIVE-CLI 2026-10-29(HEAD `fecf6ff`)의 Codex CLI 0.165.0 `execute.code` 1회, Claude Code 2.1.312 `execute.general` 1회([결과](ORBIT-LIVE-CLI-2026-10-29.md)). Claude 모델 `claude-opus-5-5` native_observed, Codex actual model unknown. 두 실행 모두 "실행 완료"이며 독립 품질 통과가 아니다. 이후 HEAD(`ea59619`)에서 live 재실행은 하지 않았다. 과거 FF1(Claude Chrome E2E)·Phase3~5 live 기록은 해당 시점 HEAD 기준이다.
