@@ -14,7 +14,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import type { Controller } from './controller.ts';
+import type { Controller,WorkerConfiguration } from './controller.ts';
 import { AppError } from './controller.ts';
 import { Studio,exact,studioError } from './studio.ts';
 import { providerConnections,sendMock } from './providers/policy.ts';
@@ -38,7 +38,7 @@ async function body(req:IncomingMessage,limit=18000):Promise<Record<string,unkno
   for await(const chunk of req){size+=chunk.length;if(size>limit)throw new AppError('BODY_TOO_LARGE',413);chunks.push(chunk);}
   try{const value=JSON.parse(Buffer.concat(chunks).toString('utf8'));if(!value||typeof value!=='object'||Array.isArray(value))throw new Error();return value;}catch{throw new AppError('INVALID_JSON',400);}
 }
-export function createHttpServer(controller:Controller,assets:string,options:{nativeProbe?:ReturnType<typeof createNativeProbeService>;runtimeAdapters?:CapabilityRuntimeAdapters;claudeAuthentication?:ReturnType<typeof createClaudeAuthenticationService>}={}){
+export function createHttpServer(controller:Controller,assets:string,options:{workers?:WorkerConfiguration;nativeProbe?:ReturnType<typeof createNativeProbeService>;runtimeAdapters?:CapabilityRuntimeAdapters;claudeAuthentication?:ReturnType<typeof createClaudeAuthenticationService>}={}){
   const studio=new Studio(controller.store);
   const handoff=new HandoffService(controller.store,studio);
   const goals=new GoalService(controller.store);
@@ -62,6 +62,7 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
   };
   const capabilityInvocation=new CapabilityInvocationService(controller.store,runtimeAdapters);
   const capabilityExecution=new CapabilityExecutionService(controller.store,controller,capabilityRegistry,runtimeAdapters);
+  controller.initializeWorkers(capabilityExecution,options.workers);
   const sessions=new Map<string,{csrf:string;expires:number}>();
   const appPreview=new AppPreviewHost(id=>controller.appPreviewSnapshot(id));
   let previewReady:Promise<void>=Promise.resolve();
@@ -78,7 +79,7 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
   server.once('listening',()=>{const address=server.address();if(address&&typeof address!=='string')previewReady=appPreview.listen('http://127.0.0.1:'+address.port).catch(()=>{});});
   const previewWorkspace=(event:{kind:string})=>{if(event.kind==='workspace.selected')appPreview.clear();};
   controller.store.on('event',previewWorkspace);
-  server.once('close',()=>{controller.store.off('event',previewWorkspace);void appPreview.close();});
+  server.once('close',()=>{void controller.stopWorkers();controller.store.off('event',previewWorkspace);void appPreview.close();});
   async function handle(req:IncomingMessage,res:ServerResponse){
     await previewReady;
     const address=server.address();if(!address||typeof address==='string')throw new AppError('UNAVAILABLE',503);
@@ -102,6 +103,16 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
     }
     if(url.pathname.startsWith('/api/')){
       if(!session||session.expires<=Date.now())throw new AppError('SESSION_REQUIRED',401);
+      const workerRoute=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/worker-batches(?:\/([a-f0-9-]{36})(?:\/(submit))?)?$/);
+      const integrationRoute=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/integration-queue$/);
+      if(req.method==='GET'&&workerRoute&&workerRoute[2]&&!workerRoute[3]){
+        if(url.search)throw new AppError('INVALID_FIELDS',400);
+        json(res,200,controller.workerBatch(workerRoute[1],workerRoute[2]));return;
+      }
+      if(req.method==='GET'&&integrationRoute){
+        if(url.search)throw new AppError('INVALID_FIELDS',400);
+        json(res,200,controller.workerIntegrationQueue(integrationRoute[1]));return;
+      }
       const qualityRoute=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/quality-loops(?:\/(preview|start|([a-f0-9-]{36})\/resume))?$/);
       if(req.method==='GET'&&qualityRoute&&!qualityRoute[2]){
         if(url.search)throw new AppError('INVALID_FIELDS',400);
@@ -290,6 +301,12 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
         if(url.pathname==='/api/capability-orchestration/refresh'){
           if(url.search)throw new AppError('INVALID_FIELDS',400);exact(data,[]);
           controller.assertExecutionAvailable();await nativeProbe.refresh();const registry=capabilityRegistry();capabilityRouting.recordDiscovery(registry);json(res,200,registry);return;
+        }
+        if(workerRoute){
+          if(url.search)throw new AppError('INVALID_FIELDS',400);
+          if(!workerRoute[2]){json(res,200,controller.createWorkerBatch(workerRoute[1],data));return;}
+          if(workerRoute[3]==='submit'){json(res,200,await controller.submitWorkerBatch(workerRoute[1],workerRoute[2],data));return;}
+          throw new AppError('INVALID_FIELDS',400);
         }
         if(invocationRoute){if(url.search)throw new AppError('INVALID_FIELDS',400);json(res,200,await capabilityInvocation.invoke(invocationRoute[1],data as unknown as CapabilityInvocationInput));return;}
         if(executionRoute){
