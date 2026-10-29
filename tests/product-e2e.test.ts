@@ -12,7 +12,6 @@
  * fail WORKER_INPUTS_CHANGED (CQG-6B-CTL); general candidate semantic evidence is required
  * (GENERAL-ACCEPT-B); refreshed execution approval is required after PLAN_CHANGED;
  * code material/download APIs require GENERAL_PROJECT_REQUIRED;
- * code candidates reach CQG but source artifactDigest binding still mismatches.
  * General integrated versions have no producing run/task, so P6 omits their references.
  * No-upload general continuations are separate scenarios, not a passed material journey.
  * Local command categories are a synthetic host policy, not production lint/build/E2E proof.
@@ -182,17 +181,20 @@ for(const nativeFixture of [false,true])test(`P8 code: real local checks and dev
       f.store.db.prepare('UPDATE runs SET body=? WHERE id=?').run(JSON.stringify(run),run.id);
       assert.equal(read()?.binding.runId,run.id);
     });
-    assert.equal(item.status,'refused');
-    assert.equal(item.completion.verifiedDone,false);
-    assert.ok(item.completion.reasonCodes.includes('CQG_SOURCE_BINDING_MISMATCH:artifactDigest'));
-    assert.notEqual(item.manifest.sourceDigest,task.completion!.binding.artifactDigest);
-    if(nativeFixture)assert.equal(item.reason,'INTEGRATION_COMPLETION_REFUSED:CQG_SOURCE_BINDING_MISMATCH:artifactDigest');
-    else{
+    assert.equal(item.status,nativeFixture?'applied':'refused',item.reason);
+    assert.equal(item.completion.verifiedDone,nativeFixture);
+    assert.equal(item.sourceFingerprint,task.completion!.binding.artifactDigest);
+    assert.ok(!item.completion.reasonCodes.includes('CQG_SOURCE_BINDING_MISMATCH:artifactDigest'));
+    if(nativeFixture){
+      assert.equal(item.reason,null);
+      assert.equal(trustedGit(f.project.path,['rev-parse','dev']).toString().trim(),item.candidate.commitSha);
+      assert.equal(readFileSync(join(f.project.path,'result.txt'),'utf8'),'Evidence: 42\n');
+    }else{
       assert.match(item.reason,/^INTEGRATION_COMPLETION_REFUSED:/);
       for(const code of ['CQG_SOURCE_NOT_VERIFIED_DONE','CQG_AI_NATIVE_REQUIRED','CQG_EXECUTION_NOT_OBSERVED_COMPLETE','CQG_MODEL_OBSERVATION_REQUIRED','EXECUTION_MOCK'])assert.ok(item.completion.reasonCodes.includes(code),code);
+      assert.equal(trustedGit(f.project.path,['rev-parse','dev']).toString().trim(),devBefore);
+      assert.equal(existsSync(join(f.project.path,'result.txt')),false);
     }
-    assert.equal(trustedGit(f.project.path,['rev-parse','dev']).toString().trim(),devBefore);
-    assert.equal(existsSync(join(f.project.path,'result.txt')),false);
     const goal=(await f.get(f.base+'/goals'))[0];assert.equal(goal.verifiedDone,nativeFixture);assert.deepEqual(goal.taskCompletions[0].completion,task.completion);
     // P4/P5 is currently general-only; do not invent a code download route.
     const download=await f.request('GET',f.base+'/deliverables');assert.equal(download.status,409);t.diagnostic('code deliverables gap: '+JSON.stringify(download.body));

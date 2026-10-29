@@ -89,7 +89,7 @@ function fixture(kind:'code'|'general'='code',args=['-e','process.exit(0)']){
   const completion={source:(item:IntegrationItem)=>{
     const captured=candidateEvidence(item,store,policy.completionPolicy,verificationCommandPreviews(configuration,project.path),true);
     const result=evaluateTaskCompletion(captured.evidence as CompletionEvidence,policy.completionPolicy,captured.binding);
-    result.binding={...result.binding,artifactId:item.space.workspaceId??item.space.attemptId,artifactDigest:kind==='code'?item.manifest.sourceDigest:digest(item.manifest),baseSha:item.baseSha};
+    result.binding={...result.binding,artifactId:item.space.workspaceId??item.space.attemptId,artifactDigest:kind==='code'?projects.fingerprint(item.space.workspaceId!):digest(item.manifest),baseSha:item.baseSha};
     return result;
   },read:(item:IntegrationItem):IntegrationCompletionEvidence|null=>candidateEvidence(item,store,policy.completionPolicy,verificationCommandPreviews(configuration,project.path))};
   const makeQueue=()=>new IntegrationQueue(store,projects,workers,spaces,verification,merge,()=>policy,item=>completion.read(item),item=>completion.source(item));
@@ -109,6 +109,42 @@ test('two workers integrate sequentially from their own base onto latest HEAD',a
  assert.equal(f.queue.get(x.id).status,'applied',f.queue.get(x.id).reason??'');assert.equal(f.queue.get(y.id).status,'applied',f.queue.get(y.id).reason??'');
  assert.equal(readFileSync(join(f.repo,'a.txt'),'utf8'),'A\n');assert.equal(readFileSync(join(f.repo,'b.txt'),'utf8'),'B\n');
  assert.equal(f.workers.read(a.r.reservationId).state,'released');assert.equal(f.git('rev-parse','HEAD~2'),f.base);
+ }finally{f.store.close();}
+});
+test('code enqueue fails closed when the verification fingerprint is unavailable',()=>{
+ const f=fixture();try{
+  const w=f.worker('a.txt','A'),projects=new Projects(f.store,join(f.root,'managed'),[f.repo]);
+  projects.fingerprint=()=>{throw new Error('FINGERPRINT_UNAVAILABLE');};
+  const queue=new IntegrationQueue(f.store,projects,f.workers,f.spaces,f.verification,f.merge,()=>f.policy);
+  assert.throws(()=>queue.enqueue({requestId:randomUUID(),fence:w.r,targetBranch:'dev'}),/FINGERPRINT_UNAVAILABLE/);
+  assert.equal(queue.list().length,0);
+  assert.equal(f.workers.read(w.r.reservationId).state,'terminal_confirmed');
+ }finally{f.store.close();}
+});
+test('legacy code queue row without sourceFingerprint is refused after reload',async()=>{
+ const f=fixture();try{
+  const q=f.worker('a.txt','A').enqueue();
+  delete q.sourceFingerprint;
+  f.store.db.prepare('UPDATE integration_queue SET body=? WHERE id=?').run(JSON.stringify(q),q.id);
+  const queue=f.makeQueue();await queue.drain();
+  const result=queue.get(q.id);
+  assert.equal(result.status,'refused');
+  assert.ok(result.completion?.reasonCodes.includes('CQG_SOURCE_BINDING_MISMATCH:artifactDigest'),result.reason??'');
+  assert.equal(result.sourceFingerprint,undefined);
+  assert.equal(f.git('rev-parse','HEAD'),f.base);
+ }finally{f.store.close();}
+});
+test('unchanged tracked bytes changed at source completion read refuse fingerprint binding',async()=>{
+ const f=fixture();try{
+  const w=f.worker('a.txt','A'),q=w.enqueue(),source=f.completion.source;
+  assert.ok(!q.manifest.files.some(file=>file.path==='b.txt'));
+  // Change after the manifest freshness gate, at the live source-completion read.
+  f.completion.source=item=>{writeFileSync(join(w.space.path,'b.txt'),'changed after enqueue');return source(item);};
+  await f.queue.drain();const result=f.queue.get(q.id);
+  assert.equal(result.status,'refused');
+  assert.ok(result.completion?.reasonCodes.includes('CQG_SOURCE_BINDING_MISMATCH:artifactDigest'),result.reason??'');
+  assert.equal(f.git('rev-parse','HEAD'),f.base);
+  assert.equal(readFileSync(join(f.repo,'b.txt'),'utf8'),'base\n');
  }finally{f.store.close();}
 });
 test('conflict refuses without target writes',async()=>{const f=fixture();try{const w=f.worker('a.txt','worker\n'),q=w.enqueue();writeFileSync(join(f.repo,'a.txt'),'target\n');f.git('add','.');f.git('commit','-m','move');const head=f.git('rev-parse','HEAD');await f.queue.drain();assert.equal(f.queue.get(q.id).status,'refused');assert.equal(f.git('rev-parse','HEAD'),head);}finally{f.store.close();}});

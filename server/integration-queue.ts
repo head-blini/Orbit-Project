@@ -81,6 +81,7 @@ export interface IntegrationItem {
   target:git.MergeTarget|null;candidate:git.MergeCandidate|null;candidatePath:string|null;candidateDigest:string|null;
   status:'queued'|'building'|'verifying'|'applying'|'applied'|'refused'|'blocked';reason:string|null;
   attempts:number;released:boolean;generalTargetDigest:string|null;applyStarted:boolean;
+  sourceFingerprint?:string;
   completionPolicyDigest?:string|null;completion?:CandidateCompletion;
 }
 function scan(root:string):git.MergeSnapshot {
@@ -128,9 +129,11 @@ export class IntegrationQueue {
     const reservation=this.workers.read(input.fence.reservationId),space=this.space(reservation.reservationId),policy=this.policy(space.projectId);
     if(reservation.state!=='terminal_confirmed')throw new Error('INTEGRATION_TERMINAL_REQUIRED');
     const manifest=this.spaces.finish(input.fence);
+    const sourceFingerprint=space.kind==='code'?this.projects.fingerprint(space.workspaceId!):undefined;
     if(!/^[a-f0-9]{64}$/.test(policy.approvedBaseline)||policy.approvedBaseline!==reservation.batch.planningHash)throw new Error('INTEGRATION_BASELINE_CHANGED');
     const project=this.projects.list().find(p=>p.id===space.projectId)!;
     const item:IntegrationItem={id:randomUUID(),requestId:input.requestId,inputDigest,fence:structuredClone(input.fence),projectId:space.projectId,space,approvedBaseline:policy.approvedBaseline,requiredChecks:[...policy.requiredChecks],defaultBranch:policy.defaultBranch,configDigest:this.verification.integrationConfigDigest(project.path),baseSha:space.baseSha,sourceSha:space.baseSha,manifest,targetBranch:input.targetBranch,target:null,candidate:null,candidatePath:null,candidateDigest:null,status:'queued',reason:null,attempts:0,released:false,generalTargetDigest:null,applyStarted:false};
+    item.sourceFingerprint=sourceFingerprint;
     item.completionPolicyDigest=policy.completionPolicy?completionPolicyDigest(policy.completionPolicy):null;
     this.store.transaction(()=>{
       if(this.list().some(i=>i.fence.reservationId===item.fence.reservationId))throw new Error('INTEGRATION_ALREADY_QUEUED');
@@ -190,7 +193,7 @@ export class IntegrationQueue {
     }
     const source=this.readSourceCompletion(structuredClone(item));
     const sourceBinding:CompletionBinding={...binding,artifactId:item.space.workspaceId??item.space.attemptId,
-      artifactDigest:item.space.kind==='code'?item.manifest.sourceDigest:hash(item.manifest),baseSha:item.baseSha,
+      artifactDigest:item.space.kind==='code'?item.sourceFingerprint??null:hash(item.manifest),baseSha:item.baseSha,
       configDigest:item.space.kind==='code'?binding.configDigest:source?.binding.configDigest??null};
     item.completion=evaluateCandidateCompletion(evidence,policy,binding,{subject:'integration_candidate',producer:'orbit_merge',
       ...subject,sourceBinding},source);

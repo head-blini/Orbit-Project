@@ -33,11 +33,12 @@ const dimension=(status:QualityDimension['status']='not_run',evidenceIds:string[
 // Native model/review observations are fixtures, never live provider evidence.
 function candidateEvidence(item:IntegrationItem,store:Store,policy:CompletionPolicy,commands:CompletionEvidence['commands'],source=false):IntegrationCompletionEvidence {
  const reservation=new ParallelWorkerService(store).read(item.fence.reservationId);
- const binding={projectId:item.projectId,taskId:reservation.attempt.taskId,runId:'run-producer',planningVersionId:reservation.batch.planningVersionId,
-  planningContentHash:item.approvedBaseline,acceptanceDigest:'acceptance',artifactId:item.id,artifactDigest:item.candidateDigest,
+ const run=store.findRequest(reservation.attempt.dispatchRequestId)!.run;
+ const binding={projectId:item.projectId,taskId:reservation.attempt.taskId,runId:run.id,planningVersionId:reservation.batch.planningVersionId,
+  planningContentHash:item.approvedBaseline,acceptanceDigest:run.acceptanceDigest!,artifactId:item.id,artifactDigest:item.candidateDigest,
   graphRevision:String(reservation.batch.graphRevision),contractDigest:digest(reservation.batch.contractDigests),policyDigest:completionPolicyDigest(policy),configDigest:item.configDigest,
   artifactScope:item.space.kind==='code'?'workspace' as const:'task_manifest' as const,baseSha:item.target?.head??null,inputSnapshotDigest:item.space.inputDigest};
- const model=(id:string)=>({providerId:'provider',modelId:id,sessionId:'session-'+id,runId:'run-'+id,source:'native_observed' as const,evidenceSource:'native' as const});
+ const model=(id:string)=>({providerId:'provider',modelId:id,sessionId:'session-'+id,runId:id==='producer'?run.id:'run-'+id,source:'native_observed' as const,evidenceSource:'native' as const});
  const evidence:CompletionEvidence={quality:{execution:{...dimension('completed'),evidenceSource:'native'},format:dimension(),codeVerification:dimension(),semantic:dimension(),independentReview:dimension(),repair:dimension(),revalidation:dimension(),userApproval:dimension(),evidence:[]},
   producer:{binding:{...binding},model:model('producer')},bindings:{},checks:[],commands,loops:[],gateResults:[],approvals:[]};
  const add=(id:string,kind:'verification_check'|'artifact_check'|'quality_loop',source:'local'|'native'='local')=>{
@@ -156,13 +157,19 @@ test('CQG-6b: same-batch dependent uses applied candidate, not plan base or late
   const configuration=readVerificationConfiguration(JSON.stringify([{projectPath:f.project.path,id:'full',label:'Full',executable:process.execPath,args:['-e','process.exit(0)'],timeoutMs:10000,categories:[...CODE_GATES]}]));
   const verification=new VerificationService(f.store,f.projects,configuration),merge=new MergeService(f.store,f.projects,verification,()=>false);
   const policy:CompletionPolicy={projectKind:'code',requiredGates:[...CODE_GATES],gateCommandMap:verificationGateCommandMap(configuration,f.project.path),notApplicable:[],requireIndependentReview:false,dependencyRelease:'quality_passed'};
+  // This scheduler fixture does not use Controller acceptance capture. Supply its fixture provenance explicitly.
+  const completedRun=f.store.getRun(run.id)!;
+  f.store.db.prepare('UPDATE runs SET body=? WHERE id=?').run(JSON.stringify({...completedRun,acceptanceDigest:'acceptance'}),run.id);
   let sourceBase:string|null=null;
   const queue=new IntegrationQueue(f.store,f.projects,workers,spaces,verification,merge,()=>({approvedBaseline:f.batch.planningHash,defaultBranch:'main',requiredChecks:['full'],completionPolicy:policy}),
    candidate=>candidateEvidence(candidate,f.store,policy,verificationCommandPreviews(configuration,f.project.path)),candidate=>{
     sourceBase=candidate.baseSha;
+    const source=new ProjectProgressService(f.store,f.studio,{policy:()=>policy,verification:(workspaceId,runId)=>verification.view(workspaceId,runId)})
+     .read(f.project.id,{}).tasks.find(task=>task.id===f.tasks[2].id)!.completion!;
     const captured=candidateEvidence(candidate,f.store,policy,verificationCommandPreviews(configuration,f.project.path),true);
-    const source=evaluateTaskCompletion(captured.evidence as CompletionEvidence,policy,captured.binding);
-    source.binding={...source.binding,artifactId:candidate.space.workspaceId,artifactDigest:candidate.manifest.sourceDigest,baseSha:worker.baseSha};return source;
+    const completion=evaluateTaskCompletion(captured.evidence as CompletionEvidence,policy,captured.binding);
+    // Native evidence remains a fixture; source binding comes unchanged from real project progress.
+    return {...completion,binding:source.binding};
    });
   const queued=queue.enqueue({requestId:randomUUID(),fence:result,targetBranch:'dev'});await queue.drain();
   const integrated=queue.get(queued.id);
