@@ -224,3 +224,45 @@ test('context becoming unavailable at invocation is ROUTE_CHANGED and does not c
     assert.equal(f.grants.validFor(key,itemDigest(original),'p1','t1')?.grantId,grant.grantId);assert.equal(f.state.calls,0);
   }finally{f.store.close();}
 });
+
+test('approval previews replace only the same project, task and item; stale IDs fail closed',async()=>{
+  const f=fixture();try{
+    const others=[{...selection,projectId:'p2'},{...selection,taskId:'t2'},{...selection,itemId:hash('other')}];
+    const preserved=others.map(s=>{f.state.meta={...original,id:s.itemId};return f.service.previewApproval(s);});
+    f.state.meta={...original};
+    const first=f.service.previewApproval(selection);
+    let latest=first;
+    for(let i=0;i<20;i++){
+      if(i%2)f.state.planning=hash(`plan-${i}`);
+      latest=f.service.previewApproval(selection);
+      assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM tool_approval_previews').get()!.n,4);
+    }
+    for(const p of preserved)assert.ok(f.store.db.prepare('SELECT id FROM tool_approval_previews WHERE id=?').get(p.previewId));
+    const stale={requestId:'stale',previewId:first.previewId,expectedDigest:first.digest,confirmed:true};
+    assert.throws(()=>f.service.approve(stale),/ROUTE_NOT_FOUND/);
+    await assert.rejects(f.service.invoke(stale),/ROUTE_NOT_FOUND/);
+    assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM tool_grants').get()!.n,0);
+    const input={...stale,requestId:'latest',previewId:latest.previewId,expectedDigest:latest.digest};
+    const approved=f.service.approve(input);
+    assert.deepEqual(f.service.approve(input),approved);
+    assert.throws(()=>f.service.approve({...input,requestId:'conflict'}),/IDEMPOTENCY_CONFLICT/);
+    const invoke={...input,requestId:'invoke',previewId:approved.previewId,expectedDigest:approved.digest};
+    const result=await f.service.invoke(invoke);
+    f.service.previewApproval(selection);
+    assert.deepEqual(await f.service.invoke(invoke),result);
+    assert.equal(f.state.calls,1);
+  }finally{f.store.close();}
+});
+
+test('approval preview replacement rolls back pruning if insertion fails',()=>{
+  const f=fixture();try{
+    const preview=f.service.previewApproval(selection);
+    f.store.db.exec("CREATE TRIGGER fail_preview BEFORE INSERT ON tool_approval_previews BEGIN SELECT RAISE(ABORT,'preview fault'); END");
+    assert.throws(()=>f.service.previewApproval(selection),/preview fault/);
+    const rows=f.store.db.prepare('SELECT id FROM tool_approval_previews').all();
+    assert.deepEqual(rows.map(r=>r.id),[preview.previewId]);
+    const input={requestId:'approval',previewId:preview.previewId,expectedDigest:preview.digest,confirmed:true};
+    assert.deepEqual(f.service.approve(input),f.service.approve(input));
+    assert.equal(f.state.calls,0);
+  }finally{f.store.close();}
+});

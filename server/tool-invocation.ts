@@ -48,7 +48,14 @@ export class ToolInvocationService {
     if(!sha(planningContentHash))throw new AppError('PLANNING_BASELINE_REQUIRED',409);
     const binding={...selection,itemDigest:itemDigest(meta),planningContentHash,...(this.ports.launchContext?{launchContext:this.ports.launchContext(selection)}:{})};
     const preview={previewId:randomUUID(),digest:hash(binding),binding};
-    this.store.db.prepare('INSERT INTO tool_approval_previews VALUES(?,?)').run(preview.previewId,JSON.stringify(preview));
+    this.store.transaction(()=>{
+      // A new preview supersedes earlier approval previews for this task's item.
+      this.store.db.prepare(`DELETE FROM tool_approval_previews
+        WHERE json_extract(body,'$.binding.projectId')=? AND json_extract(body,'$.binding.taskId')=?
+          AND json_extract(body,'$.binding.runtimeId')=? AND json_extract(body,'$.binding.kind')=?
+          AND json_extract(body,'$.binding.itemId')=?`).run(selection.projectId,selection.taskId,selection.runtimeId,selection.kind,selection.itemId);
+      this.store.db.prepare('INSERT INTO tool_approval_previews VALUES(?,?)').run(preview.previewId,JSON.stringify(preview));
+    });
     return {previewId:preview.previewId,digest:preview.digest};
   }
   approve(input:unknown):ToolInvocationPreview {
