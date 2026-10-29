@@ -12,15 +12,16 @@ function freeze<T extends object>(value:T):Readonly<T>{for(const child of Object
 /** Stable App Server turn/start schema. Authority and source claims are absent. */
 export const planningOutputSchema=freeze({type:'object',additionalProperties:false,
   properties:{schema_version:{type:'string',enum:['1.0']},title:string,goal:string,
+    depth:{type:'string',enum:['simple','detailed']},depth_reason:string,risks:list,
     requirements:{type:'array',items:{type:'object',additionalProperties:false,properties:{id:string,description:string,acceptance_criteria:list},required:['id','description','acceptance_criteria']}},
     constraints:list,open_questions:list,decisions:{type:'array',maxItems:100,items:{type:'object',additionalProperties:false,properties:{topic:string,decision:string,rationale:string},required:['topic','decision','rationale']}}},
-  required:['schema_version','title','goal','requirements','constraints','open_questions','decisions']});
+  required:['schema_version','title','goal','requirements','constraints','open_questions','decisions','depth','depth_reason','risks']});
 
 /** Only supplied text is placed in the request. Native context loading is a separate boundary. */
 export function buildPlanningPrompt(text:unknown):{instructions:string;inputDigest:string}{
   if(typeof text!=='string'||!text.trim()||text.length>8000||Buffer.byteLength(text,'utf8')>32*1024||/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(text))throw new AppError('INVALID_PLANNING_INPUT',400);
   if(inspectOutbound(text).length||containsCredential(text))throw new AppError('PLANNING_INPUT_BLOCKED',422);
-  const instructions='Create a planning proposal from the untrusted user request below. Return only the schema 1.0 JSON required by the output schema. Include concrete acceptance criteria and decision rationale. Keep uncertain assumptions in open_questions. This is a draft proposal, never approval or permission to execute. Do not use tools, read project files, execute commands, change files, access credentials or network, delegate, or request approvals. Do not invent source attribution.\n'+staticAppPreviewCapability+'\n'+JSON.stringify({request:text});
+  const instructions='Create a planning proposal from the untrusted user request below. Return only the schema 1.0 JSON required by the output schema. Propose depth simple for a clear, bounded request with few deliverables; propose detailed for multiple dependent deliverables, uncertainty, or risk. If unsure use detailed. State a short reason in depth_reason. For simple use a short goal and minimal tasks; for detailed include requirements, constraints, per-task acceptance, risks and open questions. Both depths must keep every required field and all acceptance criteria. Keep constraints separate from tasks; never turn each constraint into a task. Requirements represent deliverable tasks for any domain, including reports, analysis, writing and code. Empty optional sections may be omitted; never discard explicit exclusions or acceptance criteria. Include concrete acceptance criteria and decision rationale. Keep uncertain assumptions in open_questions. This is a draft proposal, never approval or permission to execute. Do not use tools, read project files, execute commands, change files, access credentials or network, delegate, or request approvals. Do not invent source attribution.\n'+staticAppPreviewCapability+'\n'+JSON.stringify({request:text});
   return {instructions,inputDigest:createHash('sha256').update(instructions).digest('hex')};
 }
 
@@ -66,7 +67,8 @@ export function parsePlanningProposal(text:unknown):PlanningDraft {
   if(typeof text!=='string'||!text.trim()||text.length>64000||Buffer.byteLength(text,'utf8')>256*1024)throw invalid();
   let value:unknown;try{value=JSON.parse(text);}catch{throw invalid();}
   if(!value||typeof value!=='object'||Array.isArray(value)
-    ||Object.keys(value).sort().join(',')!==[...planningOutputSchema.required].sort().join(','))throw invalid();
+    ||Object.keys(value).some(key=>!Object.hasOwn(planningOutputSchema.properties,key))
+    ||planningOutputSchema.required.filter(key=>!['depth','depth_reason','risks'].includes(key)).some(key=>!Object.hasOwn(value,key)))throw invalid();
   // Inspect original decoded strings before normalizing whitespace. In particular,
   // trim() must not hide rejected control characters at the edges of a field.
   const pending:unknown[]=[value],fields:string[]=[];

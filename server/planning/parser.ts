@@ -1,3 +1,4 @@
+import {planningDepth} from '../../shared/planning-agent.ts';
 import type { PlanningDecision, PlanningDraft, PlanningParseResult, PlanningProvenance, PlanningSource } from '../../shared/parallel.ts';
 
 export const MAX_PLANNING_BYTES = 256 * 1024;
@@ -37,11 +38,13 @@ function normalizeJsonDocument(value: unknown, source: PlanningSource): Planning
   if (source !== 'manual' && source !== 'import') return fail('source', 'INVALID_SOURCE');
   if (!object(value)) return fail('document', 'INVALID_DOCUMENT');
   if (value.schema_version !== '1.0') return fail('schema_version', 'UNSUPPORTED_SCHEMA');
-  if (!exactKeys(value, ['schema_version', 'title', 'goal', 'requirements', 'constraints', 'open_questions', 'decisions', 'source', 'non_goals'])) return fail('document', 'UNKNOWN_FIELD');
+  if (!exactKeys(value, ['schema_version', 'title', 'goal', 'requirements', 'constraints', 'open_questions', 'decisions', 'source', 'non_goals', 'depth', 'depth_reason', 'risks'])) return fail('document', 'UNKNOWN_FIELD');
   if (typeof value.title !== 'string' || typeof value.goal !== 'string') return fail('document', 'INVALID_TEXT_FIELDS');
   if (!Array.isArray(value.requirements)) return fail('requirements', 'INVALID_REQUIREMENTS');
   if (!strings(value.constraints) || !strings(value.open_questions)) return fail('document', 'INVALID_LIST');
   if (value.non_goals !== undefined && !strings(value.non_goals)) return fail('non_goals', 'INVALID_LIST');
+  if (value.depth_reason !== undefined && (typeof value.depth_reason !== 'string' || value.depth_reason.length > 1000)) return fail('depth_reason','INVALID_TEXT');
+  if (value.risks !== undefined && !strings(value.risks)) return fail('risks','INVALID_LIST');
   const decisions:PlanningDecision[]=[];
   if (value.decisions !== undefined) {
     if (!Array.isArray(value.decisions) || value.decisions.length > 100) return fail('decisions', 'INVALID_DECISIONS');
@@ -66,6 +69,10 @@ function normalizeJsonDocument(value: unknown, source: PlanningSource): Planning
   const nonGoals=(value.non_goals as string[]|undefined)?.map(text=>text.trim()).filter(Boolean);
   // Do not add even an empty key: historical content hashes bind exact JSON bytes.
   if (nonGoals?.length) draft.nonGoals=nonGoals;
+  if (Object.hasOwn(value,'depth')) draft.depth=planningDepth(value.depth);
+  if (typeof value.depth_reason==='string' && value.depth_reason.trim()) draft.depthReason=value.depth_reason.trim();
+  const risks=(value.risks as string[]|undefined)?.map(text=>text.trim()).filter(Boolean);
+  if (risks?.length) draft.risks=risks;
   return finish(draft);
 }
 
@@ -200,6 +207,9 @@ function planningDocument(draft: PlanningDraft) {
     requirements: draft.requirements.map(requirement => ({ id: requirement.label, description: requirement.description, acceptance_criteria: requirement.acceptanceCriteria })),
     constraints: draft.constraints, open_questions: draft.openQuestions, decisions: draft.decisions??[],
     ...(draft.nonGoals?.length?{non_goals:draft.nonGoals}:{}),
+    ...(draft.depth!==undefined?{depth:planningDepth(draft.depth)}:{}),
+    ...(draft.depthReason?{depth_reason:draft.depthReason}:{}),
+    ...(draft.risks?.length?{risks:draft.risks}:{}),
     source: provenance?{kind:provenance.kind,provider_id:provenance.providerId,external_url:provenance.externalUrl,
       ...(provenance.author!==undefined?{author:provenance.author}:{}),...(provenance.references!==undefined?{references:provenance.references}:{})}:
       { kind: draft.source === 'manual' ? 'in_app_manual' : 'file', provider_id: null, external_url: null } };
