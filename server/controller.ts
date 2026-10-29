@@ -3,6 +3,7 @@ import type {CandidateCompletionContext,IntegrationItem,IntegrationCompletionRea
 import {lstatSync,readdirSync} from 'node:fs';
 import {fingerprintWorkspace} from './workspace-fingerprint.ts';
 import type {CapabilityExecutionService} from './capability-execution.ts';
+import type {TaskCompletion} from '../shared/task-completion.ts';
 import type {CapabilityExecutionRecord} from '../shared/capability-execution.ts';
 import {ParallelWorkerService} from './parallel-workers.ts';
 import {WorkerSpaces,generalAttemptPath,resolveWorkerPath,type WorkerSpace} from './worker-spaces.ts';
@@ -190,7 +191,7 @@ export class Controller {
       commands:this.verification.view(item.space.workspaceId,source.binding.runId).commands,bindings:{},loops:[],gateResults:[]};
     return readCandidateCompletion(this.store,item,context);
   }
-  initializeWorkers(execution:CapabilityExecutionService,configuration:WorkerConfiguration={},completion?:{policy:NonNullable<CompletionReaders['policy']>;candidate:IntegrationCompletionReader}){
+  initializeWorkers(execution:CapabilityExecutionService,configuration:WorkerConfiguration={},completion?:{policy:NonNullable<CompletionReaders['policy']>;candidate:IntegrationCompletionReader;source?:(item:Readonly<IntegrationItem>)=>TaskCompletion|null}){
     if(this.workerScheduler)return;
     if(!this.projects)return;
     if(completion){this.completionPolicy=completion.policy;this.candidateCompletion=completion.candidate;}
@@ -203,7 +204,7 @@ export class Controller {
       const graph=new TaskGraphService(this.store).view(projectId,held.batch.planningVersionId,{verifiedDoneIds:[],blocked:[]},held.batch.graphRevision);
       if(graph.stale||new TaskGraphService(this.store).read(projectId,held.batch.planningVersionId).revision!==held.batch.graphRevision)throw new AppError('INTEGRATION_BASELINE_CHANGED',409);
       return {approvedBaseline:held.batch.planningHash,defaultBranch:config?.defaultBranch??'',requiredChecks:config?.requiredChecks??[],completionPolicy:this.completionPolicy?.(projectId)};
-    },item=>this.candidateCompletion(item),item=>this.readIntegrationSource(item));
+    },item=>this.candidateCompletion(item),completion?.source??(item=>this.readIntegrationSource(item)));
     this.store.db.exec('CREATE TABLE IF NOT EXISTS worker_integration_refusals(reservation_id TEXT PRIMARY KEY,project_id TEXT NOT NULL,reason TEXT NOT NULL);');
     for(const row of this.store.db.prepare('SELECT reservation_id FROM worker_integration_refusals').all()){
       const reservation=workers.read(String(row.reservation_id));
