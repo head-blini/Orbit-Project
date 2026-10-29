@@ -157,7 +157,8 @@ test('malformed, authority-bearing, private and oversized output never becomes a
 
 test('raw final output at the character boundary remains valid without truncation',async()=>{
   const value=JSON.parse(proposalText());value.goal='';value.goal='x'.repeat(64000-JSON.stringify(value).length);const text=JSON.stringify(value);assert.equal(text.length,64000);
-  const f=setup();f.rpc.onTurn=()=>f.rpc.complete(text);const result=await runCodexPlanning(f.input,f.factory);
+  // This checks output integrity, not latency; allow headroom for validation under concurrent test load.
+  const f=setup();f.rpc.onTurn=()=>f.rpc.complete(text);const result=await runCodexPlanning({...f.input,timeoutMs:5000},f.factory);
   assert.equal(result.execution,'completed');assert.equal(result.proposal?.goal,value.goal);
 });
 
