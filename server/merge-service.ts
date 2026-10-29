@@ -33,6 +33,7 @@ export class MergeService {
   }
   ensureAvailable(workspaceId?:string){
     if(this.working)throw new AppError('MERGE_BUSY',409);
+    if(this.store.db.prepare("SELECT name FROM sqlite_master WHERE name='integration_queue'").get()&&this.store.db.prepare('SELECT id FROM integration_queue WHERE slot=1').get())throw new AppError('INTEGRATION_BUSY',409);
     const projectId=workspaceId?this.store.workspaces().find(item=>item.id===workspaceId)?.projectId:undefined;
     if(projectId&&this.records().some(record=>record.projectId===projectId&&uncertain(record)))throw new AppError('MERGE_RECOVERY_REQUIRED',409);
   }
@@ -130,6 +131,25 @@ export class MergeService {
       this.git.applyMergeCandidate(current.project.path,record.target,record.candidate);
       return this.save({...record,phase:'apply',status:'applied',issue:null,completionBasis:'git_and_bytes'});
     }catch{return this.save({...record,phase:'apply',status:'unknown',issue:'MERGE_APPLY_UNCERTAIN',completionBasis:null});}
+    finally{this.working=false;}
+  }
+  /** Internal auto-apply path. The queue owns the durable slot and supplies a
+   * fresh, candidate-bound full-verification assertion. No HTTP input reaches it. */
+  applyIntegration(input:{id:string;projectId:string;workspaceId:string;sourceDigest:string;configDigest:string;target:nativeGit.MergeTarget;candidate:nativeGit.MergeCandidate},assertVerified:()=>void):MergeRecord {
+    const request={requestId:input.id,commit:input.candidate.commitSha};
+    const prior=this.replay('integration',request);if(prior)return prior;
+    if(this.working||this.externalBusy()||this.verification.active)throw new AppError('MERGE_BUSY',409);
+    const slot=this.store.db.prepare('SELECT id FROM integration_queue WHERE slot=1').get();
+    if(slot?.id!==input.id||this.records().some(uncertain))throw new AppError('MERGE_RECOVERY_REQUIRED',409);
+    assertVerified();
+    const now=new Date().toISOString();
+    const record:MergeRecord={id:input.id,projectId:input.projectId,workspaceId:input.workspaceId,runId:input.id,sourceDigest:input.sourceDigest,checkSetDigest:input.configDigest,approvalId:input.id,target:input.target,candidate:input.candidate,phase:'apply',status:'applying',issue:null,completionBasis:null,createdAt:now,updatedAt:now};
+    this.working=true;
+    try{
+      this.intent('integration',request,record);
+      this.store.transaction(()=>this.git.applyMergeCandidate(this.projects!.mergeProject(input.projectId).path,input.target,input.candidate));
+      return this.save({...record,status:'applied',completionBasis:'git_and_bytes'});
+    }catch{return this.save({...record,status:'unknown',issue:'MERGE_APPLY_UNCERTAIN'});}
     finally{this.working=false;}
   }
   recover(input:RecoverMergeInput):MergeRecord{

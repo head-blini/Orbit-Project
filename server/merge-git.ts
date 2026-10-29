@@ -166,3 +166,62 @@ export function observeMergeApplication(projectPath:string,input:MergeTarget,can
     if(objectId(root,['rev-parse','HEAD'])!==head)return 'unknown';assertBranch(root,target.branch);return 'applied';
   }catch{return 'unknown';}
 }
+
+/** Caller supplies the repository default from trusted project configuration.
+ * Local symbolic remote HEADs add protection without contacting any remote. */
+export function inspectIntegrationTarget(projectPath:string,branch:string,defaultBranch:string):MergeTarget {
+  if(!branchName(branch)||!branchName(defaultBranch))throw new Error('INTEGRATION_TARGET_INVALID');
+  const root=repository(projectPath);
+  const defaults=scalar(root,['for-each-ref','--format=%(symref)','refs/remotes']).split('\n').filter(Boolean).map(ref=>ref.split('/').slice(3).join('/'));
+  // for-each-ref omits dangling symbolic HEADs in offline repositories.
+  const remoteRefs=join(root,'.git','refs','remotes');
+  if(existsSync(remoteRefs))for(const remote of readdirSync(remoteRefs)){
+    if(branchName(remote)&&existsSync(join(remoteRefs,remote,'HEAD'))){
+      const ref=trustedGit(root,['symbolic-ref','--quiet','refs/remotes/'+remote+'/HEAD'],{allowDiffExit:true}).toString().trim();
+      if(ref)defaults.push(ref.split('/').slice(3).join('/'));
+    }
+  }
+  if(['main','master',defaultBranch,...defaults].includes(branch))throw new Error('INTEGRATION_TARGET_PROTECTED');
+  const head=objectId(projectPath,['rev-parse','--verify','refs/heads/'+branch]);
+  const target=inspectMergeTarget(projectPath,head);
+  if(target.branch!==branch)throw new Error('INTEGRATION_TARGET_NOT_CHECKED_OUT');
+  return target;
+}
+
+/** Construct only the worker delta, then three-way merge onto the latest target.
+ * The worker index, HEAD and files are never written. */
+export function prepareIntegrationCandidate(projectPath:string,baseSha:string,changes:MergeSnapshot,target:MergeTarget,id:string,scratchRoot:string){
+  const approved=snapshot(changes),root=repository(projectPath),scratch=directory(scratchRoot);
+  if(!sha(baseSha)||!uuid(id))fail();
+  tree(root,baseSha);const base=tree(root,target.head);
+  const temporary=join(scratch,'orbit-integration-'+id);mkdirSync(temporary);
+  const indexFile=join(temporary,'index');trustedGit(root,['read-tree',baseSha],{indexFile});
+  for(const file of approved.files){
+    const blob=file.presence==='present'?objectIdFromBytes(file.bytes):'0'.repeat(baseSha.length);
+    trustedGit(root,['update-index','-z','--index-info'],{indexFile,input:Buffer.from(`${file.presence==='present'?file.mode:'0'} ${blob}\t${file.path}\0`)});
+  }
+  function objectIdFromBytes(bytes:Uint8Array){const id=trustedGit(root,['hash-object','-w','--no-filters','--stdin'],{input:bytes}).toString().trim();if(!sha(id))fail();return id;}
+  const workerTree=trustedGit(root,['write-tree'],{indexFile}).toString().trim();if(!sha(workerTree))fail();
+  const sourceSha=trustedGit(root,['commit-tree',workerTree,'-p',baseSha],{identity:true,input:Buffer.from('Orbit worker delta\n')}).toString().trim();if(!sha(sourceSha))fail();
+  let merged:string;
+  try{merged=scalar(root,['merge-tree','--write-tree','--merge-base='+baseSha,target.head,sourceSha]).split('\n')[0];}
+  catch{throw new Error('INTEGRATION_CONFLICT');}
+  if(!sha(merged))fail();const next=tree(root,merged);
+  const changed=trustedGit(root,['diff-tree','--no-commit-id','--no-renames','--name-only','-z','-r',target.treeSha,merged]).toString('utf8').split('\0').filter(Boolean);
+  if(changed.some(path=>!approved.files.some(file=>file.path===path)))throw new Error('INTEGRATION_SCOPE');
+  assertNoCollisions(root,base,next);
+  const commitSha=trustedGit(root,['commit-tree',merged,'-p',target.head],{identity:true,input:Buffer.from('Orbit verified integration '+id+'\n')}).toString().trim();if(!sha(commitSha))fail();
+  const candidate={commitSha,treeSha:merged,branch:'orbit-snapshot/'+id};
+  trustedGit(root,['update-ref','refs/heads/'+candidate.branch,commitSha,'0'.repeat(baseSha.length)]);
+  const path=join(temporary,'candidate');trustedGit(root,['worktree','add','--detach','--',path,commitSha]);
+  return {candidate,path,sourceSha};
+}
+
+export function integrationCandidateSnapshot(projectPath:string,target:MergeTarget,candidate:MergeCandidate,path:string):MergeSnapshot {
+  const root=repository(projectPath),files=candidateTree(root,target.head,candidate);
+  if(objectId(path,['rev-parse','HEAD'])!==candidate.commitSha)fail();
+  assertClean(path);assertIndex(path,files);rawWorkspace(path,target.head,files);
+  // Ignored writes must not escape candidate verification either.
+  if(trustedGit(path,['ls-files','--others','-z']).length)fail();
+  return readWorkspaceSnapshot(path,target.head,files.map(({path,mode})=>({path,mode})));
+}
