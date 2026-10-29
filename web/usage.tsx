@@ -1,5 +1,5 @@
 import { useEffect,useRef,useState } from 'react';
-import type { CodexUsage } from '../shared/usage.ts';
+import type { CodexUsage,SubscriptionUsageObservation,SubscriptionQuotaWindow } from '../shared/usage.ts';
 import type { Snapshot } from '../shared/types.ts';
 const number=(value:number|null)=>value===null?'unknown':value.toLocaleString('ko-KR');
 export function UsagePanel({state,online,post}:{state:Snapshot|null;online:boolean;post:(path:string,body:object)=>Promise<unknown>}){
@@ -29,5 +29,36 @@ export function UsagePanel({state,online,post}:{state:Snapshot|null;online:boole
       {usage.daily&&<details><summary>공식 일별 토큰 기록 ({usage.daily.length})</summary><ul>{usage.daily.map(day=><li key={day.date}>{day.date} · {number(day.tokens)} tokens</li>)}</ul></details>}
       <p className="subtle">프로젝트 통계의 작업별 관찰값과 이 계정 전체 조회값은 범위가 다릅니다. 한도나 토큰 수치로 API 비용을 계산하지 않습니다.</p>
     </>}
+  </section>;
+}
+
+const runtimeNames:Record<string,string>={codex:'Codex','claude-code':'Claude Code'};
+const freshnessNames={fresh:'최신',stale:'마지막 관측 · 오래됨',unknown:'관측 시각 미확인'} as const;
+const statusNames={allowed:'허용',allowed_warning:'허용 · 경고',rejected:'한도 도달',unknown:'상태 미확인'} as const;
+/** One window: remaining % only when the provider gave a number; computed values are labelled. */
+export function windowLabel(window:SubscriptionQuotaWindow):string{
+  const remaining=window.remainingPercent===null?'잔여 unknown':`잔여 ${Math.round(window.remainingPercent)}%${window.remainingSource==='computed'?' (계산값)':''}`;
+  return `${remaining} · ${statusNames[window.providerStatus]}${window.resetsAt?' · 초기화 '+new Date(window.resetsAt).toLocaleString('ko-KR',{hour12:false}):''}`;
+}
+export function subscriptionSummary(o:SubscriptionUsageObservation):string{
+  return [runtimeNames[o.runtimeId]??o.runtimeId,o.identityStatus==='observed'&&o.accountRef?'계정 '+o.accountRef:'계정 미식별',
+    freshnessNames[o.freshness],o.observedAt?'관측 '+new Date(o.observedAt).toLocaleString('ko-KR',{hour12:false}):'관측 없음',
+    o.sharing==='shared'?'공유 한도':o.sharing==='not_shared'?'단독 한도':'공유 여부 미확인',o.source.evidence==='mock'?'모의 관측':o.source.evidence==='unknown'?'출처 미확인':'공식 관측'].join(' · ');
+}
+/** Read-only list of recorded subscription observations; nothing here probes a provider or runs a model. */
+export function SubscriptionUsageList({online}:{online:boolean}){
+  const [rows,setRows]=useState<{observation:SubscriptionUsageObservation}[]|null>(null),[error,setError]=useState(false);
+  useEffect(()=>{let live=true;if(!online)return;
+    void fetch('/api/usage/subscriptions',{cache:'no-store'}).then(r=>r.ok?r.json():Promise.reject()).then(value=>{if(live&&Array.isArray(value))setRows(value);}).catch(()=>{if(live)setError(true);});
+    return()=>{live=false;};},[online]);
+  return <section className="surface usage-panel" aria-labelledby="subscription-usage-title">
+    <h2 id="subscription-usage-title">구독 잔여 한도</h2>
+    <p className="subtle">공식 경로로 관측한 값만 보여줍니다. Claude는 승인된 실행 중에만 관측되며, 60초가 지나거나 연결이 끊기면 마지막 관측으로 표시합니다. 여러 창의 비율을 합치지 않고 API 비용과 섞지 않습니다. ChatGPT 웹과 미식별 계정은 unknown입니다.</p>
+    {error&&<p role="alert">구독 한도 기록을 불러오지 못했습니다.</p>}
+    {!rows?<p>확인 중…</p>:!rows.length?<p>아직 관측된 구독 한도가 없습니다.</p>:<ul className="capability-list">{rows.map(({observation:o})=><li key={o.runtimeId+o.connectionRef}>
+      <b>{subscriptionSummary(o)}</b>
+      {o.buckets?.length?<ul>{o.buckets.flatMap(bucket=>(['primary','secondary'] as const).flatMap(kind=>bucket[kind]?[<li key={bucket.id+kind}>{bucket.id} · {windowLabel(bucket[kind]!)}</li>]:[]))}</ul>:<p>잔여 한도: unknown</p>}
+      {!!o.unknownReasons.length&&<p className="subtle">미확인 사유: {o.unknownReasons.join(', ')}</p>}
+    </li>)}</ul>}
   </section>;
 }
