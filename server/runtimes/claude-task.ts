@@ -4,6 +4,7 @@ import type {ProgressSignals} from '../../shared/project-progress.ts';
 import type {ClaudeEvent,ClaudeOutcome} from './claude-code.ts';
 import {safeText} from '../privacy.ts';
 import {AppError} from '../errors.ts';
+import {renderOverlay,type HarnessVersion} from '../../shared/harness.ts';
 
 /** Pieces the Controller needs to run a project Task on Claude Code; no persistence here. */
 export interface ClaudeTaskInput {
@@ -12,13 +13,15 @@ export interface ClaudeTaskInput {
   decisions:readonly {decision:string;rationale:string}[];deliverable:string;
   /** Project-relative user materials (inputs/…) the task may read. */
   materials?:readonly string[];
+  /** HE-5a: promoted claude_task overlay; absent or v0 renders nothing, keeping the prompt byte-identical. */
+  harness?:Pick<HarnessVersion,'revision'|'lines'>;
 }
 
 const clip=(value:string,max:number)=>{const text=safeText(value).replace(/\s+/g,' ').trim();return text.length>max?text.slice(0,max-1)+'…':text;};
 const list=(items:readonly string[],max=12)=>items.slice(0,max).map(item=>'- '+clip(item,200)).join('\n')||'- (없음)';
 
 export function claudeTaskPrompt(input:ClaudeTaskInput):string{
-  const file=normalize(input.deliverable);
+  const file=normalize(input.deliverable),overlay=input.harness?renderOverlay(input.harness):'';
   if(!input.deliverable||isAbsolute(input.deliverable)||file.startsWith('..')||/[\x00-\x1f]/.test(input.deliverable)||file.length>120)throw new AppError('INVALID_DELIVERABLE',400);
   return [
     `작업: ${clip(input.title,200)}`,
@@ -32,6 +35,8 @@ export function claudeTaskPrompt(input:ClaudeTaskInput):string{
     `결과물은 현재 폴더의 ${file} 파일로 작성하세요. 다른 위치에 쓰지 마세요.`,
     // Live E2E 2026-10-29: the default file must not override approved criteria that name their own file.
     '단, 위 완료 조건이나 제약이 파일 이름·위치를 정하거나 다른 파일 생성을 금지하면 그 기준을 따르고 위 기본 파일은 만들지 마세요.',
+    // HE-D1 2(a): appended after the evolvable guidance, before the protected sentences below.
+    ...(overlay?[overlay]:[]),
     '승인 기준을 바꾸지 마세요. 기준과 충돌하거나 정보가 부족하면 결과물(없으면 최종 응답)에 미해결 사항으로 적으세요.',
     '완료를 선언해도 검증은 Orbit이 완료 조건으로 따로 수행합니다.',
   ].join('\n');
