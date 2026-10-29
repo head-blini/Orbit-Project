@@ -147,3 +147,30 @@ test('general project run (projectId, no workspaceId) counts only for its own pr
     assert.deepEqual(req.runs,[{id:own.id,execution:'completed'}]);assert.equal(req.runsTotal,1);assert.equal(req.acceptance,'unverified');
   }finally{f.store.close();}
 });
+
+test('goal completion references current CQG for every task, exposes only owned outputs, and downgrades stale/mock/unknown',()=>{
+  const f=fixture();try{
+    const plan=f.approve(),[task]=f.studio.mutate('project-a','plans',plan.id,'task-drafts',{}) as SavedTask[];
+    const run=f.store.createRun('completion-goal','digest','fixture',undefined,{projectId:'project-a',taskId:task.id,planningVersionId:plan.id});f.store.updateRun(run.id,{execution:'completed'},'run.completed');
+    f.goals.create('project-a',createInput(plan));
+    const decision={status:'passed',source:'local',freshness:'current',evidenceIds:['check-current'],blockers:[]};
+    const completion:any={verifiedDone:true,qualityPassed:true,binding:{projectId:'project-a',taskId:task.id,runId:run.id,planningVersionId:plan.id,planningContentHash:plan.contentHash},gates:[{id:'unit',...decision}],independentReview:{...decision,status:'not_run',source:'unknown',freshness:'unavailable'},userApproval:{...decision,status:'not_run',source:'unknown',freshness:'unavailable'},reasonCodes:[]};
+    const progress:any={projectId:'project-a',tasks:[{id:task.id,latestRunId:run.id,planCurrent:true,completion}]};
+    const artifact={id:'version',deliverableId:'a'.repeat(64),path:'report.txt',size:5,sha256:'b'.repeat(64),taskId:task.id,runId:run.id,runAt:run.updatedAt,observedAt:run.updatedAt};
+    const service=new GoalService(f.store,{progress:()=>progress,deliverables:()=>[artifact,{...artifact,id:'foreign',runId:'foreign-run'}]});
+    const changes=f.store.db.prepare('SELECT total_changes() AS n').get()!.n;
+    const read=()=>service.list('project-a')[0];assert.equal(read().verifiedDone,true);assert.deepEqual(read().deliverables,[artifact]);assert.equal(read().taskCompletions![0].completion!.gates[0].evidenceIds[0],'check-current');
+    for(const source of ['mock','unknown']){completion.gates[0].source=source;assert.equal(read().verifiedDone,false);}completion.gates[0].source='local';
+    completion.gates[0].freshness='stale';assert.equal(read().verifiedDone,false);completion.gates[0].freshness='current';
+    completion.binding.runId='old';assert.equal(read().verifiedDone,false);completion.binding.runId=run.id;
+    progress.tasks.push({id:'unrelated',completion});assert.equal(read().verifiedDone,true);
+    progress.tasks[0].latestRunId='newer';assert.equal(read().verifiedDone,false);progress.tasks[0].latestRunId=run.id;
+    completion.verifiedDone=false;assert.equal(read().verifiedDone,false);completion.verifiedDone=true;
+    completion.independentReview={...decision,source:'mock',status:'completed'};assert.equal(read().verifiedDone,false);
+    assert.equal(f.store.db.prepare('SELECT total_changes() AS n').get()!.n,changes,'goal reads do not persist completion or observations');
+    completion.independentReview={...decision,status:'not_run',source:'unknown',freshness:'unavailable'};
+    f.store.db.prepare('UPDATE planning_tasks SET body=? WHERE version_id=?').run(JSON.stringify([task,{...task,id:'second-task'}]),plan.id);
+    assert.equal(read().taskCompletions!.length,2);assert.equal(read().verifiedDone,false,'every referenced task must have current completion');
+
+  }finally{f.store.close();}
+});

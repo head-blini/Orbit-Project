@@ -12,6 +12,7 @@ export interface DeliverableChecks {
 /** A user-supplied source file in the project's inputs/ folder. */
 export interface Material {path:string;size:number;sha256:string}
 export interface Deliverable {
+  id?:string;
   path:string;size:number;modifiedAt:string;sha256:string;mediaType:string;
   taskId:string|null;taskTitle:string|null;previewable:boolean;checks:DeliverableChecks;
   /** 'input' files are user materials, never AI results. */
@@ -21,3 +22,10 @@ export interface DeliverableList {items:Deliverable[];skipped:number;truncated:b
 export type DeliverablePreview=
   |{kind:'text';path:string;mediaType:string;text:string;truncated:boolean}
   |{kind:'unsupported';mediaType:string};
+
+/** Observation history, not a verification verdict. Unknown provenance stays null. */
+export interface DeliverableVersion {
+  id:string;deliverableId:string;path:string;size:number;sha256:string;
+  taskId:string|null;runId:string|null;runAt:string|null;observedAt:string;
+  available?:boolean;
+}

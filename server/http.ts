@@ -1,3 +1,4 @@
+import {downloadHeaders} from './deliverables.ts';
 import {CapabilityInvocationService} from './capability-invocation.ts';
 import type {CapabilityInvocationInput} from '../shared/capability-invocation.ts';
 import {enrichCapabilityValidation} from './capability-validation.ts';
@@ -41,10 +42,13 @@ async function body(req:IncomingMessage,limit=18000):Promise<Record<string,unkno
 export function createHttpServer(controller:Controller,assets:string,options:{workers?:WorkerConfiguration;nativeProbe?:ReturnType<typeof createNativeProbeService>;runtimeAdapters?:CapabilityRuntimeAdapters;claudeAuthentication?:ReturnType<typeof createClaudeAuthenticationService>}={}){
   const studio=new Studio(controller.store);
   const handoff=new HandoffService(controller.store,studio);
-  const goals=new GoalService(controller.store);
+
   const taskGraphs=new TaskGraphService(controller.store);
   // Partial controllers (tests, embedded hosts) fall back to a reader without completion policy, i.e. 'wait'.
   const progress=controller.progress??new ProjectProgressService(controller.store,studio,{deliverables:id=>controller.deliverables(id),verification:(workspaceId,runId)=>controller.verification.view(workspaceId,runId)});
+  const goals=new GoalService(controller.store,{
+    progress:id=>progress.read(id,{}),deliverables:id=>controller.deliverableVersions?.references(id)??[],
+  });
   const planningHandoff=new PlanningHandoffService(controller.store,(workspaceId,runId)=>controller.verification.view(workspaceId,runId),id=>controller.workspaceDiff(id));
   // Share the Controller's caches so registry readiness and the readiness API never diverge.
   const nativeProbe=options.nativeProbe??controller.nativeProbe??createNativeProbeService();
@@ -181,6 +185,11 @@ export function createHttpServer(controller:Controller,assets:string,options:{wo
         const planningSuggestion=url.pathname.match(/^\/api\/projects\/([a-f0-9-]{36})\/planning-suggestions\/(preview|start|recover|([a-f0-9-]{36})\/(interrupt|save))$/);
         const materialsPost=/^\/api\/projects\/[a-f0-9-]{36}\/materials$/.test(url.pathname);
         const data=await body(req,largeStudioInput?6*256*1024+256*1024:materialsPost?10*(128*1024+512):planningSuggestion?64000:taskGraphRoute?1024*1024+4096:18000);
+        const observeDeliverables=url.pathname.match(/^\/api\/projects\/([a-f0-9-]{36})\/deliverables\/observe$/);
+        if(observeDeliverables){
+          if(url.search)throw new AppError('INVALID_FIELDS',400);exact(data,[]);
+          json(res,200,controller.observeDeliverables(observeDeliverables[1]));return;
+        }
         if(qualityRoute){
           if(url.search)throw new AppError('INVALID_FIELDS',400);
           const projectId=qualityRoute[1],action=qualityRoute[2];
@@ -461,6 +470,14 @@ export function createHttpServer(controller:Controller,assets:string,options:{wo
       }
       const materialsView=url.pathname.match(/^\/api\/projects\/([a-f0-9-]{36})\/materials$/);
       if(req.method==='GET'&&materialsView){if(url.search)throw new AppError('INVALID_FIELDS',400);json(res,200,controller.materials(materialsView[1]));return;}
+      const downloadRoute=url.pathname.match(/^\/api\/projects\/([a-f0-9-]{36})\/deliverables\/([a-f0-9]{64})\/(download|versions)(?:\/([a-f0-9-]{36})\/download)?$/);
+      if(req.method==='GET'&&downloadRoute){
+        if(url.search||downloadRoute[3]==='download'&&downloadRoute[4])throw new AppError('INVALID_FIELDS',400);
+        const [,projectId,id,action,versionId]=downloadRoute;
+        if(action==='versions'&&!versionId){json(res,200,controller.deliverableHistory(projectId,id));return;}
+        const file=controller.deliverableDownload(projectId,id,versionId);
+        res.writeHead(200,downloadHeaders(file));res.end(file.bytes);return;
+      }
       const deliverablesRoute=url.pathname.match(/^\/api\/projects\/([a-f0-9-]{36})\/deliverables(\/preview)?$/);
       if(req.method==='GET'&&deliverablesRoute){
         const keys=[...url.searchParams.keys()];

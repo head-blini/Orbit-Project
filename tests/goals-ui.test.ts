@@ -209,3 +209,18 @@ test('late history from an earlier project cannot repopulate the panel',async()=
   await coordinator.setScope(scope);const history=coordinator.showHistory('goal-a');await coordinator.setScope({projectId:'project-b',online:true});pending.resolve(json([goal()]));await history;
   assert.equal(coordinator.getSnapshot().history,null);assert.equal(coordinator.getSnapshot().historyLoading,null);assert.equal(coordinator.getSnapshot().historyError,'');
 });
+
+test('goal view shows CQG evidence and never labels stale, mock, unknown or unread current state complete',async()=>{
+  const {GoalTrackingView,createGoalTrackingCoordinator}=await components();
+  const decision={status:'passed',source:'local',freshness:'current',evidenceIds:['cqg-evidence'],blockers:[]};
+  const completion:any={verifiedDone:true,qualityPassed:true,gates:[{id:'unit',...decision}],independentReview:{...decision,status:'not_run',source:'unknown'},userApproval:{...decision,status:'not_run',source:'unknown'}};
+  const row=view({verifiedDone:true,taskCompletions:[{taskId:'task-a',runId:'run-a',verifiedDone:true,completion}],deliverables:[{id:'version',deliverableId:'a'.repeat(64),path:'report.txt',size:4,sha256:hash,taskId:'task-a',runId:'run-a',runAt:null,observedAt:'2026-10-29T00:00:00Z'}]});
+  const coordinator=createGoalTrackingCoordinator({post:noPost,get:async path=>json(path.endsWith('/plans')?[plan()]:[row])});await coordinator.setScope(scope);
+  const state=coordinator.getSnapshot(),callbacks={onRefresh:()=>{},onSelectPlan:()=>{},onCreate:()=>{},onSetState:()=>{},onHistory:()=>{}};
+  const render=()=>renderToStaticMarkup(createElement(GoalTrackingView,{state,...callbacks}));
+  assert.match(render(),/연결 작업 검증 완료/);assert.match(render(),/cqg-evidence/);assert.match(render(),/report.txt/);
+  const shown=state.goals[0].taskCompletions![0].completion!;
+  for(const source of ['mock','unknown'] as const){shown.gates[0].source=source;assert.doesNotMatch(render(),/연결 작업 검증 완료|현재 검증 통과/);}shown.gates[0].source='local';
+  shown.gates[0].freshness='stale';assert.doesNotMatch(render(),/연결 작업 검증 완료|현재 검증 통과/);shown.gates[0].freshness='current';
+  state.loaded=false;assert.doesNotMatch(render(),/연결 작업 검증 완료|현재 검증 통과/);coordinator.dispose();
+});

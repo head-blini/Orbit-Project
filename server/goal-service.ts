@@ -1,3 +1,6 @@
+import {currentGoalCompletion} from '../shared/goals.ts';
+import type {ProjectProgress} from '../shared/project-progress.ts';
+import type {DeliverableVersion} from '../shared/deliverables.ts';
 import {createHash,randomUUID} from 'node:crypto';
 import type {Store} from './store.ts';
 import {Studio,exact} from './studio.ts';
@@ -15,10 +18,12 @@ function fields(input:unknown,keys:string[]):asserts input is Record<string,unkn
   exact(input as Record<string,unknown>,keys);
 }
 
-/** Tracking has no runtime, filesystem, usage-refresh or execution dependency. */
+/** Tracking reads server completion facts; it never executes or verifies work. */
 export class GoalService {
   private store:Store;private studio:Studio;
-  constructor(store:Store){
+  private readers:{progress?:(id:string)=>ProjectProgress;deliverables?:(id:string)=>DeliverableVersion[]};
+  constructor(store:Store,readers:GoalService['readers']={}){
+    this.readers=readers;
     this.store=store;this.studio=new Studio(store);
     const version=store.getMeta('goal_schema_version');
     if(version!==null&&version!=='1')throw new AppError('GOAL_SCHEMA_UNSUPPORTED',503);
@@ -117,14 +122,31 @@ export class GoalService {
     this.project(projectId);
     const tasks=this.studio.read(projectId,'tasks') as SavedTask[],workspaces=new Set(this.store.workspaces().filter(w=>w.projectId===projectId).map(w=>w.id));
     const allRuns=this.store.runs().filter(run=>run.workspaceId?workspaces.has(run.workspaceId):run.projectId===projectId);
+    let progress:ProjectProgress|undefined;
+    try{progress=this.readers.progress?.(projectId);}catch{/* Unreadable current evidence cannot prove completion. */}
+    const artifacts=this.readers.deliverables?.(projectId)??[];
     return this.store.db.prepare('SELECT id FROM tracked_goals WHERE project_id=? ORDER BY rowid DESC').all(projectId).map(row=>{
       const goal=this.record(projectId,String(row.id)),plan=this.plan(projectId,goal.planningVersionId);
       if(plan.contentHash!==goal.planningHash)throw new AppError('GOAL_PLAN_INTEGRITY',409);
       const planCurrent=this.current(plan)&&plan.state==='approved',linkedTasks=tasks.filter(t=>t.projectId===projectId&&t.planningVersionId===plan.id),taskIds=new Set(linkedTasks.map(t=>t.id));
       const runs=allRuns.filter(run=>run.planningVersionId===plan.id&&run.taskId&&taskIds.has(run.taskId)),{refs:evidence,recoveryRequired}=this.evidence(runs,projectId);
-      const blockers=['ACCEPTANCE_NOT_QUALIFIED'];if(!planCurrent)blockers.push('PLAN_NOT_CURRENT');if(runs.some(r=>r.execution==='lost'))blockers.push('RUN_RECOVERY_UNRESOLVED');
+      const taskCompletions=linkedTasks.map(task=>{
+        const current=progress?.projectId===projectId?progress.tasks.find(t=>t.id===task.id):undefined;
+        const completion=current?.completion??null,binding=completion?.binding;
+        const verifiedDone=!!(planCurrent&&current?.planCurrent&&completion?.verifiedDone&&completion.qualityPassed&&current.latestRunId
+          &&runs.some(r=>r.id===current.latestRunId&&r.taskId===task.id&&r.execution==='completed')
+          &&binding?.projectId===projectId&&binding.taskId===task.id&&binding.runId===current.latestRunId
+          &&binding.planningVersionId===plan.id&&binding.planningContentHash===plan.contentHash
+          &&currentGoalCompletion(completion));
+        return {taskId:task.id,runId:current?.latestRunId??null,verifiedDone,completion};
+      });
+      const verifiedDone=taskCompletions.length>0&&taskCompletions.every(t=>t.verifiedDone)
+        &&plan.draft.requirements.length>0&&plan.draft.requirements.every(r=>linkedTasks.some(t=>t.requirementLabels.includes(r.label)))&&!recoveryRequired&&!runs.some(r=>r.execution==='lost');
+      const runIds=new Set(runs.map(run=>run.id));
+      const deliverables=artifacts.filter(a=>a.taskId&&taskIds.has(a.taskId)&&a.runId&&runIds.has(a.runId));
+      const blockers=verifiedDone?[]:['ACCEPTANCE_NOT_QUALIFIED'];if(!planCurrent)blockers.push('PLAN_NOT_CURRENT');if(runs.some(r=>r.execution==='lost'))blockers.push('RUN_RECOVERY_UNRESOLVED');
       if(recoveryRequired)blockers.push('EVIDENCE_RECOVERY_UNRESOLVED');
-      return {goal,title:plan.draft.title,objective:plan.draft.goal,planCurrent,blockers,
+      return {goal,title:plan.draft.title,objective:plan.draft.goal,planCurrent,blockers,verifiedDone,taskCompletions,deliverables,
         evidenceScope:'기존 기록은 참고 증거입니다. 현재 소스·승인된 수용 테스트·실행 환경의 자격 검증을 뜻하지 않습니다. 요구사항별 최대 100개 참조를 표시합니다.',
         requirements:plan.draft.requirements.map(requirement=>{
           const ids=linkedTasks.filter(task=>task.requirementLabels.includes(requirement.label)).map(t=>t.id),set=new Set(ids);
