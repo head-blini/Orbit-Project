@@ -22,6 +22,8 @@ test('the task prompt carries the approved baseline, decisions and non-goals, an
     acceptanceCriteria:['출처 3개 이상','자료 날짜 기록'],constraints:['유료 API 사용 금지'],nonGoals:['가격 협상'],decisions:[{decision:'국내 서비스만',rationale:'초기 범위'}],deliverable:'sources.md'});
   for(const part of ['공개 자료 수집','여행 결제 서비스 3곳 비교','r2','abababababab','출처 3개 이상','자료 날짜 기록','유료 API 사용 금지','가격 협상','국내 서비스만','초기 범위','sources.md'])assert.ok(prompt.includes(part),part);
   assert.match(prompt,/검증은 Orbit/);assert.match(prompt,/승인 기준을 바꾸지/);
+  // Live E2E 2026-10-29: approved criteria naming their own file win over the default deliverable.
+  assert.ok(prompt.indexOf('그 기준을 따르고 위 기본 파일은 만들지')>prompt.indexOf('sources.md'),'precedence rule follows the default file');
 });
 
 test('prompt inputs cannot smuggle credentials or unbounded text',()=>{
