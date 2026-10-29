@@ -1,3 +1,13 @@
+# Task Graph · Registry 재개 상태 (2026-10-29 · Claude Code 오케스트레이터)
+
+- 기준 브랜치 `codex/orbit-mac-handoff-2026-10-26` HEAD `fc0afd1`. Codex 작업은 `/codex` Skill로 위임, 오케스트레이터가 코드 검토·전체 verify 후 커밋·병합.
+- CORE-LIVE 일부: 일반 작업 프롬프트가 승인 기준의 파일 지정을 우선하도록 수정 `a8601d7`. Codex actual model unknown(app-server 미제공)은 차단 유지.
+- TG(X01): 승인 기획 결속 Task DAG `b6a98e8`(Codex TG-01) + HTTP `4c506d2`. `done`은 CQG가 정의되기 전까지 표시하지 않음. 검증 1419/0 fail.
+- REGISTRY(X08): 설계 [ORBIT-REGISTRY-D1](ORBIT-REGISTRY-D1.md) `622cafe`(보수적 기본값), R1 계약·저장 `96eff58`, R2 서비스 `f230799`, R3 Model Hub·Controller 연결 `bc061a6`(Codex), R4 UI·R5 HTTP `fc0afd1`(Claude). 인증 값 미저장·참조 이름만, 사용자 항목 기본 비활성, 연결 진단은 명시 확인 + 서버가 projectId를 경로로 매핑.
+- 검증: 최종 Node24 `npm run verify` exit0 **1471 tests /1469 pass /0 fail /2 skip**. Registry 화면 Mock headless Chrome 확인. 실제 외부 연결 진단·실모델 호출 0회(mock-tested 상태).
+- 알려진 이슈: `tests/quality-loop-controller.test.ts`가 부하 시 간헐 실패(`'failed' !== 'passed'`, 26회 중 2회). 이번 변경 이전에도 같은 파일에서 관측. 별도 원인 조사 필요.
+- 다음: USAGE(잔여 한도, 기존 usageSnapshot/claudeQuota 재사용 확인), PW, CQG, FE, HE, TOOLS, PRODUCT. GPT-EXCHANGE 실연결·추가 실호출은 별도 승인.
+
 # QG 통합 · LIVE-CLI 재개 상태 (2026-10-29 · Claude Code 오케스트레이터)
 
 - 승인: `ORBIT-SCOPE-EXTENSION-2026-10-29.md`, `ORBIT-UNIFIED-BACKLOG-2026-10-29.md`. 오케스트레이션 체크포인트: `.local/orchestrator/STATE.md` (gitignored), Codex 위임 Skill `.claude/skills/codex/`.
