@@ -171,3 +171,15 @@ test('preview survives restart and completed request replays without a launch',a
     assert.deepEqual(await service.invoke(input),result);assert.equal(f.state.calls,1);
   }finally{reopened?.close();rmSync(dir,{recursive:true,force:true});}
 });
+
+test('invoke consumes the grant exactly once through the shared T2 transition',async()=>{
+  const f=fixture();try{
+    const g=f.grant(),input=f.approved();
+    await f.service.invoke(input);
+    const used=f.store.eventsAfter(0).filter(e=>e.kind==='tool.grant.used');
+    assert.equal(used.length,1);assert.equal(used[0]!.data.grantId,g.grantId);
+    assert.equal(f.store.db.prepare('SELECT state FROM tool_grants WHERE grant_id=?').get(g.grantId)!.state,'used');
+    await assert.rejects(f.service.invoke({...input,requestId:'invoke2'}),/ROUTE_CHANGED/);
+    assert.equal(f.store.eventsAfter(0).filter(e=>e.kind==='tool.grant.used').length,1);assert.equal(f.state.calls,1);
+  }finally{f.store.close();}
+});

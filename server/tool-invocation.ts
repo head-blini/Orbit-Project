@@ -1,6 +1,6 @@
 import {createHash,randomUUID} from 'node:crypto';
 import type {Store} from './store.ts';
-import type {ToolPermissionStore} from './tool-permissions.ts';
+import {ToolPermissionStore} from './tool-permissions.ts';
 import type {ToolItemMeta} from '../shared/tool-capabilities.ts';
 import type {ToolInvocation,ToolInvocationBinding,ToolInvocationPreview,ToolInvocationSelection,ToolLaunchPort,ToolLaunchRequest} from '../shared/tool-invocation.ts';
 import {itemDigest,toolGrantable} from './tool-capability-ledger.ts';
@@ -27,8 +27,10 @@ const keyOf=(s:ToolInvocationSelection)=>({runtimeId:s.runtimeId,kind:s.kind,ite
 export class ToolInvocationService {
   private store:Store;
   private ports:ToolInvocationPorts;
+  /** Consumption always runs on this Store, whatever the lookup port is. */
+  private grantStore:ToolPermissionStore;
   constructor(store:Store,ports:ToolInvocationPorts){
-    this.store=store;this.ports=ports;
+    this.store=store;this.ports=ports;this.grantStore=new ToolPermissionStore(store);
     store.db.exec(`CREATE TABLE IF NOT EXISTS tool_invocation_previews(id TEXT PRIMARY KEY,body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS tool_invocations(id TEXT PRIMARY KEY,request_id TEXT NOT NULL UNIQUE,input_digest TEXT NOT NULL,body TEXT NOT NULL)`);
   }
@@ -70,12 +72,9 @@ export class ToolInvocationService {
       if(digest(current)!==expectedDigest)throw new AppError('ROUTE_CHANGED',409);
       const now=new Date().toISOString();
       const record:ToolInvocation={...current,invocationId:randomUUID(),requestId,previewId,digest:expectedDigest,createdAt:now,updatedAt:now,status:'unknown',evidenceSource:'unknown',issue:'OPERATION_UNCONFIRMED'};
-      // T2 consume() opens a transaction; Store forbids nesting. Keep its conditional transition and audit in this transaction.
-      const used=this.store.db.prepare(`UPDATE tool_grants SET state='used',updated_at=? WHERE grant_id=? AND state='active'
-        AND project_id=? AND task_id=? AND runtime_id=? AND kind=? AND item_id=? AND item_digest=?`)
-        .run(now,current.grantId,current.projectId,current.taskId,current.runtimeId,current.kind,current.itemId,current.itemDigest);
-      if(used.changes!==1)throw new AppError('ROUTE_CHANGED',409);
-      this.store.append('tool.grant.used',null,{grantId:current.grantId,projectId:current.projectId,taskId:current.taskId,code:'TOOL_GRANT_USED'});
+      // Shared T2 transition inside this intent transaction; any grant failure means the approved route no longer holds.
+      try{this.grantStore.consumeInTransaction(current.grantId,{projectId:current.projectId,taskId:current.taskId,key:keyOf(current),itemDigest:current.itemDigest});}
+      catch(error){if(error instanceof AppError)throw new AppError('ROUTE_CHANGED',409);throw error;}
       this.store.db.prepare('INSERT INTO tool_invocations VALUES(?,?,?,?)').run(record.invocationId,requestId,inputDigest,JSON.stringify(record));
       this.audit(record);
       return {record,replay:false};
