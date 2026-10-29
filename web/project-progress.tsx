@@ -34,7 +34,7 @@ const runtime=(value:string|null)=>value?runtimeLabels[value]??value:'미지정'
 /** Stages where a new explicit run may start. A lost run is never retried from here. */
 export const runnableStages:readonly TaskStage[]=['not_started','error','interrupted','verification_failed','response_unverified','revalidation_required'];
 export interface TaskActions {
-  runtimeLabel:string;canRun:boolean;busy:boolean;pendingTaskId:string|null;handoff:{taskId:string;markdown:string;history:HandoffHistoryEntry[]}|null;
+  runtimeLabel:string;canRun:boolean;busy:boolean;pendingTaskId:string|null;handoff:{taskId:string;markdown:string;history?:HandoffHistoryEntry[]}|null;
   onRun(task:ProgressTask):void;onInterrupt(task:ProgressTask):void;onHandoff(task:ProgressTask):void;
   /** Explicit lost-run recovery; absent where the runtime has no such action. */onRecover?(runId:string):void;
 }
@@ -48,7 +48,7 @@ function TaskButtons({task,actions,released}:{task:ProgressTask;actions:TaskActi
     <button disabled={actions.busy} onClick={()=>actions.onHandoff(task)}>인계 자료 보기</button>
     {actions.handoff?.taskId===task.id&&<pre className="progress-handoff" aria-label="인계 자료">{actions.handoff.markdown}</pre>}
     {actions.handoff?.taskId===task.id&&<ul className="progress-handoff-history" aria-label="인계 이력">
-      {actions.handoff.history.length?actions.handoff.history.map(entry=><li key={entry.seq}>{time(entry.at)} · {runtime(entry.destination)}로 전달 · {entry.receipt==='acknowledged'?'실행기가 시작을 확인함':'전달됨 · 시작 확인 기록 없음'}{entry.receipt==='delivered'&&entry.runExecution&&['failed','lost','interrupted'].includes(entry.runExecution)?` (실행 상태: ${entry.runExecution})`:''}</li>):<li>아직 실행기로 전달된 기록이 없습니다.</li>}
+      {Array.isArray(actions.handoff.history)&&actions.handoff.history.length?actions.handoff.history.map(entry=><li key={entry.seq}>{time(entry.at)} · {runtime(entry.destination)}로 전달 · {entry.receipt==='acknowledged'?'실행기가 시작을 확인함':'전달됨 · 시작 확인 기록 없음'}{entry.receipt==='delivered'&&entry.runExecution&&['failed','lost','interrupted'].includes(entry.runExecution)?` (실행 상태: ${entry.runExecution})`:''}</li>):<li>아직 실행기로 전달된 기록이 없습니다.</li>}
     </ul>}
   </div>;
 }
@@ -196,7 +196,7 @@ export function ProjectProgressPanel({projectId,projectKind,online,lastSeq,lastE
       if(!response.ok)throw new Error();const value=await response.json() as HandoffPackage;
       if(value.taskId!==task.id||typeof value.markdown!=='string')throw new Error();
       const log=await fetch(`/api/projects/${encodeURIComponent(projectId)}/tasks/${encodeURIComponent(task.id)}/handoff-history`,{cache:'no-store'});
-      const history=log.ok?(await log.json() as {entries:HandoffHistoryEntry[]}).entries:[];
+      const entries=log.ok?(await log.json() as {entries?:unknown}).entries:[],history=Array.isArray(entries)?entries as HandoffHistoryEntry[]:[];
       setHandoff({taskId:task.id,markdown:value.markdown,history});
     }catch{setError('인계 자료를 불러오지 못했습니다.');}
   });
