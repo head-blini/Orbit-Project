@@ -225,3 +225,9 @@ export function integrationCandidateSnapshot(projectPath:string,target:MergeTarg
   if(trustedGit(path,['ls-files','--others','-z']).length)fail();
   return readWorkspaceSnapshot(path,target.head,files.map(({path,mode})=>({path,mode})));
 }
+
+/** Read-only ancestry proof over immutable commit IDs; unrelated histories return false. */
+export function isAncestor(projectPath:string,ancestor:string,descendant:string):boolean {
+  if(!sha(ancestor)||!sha(descendant))fail();
+  return trustedGit(projectPath,['merge-base',ancestor,descendant],{allowDiffExit:true}).toString().trim()===ancestor;
+}

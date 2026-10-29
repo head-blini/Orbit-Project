@@ -74,6 +74,7 @@ export function generalAttemptPath(projectPath:string,attemptId:string):string {
 /** PW-1 does not yet carry a base revision. Only the trusted approval adapter may
  * supply this binding; PW-3 pins it per batch and never substitutes current HEAD. */
 export interface ApprovedWorkerBase {batchId:string;projectId:string;repositoryId:string;baseSha:string}
+export interface WorkerHandoff {predecessors:{taskId:string;integrationId:string;commitSha:string|null;files:{path:string;sha256:string}[]}[]}
 export interface WorkerSpace {
   reservationId:string;attemptId:string;projectId:string;kind:'code'|'general';path:string;
   workspaceId:string|null;repositoryId:string|null;baseSha:string|null;
@@ -104,7 +105,7 @@ export class WorkerSpaces {
   private store:Store;private projects:Projects;private workers:ParallelWorkerService;
   constructor(store:Store,projects:Projects,workers:ParallelWorkerService){
     this.store=store;this.projects=projects;this.workers=workers;
-    store.db.exec('CREATE TABLE IF NOT EXISTS worker_spaces(reservation_id TEXT PRIMARY KEY,body TEXT NOT NULL); CREATE TABLE IF NOT EXISTS worker_space_bases(batch_id TEXT PRIMARY KEY,body TEXT NOT NULL);');
+    store.db.exec('CREATE TABLE IF NOT EXISTS worker_spaces(reservation_id TEXT PRIMARY KEY,body TEXT NOT NULL); CREATE TABLE IF NOT EXISTS worker_space_bases(batch_id TEXT PRIMARY KEY,body TEXT NOT NULL); CREATE TABLE IF NOT EXISTS worker_space_handoffs(attempt_id TEXT PRIMARY KEY,body TEXT NOT NULL);');
   }
   private owned(token:WorkerFence){
     const r=this.workers.read(token.reservationId);
@@ -131,19 +132,27 @@ export class WorkerSpaces {
       }
     }
   }
-  create(token:WorkerFence,base?:ApprovedWorkerBase):WorkerSpace {
+  create(token:WorkerFence,base?:ApprovedWorkerBase,handoff?:WorkerHandoff):WorkerSpace {
+    const dependent=!!handoff?.predecessors.length;
     // Persist intent separately: filesystem failures/crashes must never enable an automatic retry.
     const s=this.store.transaction(()=>{
       const r=this.owned(token);if(r.state!=='reserved')fail('NOT_RESERVED');
       const project=this.projects.list().find(p=>p.id===r.batch.projectId);if(!project?.writeEnabled)fail('PROJECT_UNAVAILABLE');
+      const pinned=this.store.db.prepare('SELECT body FROM worker_space_handoffs WHERE attempt_id=?').get(r.attempt.id);
+      const body=JSON.stringify({base:base??null,handoff:handoff??null});
+      const existing=this.read(r.reservationId);
+      if((pinned&&(!dependent||pinned.body!==body))||(dependent&&!pinned&&existing))fail('HANDOFF_CONFLICT');
       if(project.kind==='code'){
         if(!base||base.batchId!==r.batch.id||base.projectId!==project.id||! /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(base.baseSha)||repositoryIdentity(join(project.path,'.git')).repositoryId!==base.repositoryId)fail('BASE_REQUIRED');
-        const body=JSON.stringify({batchId:base.batchId,projectId:base.projectId,repositoryId:base.repositoryId,baseSha:base.baseSha});
-        const prior=this.store.db.prepare('SELECT body FROM worker_space_bases WHERE batch_id=?').get(r.batch.id);
-        if(prior&&prior.body!==body)fail('BASE_CONFLICT');
-        if(!prior)this.store.db.prepare('INSERT INTO worker_space_bases VALUES(?,?)').run(r.batch.id,body);
+        if(!dependent){
+          const body=JSON.stringify({batchId:base.batchId,projectId:base.projectId,repositoryId:base.repositoryId,baseSha:base.baseSha});
+          const prior=this.store.db.prepare('SELECT body FROM worker_space_bases WHERE batch_id=?').get(r.batch.id);
+          if(prior&&prior.body!==body)fail('BASE_CONFLICT');
+          if(!prior)this.store.db.prepare('INSERT INTO worker_space_bases VALUES(?,?)').run(r.batch.id,body);
+        }
       }else if(base)fail('BASE_INVALID');
-      const existing=this.read(r.reservationId);if(existing){this.check(existing,r);return existing;}
+      if(dependent&&!pinned)this.store.db.prepare('INSERT INTO worker_space_handoffs VALUES(?,?)').run(r.attempt.id,body);
+      if(existing){this.check(existing,r);return existing;}
       if(project.kind==='general')this.projects.generalProject(project.id);
       const record:WorkerSpace={reservationId:r.reservationId,attemptId:r.attempt.id,projectId:project.id,kind:project.kind,
         path:project.kind==='general'?generalAttemptPath(project.path,r.attempt.id):'',workspaceId:project.kind==='code'?randomUUID():null,
@@ -163,6 +172,38 @@ export class WorkerSpaces {
           for(const dir of input.directories.filter(d=>d.path))mkdirSync(join(destination,dir.path),{recursive:true});
           for(const file of input.files){if(file.presence!=='present')fail('INPUT_CHANGED');writeFileSync(join(destination,file.path),file.bytes,{flag:'wx',mode:0o444});s.inputManifest.push({path:file.path,sha256:hash(file.bytes)});}
           if(input.sourceDigest!==snapshot(source).sourceDigest)fail('INPUT_CHANGED');
+        }
+        const files=new Map<string,string>();
+        for(const file of handoff?.predecessors.flatMap(p=>p.files)??[]){
+          if(files.has(file.path)&&files.get(file.path)!==file.sha256)fail('INPUT_CHANGED');
+          files.set(file.path,file.sha256);
+        }
+        const read=(root:string)=>{
+          try{
+            const specs=[...files.keys()].map(path=>{
+              resolveWorkerPath(root,path);
+              return {path,mode:lstatSync(join(root,path)).mode&0o111?'100755':'100644'};
+            });
+            const result=readWorkspaceSnapshot(root,zero,specs);
+            for(const file of result.files)if(file.presence!=='present'||hash(file.bytes)!==files.get(file.path))fail('INPUT_CHANGED');
+            return result.files;
+          }catch{fail('INPUT_CHANGED');}
+        };
+        if(files.size){
+          const inputs=tree(destination);
+          for(const path of files.keys()){
+            if(inputs.files.some(f=>fold(f.path)===fold(path)||fold(path).startsWith(fold(f.path)+'/'))
+              ||inputs.directories.some(d=>fold(d.path)===fold(path)))fail('INPUT_CONFLICT');
+            resolveWorkerPath(destination,path);
+          }
+          for(const file of read(project.path)){
+            if(file.presence!=='present')fail('INPUT_CHANGED');
+            resolveWorkerPath(destination,file.path);mkdirSync(dirname(join(destination,file.path)),{recursive:true});
+            try{writeFileSync(join(destination,file.path),file.bytes,{flag:'wx',mode:0o444});}
+            catch(error){if((error as NodeJS.ErrnoException).code==='EEXIST')fail('INPUT_CONFLICT');throw error;}
+            s.inputManifest.push({path:file.path,sha256:hash(file.bytes)});
+          }
+          read(project.path);read(destination);
         }
         for(const dir of tree(destination).directories.reverse())chmodSync(join(destination,dir.path),0o555);
         s.inputDigest=inputDigest(destination);
