@@ -191,7 +191,7 @@ export function createHttpServer(controller:Controller,assets:string,options:{wo
         if(req.headers.origin!==origin||typeof token!=='string'||token.length!==64||!timingSafeEqual(Buffer.from(token),Buffer.from(session.csrf)))throw new AppError('CSRF_REJECTED',403);
         const largeStudioInput=studioRoute&&studioRoute[2]!=='tasks'&&(!studioRoute[3]||studioRoute[4]==='revisions');
         const planningSuggestion=url.pathname.match(/^\/api\/projects\/([a-f0-9-]{36})\/planning-suggestions\/(preview|start|recover|([a-f0-9-]{36})\/(interrupt|save))$/);
-        const materialsPost=/^\/api\/projects\/[a-f0-9-]{36}\/materials$/.test(url.pathname);
+        const materialsPost=/^\/api\/projects\/[a-f0-9-]{36}\/materials(?:\/replace)?$/.test(url.pathname);
         const data=await body(req,largeStudioInput?6*256*1024+256*1024:materialsPost?10*(128*1024+512):planningSuggestion?64000:taskGraphRoute?1024*1024+4096:18000);
         const observeDeliverables=url.pathname.match(/^\/api\/projects\/([a-f0-9-]{36})\/deliverables\/observe$/);
         if(observeDeliverables){
@@ -458,6 +458,13 @@ export function createHttpServer(controller:Controller,assets:string,options:{wo
         }
         const materialsRoute=url.pathname.match(/^\/api\/projects\/([a-f0-9-]{36})\/materials$/);
         if(materialsRoute){if(url.search)throw new AppError('INVALID_FIELDS',400);json(res,200,controller.addMaterials(materialsRoute[1],data));return;}
+        const replaceRoute=url.pathname.match(/^\/api\/projects\/([a-f0-9-]{36})\/materials\/replace$/);
+        if(replaceRoute){if(url.search)throw new AppError('INVALID_FIELDS',400);json(res,200,controller.replaceMaterial(replaceRoute[1],data));return;}
+        if(url.pathname==='/api/projects/register-folder'){
+          exact(data,['requestId','name','path']);
+          if(url.search||typeof data.requestId!=='string'||typeof data.name!=='string'||typeof data.path!=='string')throw new AppError('INVALID_FIELDS',400);
+          json(res,200,controller.registerGeneralFolder({requestId:data.requestId,name:data.name,path:data.path}));return;
+        }
         if(url.pathname==='/api/projects/create'){
           exact(data,['requestId','name',...(Object.hasOwn(data,'kind')?['kind']:[])]);
           if(url.search||typeof data.requestId!=='string'||typeof data.name!=='string'||(Object.hasOwn(data,'kind')&&data.kind!=='code'&&data.kind!=='general'))throw new AppError('INVALID_FIELDS',400);

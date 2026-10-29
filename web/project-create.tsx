@@ -138,3 +138,54 @@ export function ProjectCreatePanel(props:Props){
     {issue&&<p role="alert" className="notice">{issue}</p>}
   </section>;
 }
+
+const folderKey='orbit.folder.registration';
+type FolderReceipt={requestId:string;name:string;path:string};
+const folderMessages:Record<string,string>={
+  INVALID_FIELDS:nameIssue,INVALID_PATH:'폴더 위치는 /로 시작하는 전체 경로로 입력하세요.',PATH_UNAVAILABLE:'폴더를 찾지 못했거나 읽고 쓸 수 없습니다.',
+  LINK_REJECTED:'바로가기(링크)가 포함된 폴더는 등록할 수 없습니다.',INVALID_PROJECT:'폴더가 아닙니다.',
+  FOLDER_NOT_ALLOWED:'이 폴더는 등록이 허용되지 않았습니다. 서버 관리자가 허용 목록(ORBIT_ALLOWED_PROJECTS)에 이 폴더를 정확히 추가해야 합니다. 홈·시스템 폴더는 등록할 수 없습니다.',
+  PROJECT_OVERLAP:'이미 등록된 프로젝트와 겹치는 폴더입니다.',GIT_FOLDER_REJECTED:'Git 저장소가 들어 있는 폴더는 일반 프로젝트로 등록할 수 없습니다. 코드 작업 프로젝트로 등록하세요.',
+  FOLDER_UNSUPPORTED:'AI 도구 설정 폴더(.claude, .codex 등)가 들어 있어 등록하지 않았습니다.',
+  FOLDER_RESERVED_NAME:'폴더에 이미 inputs, output 또는 .orbit-workers가 있어 등록하지 않았습니다. 기존 파일을 지키기 위해 Orbit은 이 이름을 덮어쓰지 않습니다.',
+  TREE_TOO_LARGE:'파일이 너무 많은 폴더입니다.',IDEMPOTENCY_CONFLICT:'저장된 등록 요청과 입력이 다릅니다. 이전 요청을 취소한 뒤 다시 시도하세요.',
+  RUN_ACTIVE:'다른 실행이 끝난 뒤 다시 시도하세요.',
+};
+function readFolderReceipt():FolderReceipt|null{try{const value=JSON.parse(sessionStorage.getItem(folderKey)??'null');return value&&uuid(value.requestId)&&typeof value.name==='string'&&typeof value.path==='string'?value:null;}catch{return null;}}
+
+/** Registers an existing folder as a general project. Orbit does not move or change its files. */
+export function FolderRegisterPanel({online,locked,post,onProject}:{online:boolean;locked:boolean;post:(path:string,body:object)=>Promise<any>;onProject:(id:string)=>void}){
+  const [pending,setPending]=useState(readFolderReceipt),[name,setName]=useState(pending?.name??''),[path,setPath]=useState(pending?.path??'');
+  const [busy,setBusy]=useState(false),[issue,setIssue]=useState('');
+  const disabled=!online||locked||busy;
+  async function register(){
+    if(disabled)return;
+    const trimmed=name.trim();if(!pending&&!validName(trimmed)){setIssue(nameIssue);return;}
+    // The same request ID is reused after an uncertain response, so no folder is registered twice.
+    const receipt=pending??{requestId:crypto.randomUUID(),name:trimmed,path:path.trim()};
+    try{sessionStorage.setItem(folderKey,JSON.stringify(receipt));}catch{setIssue('브라우저가 요청 기록을 보존하지 못해 보내지 않았습니다.');return;}
+    setPending(receipt);setBusy(true);setIssue('');
+    try{
+      const result=await post('/api/projects/register-folder',receipt) as CreatedProject;
+      if(result?.project?.kind!=='general'||!uuid(result.project.id))throw new Error('UNCERTAIN_RESPONSE');
+      sessionStorage.removeItem(folderKey);setPending(null);setName('');setPath('');onProject(result.project.id);
+    }catch(error){
+      const code=error instanceof Error?error.message:'';
+      setIssue(folderMessages[code]??'등록 결과를 확인하지 못했습니다. 같은 요청으로 다시 확인하세요.');
+    }finally{setBusy(false);}
+  }
+  function cancel(){try{sessionStorage.removeItem(folderKey);}catch{}setPending(null);setIssue('');}
+  return <section aria-label="기존 폴더 등록">
+    <p className="hint">이미 자료가 있는 폴더를 일반 작업 프로젝트로 씁니다. 기존 파일은 옮기거나 바꾸지 않고, Orbit은 그 안의 inputs(자료)와 output(결과물) 폴더에만 씁니다.</p>
+    <form className="register-project" onSubmit={event=>{event.preventDefault();void register();}}>
+      <label htmlFor="folder-project-name">프로젝트 이름</label>
+      <input id="folder-project-name" value={name} maxLength={80} autoComplete="off" disabled={disabled||!!pending} onChange={event=>setName(event.target.value)}/>
+      <label htmlFor="folder-project-path">폴더 위치(전체 경로)</label>
+      <input id="folder-project-path" value={path} maxLength={2000} autoComplete="off" placeholder="/Users/나/Documents/보고서" disabled={disabled||!!pending} onChange={event=>setPath(event.target.value)}/>
+      <button className="primary" disabled={disabled||!name.trim()||!path.trim()}>{busy?'확인 중…':pending?'같은 요청으로 다시 확인':'폴더 등록'}</button>
+    </form>
+    {pending&&!busy&&<button type="button" onClick={cancel}>이 요청 취소</button>}
+    <p className="subtle">서버 관리자가 허용한 폴더만 등록됩니다. Git 저장소, 홈·시스템 폴더, 다른 프로젝트와 겹치는 폴더는 등록할 수 없습니다.</p>
+    {issue&&<p role="alert" className="notice">{issue}</p>}
+  </section>;
+}

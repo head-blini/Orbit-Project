@@ -10,8 +10,8 @@ import { fingerprintWorkspace,readWorkspaceSourceSnapshot,readWorkspaceSnapshot 
 import { trustedGit } from './git-process.ts';
 import {repositoryIdentity} from './repository-resource.ts';
 import type {RepositoryResource} from '../shared/repository-authority.ts';
-import type {CreateProjectInput,CreatedProject} from '../shared/project-creation.ts';
-import {ManagedProjectCreation} from './project-creation.ts';
+import type {CreateProjectInput,CreatedProject,RegisterFolderInput} from '../shared/project-creation.ts';
+import {GeneralFolderRegistration,ManagedProjectCreation} from './project-creation.ts';
 
 const same=(a:string,b:string)=>process.platform==='win32'?a.toLowerCase()===b.toLowerCase():a===b;
 const inside=(parent:string,child:string)=>{const r=relative(parent,child);return !!r&&!r.startsWith('..')&&!isAbsolute(r);};
@@ -50,10 +50,13 @@ export function assertGitProject(store:Store,id:string|null|undefined):void {
 }
 export class Projects {
   private store:Store;private managed:string;private allowed:string[];
-  private creation?:ManagedProjectCreation;
-  constructor(store:Store,managed:string,allowed:string[]=[],creationRoot?:string){this.store=store;mkdirSync(managed,{recursive:true});this.managed=canonical(managed);this.allowed=allowed.map(canonical);if(creationRoot!==undefined)this.creation=new ManagedProjectCreation(store,creationRoot,this.managed);}
+  private creation?:ManagedProjectCreation;private folders?:GeneralFolderRegistration;
+  constructor(store:Store,managed:string,allowed:string[]=[],creationRoot?:string){this.store=store;mkdirSync(managed,{recursive:true});this.managed=canonical(managed);this.allowed=allowed.map(canonical);if(creationRoot!==undefined){this.creation=new ManagedProjectCreation(store,creationRoot,this.managed);this.folders=new GeneralFolderRegistration(store,[this.managed,resolve(creationRoot)]);}}
   get creationAvailable(){return this.creation?.available??false;}
   createProject(input:CreateProjectInput):CreatedProject{if(!this.creation)throw new AppError('PROJECT_CREATION_UNAVAILABLE',503);return this.creation.create(input,(project,id)=>this.prepareWorktree(project,id),id=>this.validate(id));}
+  /** An existing folder becomes a general project only when its exact path is in ORBIT_ALLOWED_PROJECTS. */
+  registerGeneralFolder(input:RegisterFolderInput):CreatedProject{if(!this.folders)throw new AppError('PROJECT_CREATION_UNAVAILABLE',503);return this.folders.register(input,this.allowed);}
+  private registeredFolder(project:Project){return this.allowed.some(a=>same(a,project.path))&&!!this.folders?.owns(project);}
   list():Project[]{return this.store.projects().map(p=>({...p,writeEnabled:this.allowed.some(a=>same(a,p.path))||!!this.creation?.owns(p)}));}
   workspaces(){return this.store.workspaces();}
   register(path:string):Project {
@@ -62,12 +65,12 @@ export class Projects {
     const p:Project={id:randomUUID(),kind:'code',name:safeText(basename(root)),path:root,createdAt:new Date().toISOString(),writeEnabled:this.allowed.some(a=>same(a,root))};this.store.saveProject(p);return p;
   }
   private project(id:string){const p=this.list().find(p=>p.id===id);if(!p)throw new AppError('PROJECT_NOT_FOUND',404);return p;}
-  /** A general write grant requires the exact server-created folder receipt. */
+  /** A general write grant requires the exact server-created folder receipt, or a registered, still-allowlisted folder. */
   generalProject(id:string):Project {
     const project=this.store.projects().find(project=>project.id===id);
     if(!project)throw new AppError('PROJECT_NOT_FOUND',404);
     if(project.kind!=='general')throw new AppError('GENERAL_PROJECT_REQUIRED',409);
-    if(!this.creation?.owns(project))throw new AppError('PROJECT_CREATION_UNAVAILABLE',409);
+    if(!this.creation?.owns(project)&&!this.registeredFolder(project))throw new AppError('PROJECT_CREATION_UNAVAILABLE',409);
     return project;
   }
   create(projectId:string):Workspace {

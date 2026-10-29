@@ -1,7 +1,8 @@
 import {createHash,randomUUID} from 'node:crypto';
-import {existsSync,lstatSync,mkdirSync,writeFileSync} from 'node:fs';
-import {dirname,isAbsolute,join,relative,resolve,sep} from 'node:path';
-import type {CreateProjectInput,CreatedProject} from '../shared/project-creation.ts';
+import {accessSync,constants,existsSync,lstatSync,mkdirSync,readdirSync,writeFileSync} from 'node:fs';
+import {homedir} from 'node:os';
+import {dirname,isAbsolute,join,parse,relative,resolve,sep} from 'node:path';
+import type {CreateProjectInput,CreatedProject,RegisterFolderInput} from '../shared/project-creation.ts';
 import type {Project,Workspace} from '../shared/types.ts';
 import type {Store} from './store.ts';
 import {canonical} from './projects.ts';
@@ -128,5 +129,78 @@ export class ManagedProjectCreation {
       r.state='failed';try{this.save(r);}catch{/* Durable intent remains incomplete if storage is unavailable. */}
       throw new AppError('PROJECT_CREATION_INCOMPLETE',409);
     }
+  }
+}
+
+type Registration={requestId:string;digest:string;name:string;path:string;identity:Directory[];projectId:string;createdAt:string};
+const registrationDigest=(name:string,path:string)=>hash({register:'general-folder',name,path});
+// Exact system folders and their contents; the OS temp root stays usable (it lives under /private/var on macOS).
+const systemRoots=process.platform==='win32'?[/^[a-z]:\\(?:windows|program files(?: \(x86\))?|programdata)(?:\\|$)/i]:[/^\/(?:System|Library|Applications|usr|bin|sbin|etc|dev|opt|cores|Volumes)(?:\/|$)/];
+// Runtime config an AI CLI would load from its working folder, and folders Orbit itself owns.
+const runtimeConfig=/^(?:\.git|\.claude|\.codex|\.agents|\.mcp\.json)$/i,reserved=/^(?:inputs|output|\.orbit-workers)$/i;
+/** Read-only checks of an existing folder; nothing here writes, moves or follows links. */
+function inspectFolder(root:string){
+  let count=0;
+  const walk=(dir:string)=>{for(const entry of readdirSync(dir,{withFileTypes:true})){
+    if(++count>50000)throw new AppError('TREE_TOO_LARGE',409);
+    if(runtimeConfig.test(entry.name))throw new AppError(entry.name.toLowerCase()==='.git'?'GIT_FOLDER_REJECTED':'FOLDER_UNSUPPORTED',409);
+    if(dir===root&&reserved.test(entry.name))throw new AppError('FOLDER_RESERVED_NAME',409);
+    const path=join(dir,entry.name),stat=lstatSync(path);
+    if(stat.isSymbolicLink()||(!stat.isDirectory()&&!stat.isFile())||(stat.isFile()&&stat.nlink>1))throw new AppError('LINK_REJECTED',409);
+    if(stat.isDirectory())walk(path);
+  }};
+  walk(root);
+}
+function normalizeRegistration(input:RegisterFolderInput){
+  if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).sort().join(',')!=='name,path,requestId'||typeof input.path!=='string')throw new AppError('INVALID_FIELDS',400);
+  const {requestId,name}=normalize({requestId:input.requestId,name:input.name,kind:'general'});
+  return {requestId,name,path:canonical(input.path)};
+}
+
+/**
+ * Registers an existing, operator-allowlisted folder as a general project. The
+ * folder is only inspected; Orbit later writes only its own inputs/ and output/.
+ */
+export class GeneralFolderRegistration {
+  private store:Store;private blocked:string[];
+  constructor(store:Store,blocked:string[]){
+    this.store=store;this.blocked=blocked.map(path=>resolve(path));
+    store.db.exec('CREATE TABLE IF NOT EXISTS project_registration_receipts(request_id TEXT PRIMARY KEY,digest TEXT NOT NULL,body TEXT NOT NULL);');
+  }
+  private receipts():Registration[]{
+    return this.store.db.prepare('SELECT digest,body FROM project_registration_receipts').all().flatMap(row=>{
+      try{const r:Registration=JSON.parse(String(row.body));return r.digest===row.digest&&r.digest===registrationDigest(r.name,r.path)&&uuid(r.projectId)?[r]:[];}catch{return [];}
+    });
+  }
+  private matches(r:Registration,project:Project){
+    try{return project.kind==='general'&&r.projectId===project.id&&r.path===project.path&&r.name===project.name&&r.createdAt===project.createdAt
+      &&equal(chain(r.path),r.identity)&&lstatSync(join(r.path,'.git'),{throwIfNoEntry:false})===undefined;}catch{return false;}
+  }
+  owns(project:Project){return this.receipts().some(r=>this.matches(r,project));}
+  register(input:RegisterFolderInput,allowed:readonly string[]):CreatedProject{
+    const {requestId,name,path}=normalizeRegistration(input),digest=registrationDigest(name,path);
+    const prior=this.store.db.prepare('SELECT digest,body FROM project_registration_receipts WHERE request_id=?').get(requestId);
+    if(prior){
+      if(prior.digest!==digest)throw new AppError('IDEMPOTENCY_CONFLICT',409);
+      const r=this.receipts().find(r=>r.requestId===requestId),project=this.store.projects().find(project=>project.id===r?.projectId);
+      if(!r||!project||!this.matches(r,project))throw new AppError('PROJECT_CREATION_UNAVAILABLE',409);
+      return {project:{...project,writeEnabled:true},workspace:null};
+    }
+    if(!lstatSync(path).isDirectory())throw new AppError('INVALID_PROJECT',400);
+    if(!allowed.some(entry=>process.platform==='win32'?entry.toLowerCase()===path.toLowerCase():entry===path))throw new AppError('FOLDER_NOT_ALLOWED',403);
+    const home=resolve(homedir());
+    if(path===parse(path).root||contains(path,home)||systemRoots.some(pattern=>pattern.test(path)))throw new AppError('FOLDER_NOT_ALLOWED',403);
+    if([...this.blocked,...this.store.projects().map(project=>project.path)].some(other=>contains(other,path)||contains(path,other)))throw new AppError('PROJECT_OVERLAP',409);
+    try{accessSync(path,constants.R_OK|constants.W_OK);}catch{throw new AppError('PATH_UNAVAILABLE',400);}
+    inspectFolder(path);
+    const r:Registration={requestId,digest,name,path,identity:chain(path),projectId:randomUUID(),createdAt:new Date().toISOString()};
+    const project:Project={id:r.projectId,name,kind:'general',path,createdAt:r.createdAt,writeEnabled:false};
+    this.store.transaction(()=>{
+      // Recheck under the write lock: another request may have claimed this folder meanwhile.
+      if(this.store.projects().some(other=>contains(other.path,path)||contains(path,other.path)))throw new AppError('PROJECT_OVERLAP',409);
+      this.store.db.prepare('INSERT INTO project_registration_receipts VALUES(?,?,?)').run(requestId,digest,JSON.stringify(r));
+      this.store.saveProject(project);this.store.append('project.folder.registered',null,{projectId:r.projectId});
+    });
+    return {project:{...project,writeEnabled:true},workspace:null};
   }
 }

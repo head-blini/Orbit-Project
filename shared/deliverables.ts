@@ -10,7 +10,8 @@ export interface DeliverableChecks {
   evidence?:{status:'passed'|'needs_review'|'unverified';numbers:number;matched:number;unmatched:string[]};
 }
 /** A user-supplied source file in the project's inputs/ folder. */
-export interface Material {path:string;size:number;sha256:string}
+// previousVersions: replaced bytes Orbit kept for this path (materials list only).
+export interface Material {path:string;size:number;sha256:string;previousVersions?:number}
 export interface Deliverable {
   id?:string;
   path:string;size:number;modifiedAt:string;sha256:string;mediaType:string;
