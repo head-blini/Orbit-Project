@@ -7,6 +7,15 @@ import { approvalIssues, normalizeStoredPlanningDraft } from './parser.ts';
 export interface ExecutionBrief {prompt:string;planningVersionId:string;planningContentHash:string;requirementLabels:string[]}
 export const MAX_EXECUTION_PROMPT_CHARS=4000;
 const validId=(value:unknown):value is string=>typeof value==='string'&&/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value);
+const BRIEF_HEADER='Implement the saved task below within the selected isolated workspace. Follow every plan constraint. Report verification honestly; an agent response is not a passed check.\n';
+// Random digit runs in UUIDs/SHA-256 digests match phone/national-id patterns, so PII inspection blanks only the
+// brief's leading identifier values when UUID/digest-shaped. Free text and credential checks still see everything.
+const briefIdentifiers=new RegExp('^'+BRIEF_HEADER.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')
+  +'\\{\\n  "taskId": "([^"]*)",\\n  "planningVersionId": "([^"]*)",\\n  "contentHash": "([^"]*)"');
+const opaqueId=(v:string)=>/^(?:[a-f0-9]{64}|[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})$/.test(v);
+/** Text for PII inspection of an outbound prompt that may start with an execution brief. Never send this text. */
+export const briefPiiInspectionText=(text:string)=>text.replace(briefIdentifiers,(_m,taskId:string,versionId:string,hash:string)=>
+  `${BRIEF_HEADER}{\n  "taskId": "${opaqueId(taskId)?'':taskId}",\n  "planningVersionId": "${opaqueId(versionId)?'':versionId}",\n  "contentHash": "${opaqueId(hash)?'':hash}"`);
 
 /**
  * Pure validation/formatting only. The caller must load both records from its
@@ -36,7 +45,7 @@ export function buildExecutionBrief(task:SavedTask,version:PlanningVersion):Exec
   const requirement=requirements[0];
   if(requirements.length!==1||task.title!==`${requirement.label}: ${requirement.description.split('\n')[0]}`
     ||task.description!==requirement.description||!isDeepStrictEqual(task.acceptanceCriteria,requirement.acceptanceCriteria))throw new AppError('TASK_PLAN_MISMATCH',409);
-  const prompt='Implement the saved task below within the selected isolated workspace. Follow every plan constraint. Report verification honestly; an agent response is not a passed check.\n'+JSON.stringify({
+  const prompt=BRIEF_HEADER+JSON.stringify({
     taskId:task.id,planningVersionId:version.id,contentHash:version.contentHash,title:version.draft.title,
     goal:version.draft.goal,requirements,constraints:version.draft.constraints,decisions:version.draft.decisions??[],
     ...(version.draft.nonGoals?.length?{nonGoals:version.draft.nonGoals}:{}),

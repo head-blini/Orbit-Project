@@ -29,6 +29,7 @@ import type { RpcPort } from './rpc.ts';
 import { AppError } from './errors.ts';
 import { Projects,assertGitProject } from './projects.ts';
 import { evaluateLaunch,outboundDenial,providerConnections } from './providers/policy.ts';
+import {briefPiiInspectionText} from './planning/execution.ts';
 import { Studio,exact } from './studio.ts';
 import type { SavedTask } from '../shared/parallel.ts';
 import { VerificationService,type VerificationConfiguration } from './verification-service.ts';
@@ -897,7 +898,7 @@ export class Controller {
     assertGitProject(this.store,input?.workspaceId);assertGitProject(this.store,this.workspaceId);
     if(typeof input?.requestId!=='string'||!/^[a-zA-Z0-9-]{8,80}$/.test(input.requestId)||typeof input.prompt!=='string'||!input.prompt.trim()||input.prompt.length>4000)throw new AppError('INVALID_PROMPT',400);
     if(containsCredential(input.prompt))throw new AppError('CREDENTIAL_LIKE_INPUT',400);
-    const denial=outboundDenial(input.prompt);
+    const denial=outboundDenial(briefPiiInspectionText(input.prompt));
     if(denial){this.store.append('guardrail.denied',null,{providerId:'codex',code:denial});throw new AppError(denial,400);}
     if(this.projects&&(input.workspaceId===undefined||input.workspaceId!==(this.workspaceId??null)))throw new AppError('WORKSPACE_MISMATCH');
     const digest=createHash('sha256').update(input.prompt).digest('hex');const prior=this.store.findRequest(input.requestId);

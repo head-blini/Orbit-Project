@@ -13,6 +13,7 @@ import {HandoffService} from './handoff-service.ts';
 import {AppError} from './errors.ts';
 import {containsCredential} from './privacy.ts';
 import {outboundDenial} from './providers/policy.ts';
+import {briefPiiInspectionText} from './planning/execution.ts';
 import {ClaudeCodeRun,findClaude,claudeEnv,type ClaudeEvent,type ClaudeOutcome} from './runtimes/claude-code.ts';
 import {claudeTaskPrompt,executionForClaudeOutcome} from './runtimes/claude-task.ts';
 import {nativeModelId} from './runtimes/model-identity.ts';
@@ -93,7 +94,7 @@ export class ClaudeTaskService {
     // Same input gate as Codex runs (Controller.start), applied to the same raw execution brief:
     // block instead of silently redacting, and audit the denial.
     const raw=brief.prompt+'\n'+task.title+(repair?'\n'+repair.prompt:'');
-    const denial=containsCredential(raw)?'CREDENTIAL_LIKE_INPUT':outboundDenial(raw);
+    const denial=containsCredential(raw)?'CREDENTIAL_LIKE_INPUT':outboundDenial(briefPiiInspectionText(raw));
     if(denial){this.store.append('guardrail.denied',null,{providerId:'claude-code',code:denial});throw new AppError(denial,400);}
     const harness=[activeHarness(this.harness,projectId,'claude_task'),...(repair?[activeHarness(this.harness,projectId,'repair')]:[])];
     const harnessSame=()=>{try{return harness.every(({version})=>{const now=this.harness.current(projectId,version.target);return now.versionId===version.versionId&&now.digest===version.digest;});}catch{return false;}};
