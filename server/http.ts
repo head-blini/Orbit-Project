@@ -62,8 +62,11 @@ export function createHttpServer(controller:Controller,assets:string,options:{wo
   };
   const capabilityInvocation=new CapabilityInvocationService(controller.store,runtimeAdapters);
   const capabilityExecution=new CapabilityExecutionService(controller.store,controller,capabilityRegistry,runtimeAdapters);
-  // Partial controllers (tests, embedded hosts) have no worker scheduler to bind.
-  controller.initializeWorkers?.(capabilityExecution,options.workers);
+  // Hosts that pass worker configuration (server/main.ts) bind and reconcile at startup; others bind on the first worker route,
+  // so constructing the server stays inert for partial controllers.
+  let workersBound=false;
+  const bindWorkers=()=>{if(!workersBound){workersBound=true;controller.initializeWorkers(capabilityExecution,options.workers);}};
+  if(options.workers)bindWorkers();
   const sessions=new Map<string,{csrf:string;expires:number}>();
   const appPreview=new AppPreviewHost(id=>controller.appPreviewSnapshot(id));
   let previewReady:Promise<void>=Promise.resolve();
@@ -80,7 +83,7 @@ export function createHttpServer(controller:Controller,assets:string,options:{wo
   server.once('listening',()=>{const address=server.address();if(address&&typeof address!=='string')previewReady=appPreview.listen('http://127.0.0.1:'+address.port).catch(()=>{});});
   const previewWorkspace=(event:{kind:string})=>{if(event.kind==='workspace.selected')appPreview.clear();};
   controller.store.on('event',previewWorkspace);
-  server.once('close',()=>{void controller.stopWorkers?.();controller.store.off('event',previewWorkspace);void appPreview.close();});
+  server.once('close',()=>{if(workersBound)void controller.stopWorkers();controller.store.off('event',previewWorkspace);void appPreview.close();});
   async function handle(req:IncomingMessage,res:ServerResponse){
     await previewReady;
     const address=server.address();if(!address||typeof address==='string')throw new AppError('UNAVAILABLE',503);
@@ -106,6 +109,7 @@ export function createHttpServer(controller:Controller,assets:string,options:{wo
       if(!session||session.expires<=Date.now())throw new AppError('SESSION_REQUIRED',401);
       const workerRoute=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/worker-batches(?:\/([a-f0-9-]{36})(?:\/(submit))?)?$/);
       const integrationRoute=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/integration-queue$/);
+      if(workerRoute||integrationRoute)bindWorkers();
       if(req.method==='GET'&&workerRoute&&workerRoute[2]&&!workerRoute[3]){
         if(url.search)throw new AppError('INVALID_FIELDS',400);
         json(res,200,controller.workerBatch(workerRoute[1],workerRoute[2]));return;
