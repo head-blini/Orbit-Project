@@ -4,7 +4,7 @@ import { terminal } from '../shared/types.ts';
 import { Store } from './store.ts';
 import type { Projects } from './projects.ts';
 import { AppError } from './errors.ts';
-import { validateVerificationCommand,runVerification } from './verification.ts';
+import { validateVerificationCommand,runVerification,type VerificationContext } from './verification.ts';
 import {AcceptanceService} from './acceptance.ts';
 
 export {readVerificationConfiguration,verificationCommandPreviews,type VerificationConfiguration} from './verification-configuration.ts';
@@ -22,6 +22,7 @@ function exact(value:object,keys:string[]){
 /** Host-approved commands only. This service does not add a process sandbox. */
 export class VerificationService {
   readonly acceptance:AcceptanceService;
+  private integrationRunning=false;
   private pending:{id:string;workspaceId:string;abort:AbortController;promise:Promise<void>}|null=null;
   private resolveCommands:VerificationCommandResolver;
   constructor(privateStore:Store,projects:Projects|undefined,configuration:VerificationConfigurationSource=[],agentBusy:()=>boolean=()=>false){
@@ -32,7 +33,7 @@ export class VerificationService {
     for(const check of this.checks())if(check.execution==='running')this.save({...check,execution:'lost',verdict:'not_run',output:'VERIFICATION_INTERRUPTED_BY_RESTART',completedAt:new Date().toISOString()},'verification.lost');
   }
   private store:Store;private projects:Projects|undefined;private agentBusy:()=>boolean;
-  get active(){return this.pending!==null;}
+  get active(){return this.pending!==null||this.integrationRunning;}
   private checks():CheckRecord[]{return this.store.db.prepare('SELECT body FROM verification_checks ORDER BY rowid DESC').all().map(row=>JSON.parse(String(row.body)));}
   private approvals():VerificationApproval[]{return this.store.db.prepare('SELECT body FROM verification_approvals ORDER BY rowid DESC').all().map(row=>JSON.parse(String(row.body)));}
   private save(check:CheckRecord,event:string){
@@ -50,7 +51,7 @@ export class VerificationService {
   private commands(projectPath:string):VerificationCommandPreview[]{return this.resolveCommands(projectPath);}
   private fingerprint(workspaceId:string){return this.projects!.fingerprint(workspaceId);}
   ensureAvailable(workspaceId?:string){
-    if(this.pending)throw new AppError('VERIFICATION_ACTIVE',409);
+    if(this.active)throw new AppError('VERIFICATION_ACTIVE',409);
     if(workspaceId&&this.checks().some(check=>check.workspaceId===workspaceId&&check.execution==='lost'&&!check.recoveredAt))throw new AppError('VERIFICATION_RECOVERY_REQUIRED',409);
   }
   view(workspaceId:string,runId:string|null):VerificationView{
@@ -61,7 +62,7 @@ export class VerificationService {
     let sourceDigest:string|null=null,sourceIssue:string|null=null;
     if(commands.length)try{sourceDigest=this.fingerprint(workspaceId);}catch{sourceIssue='FINGERPRINT_UNAVAILABLE';}
     const latest=commands.map(command=>checks.find(check=>check.commandId===command.id));
-    const canApprove=!!runId&&run?.execution!=='lost'&&!!sourceDigest&&commands.length>0&&!quarantined&&!this.pending&&!this.agentBusy()&&(!acceptance||['unbound','current'].includes(acceptance.state))&&latest.every((check,index)=>check&&check.execution==='completed'&&check.verdict==='passed'&&check.exitCode===0&&check.baseSha===workspace.baseSha&&check.configDigest===commands[index].configDigest&&check.sourceDigest===sourceDigest&&check.finishedDigest===sourceDigest&&check.acceptanceDigest===run?.acceptanceDigest);
+    const canApprove=!!runId&&run?.execution!=='lost'&&!!sourceDigest&&commands.length>0&&!quarantined&&!this.active&&!this.agentBusy()&&(!acceptance||['unbound','current'].includes(acceptance.state))&&latest.every((check,index)=>check&&check.execution==='completed'&&check.verdict==='passed'&&check.exitCode===0&&check.baseSha===workspace.baseSha&&check.configDigest===commands[index].configDigest&&check.sourceDigest===sourceDigest&&check.finishedDigest===sourceDigest&&check.acceptanceDigest===run?.acceptanceDigest);
     const checkSetDigest=canApprove?hash({sourceDigest,checks:latest.map(check=>({id:check!.id,configDigest:check!.configDigest}))}):null;
     const approval=this.approvals().find(item=>item.workspaceId===workspaceId&&item.runId===runId)??null;
     return {workspaceId,runId,commands,sourceDigest,sourceIssue,checks:checks.slice(0,100),quarantined,checkSetDigest,canApprove,approval,approvalCurrent:!!approval&&canApprove&&approval.sourceDigest===sourceDigest&&approval.checkSetDigest===checkSetDigest,scope,...(acceptance?{acceptance}:{})};
@@ -124,6 +125,36 @@ export class VerificationService {
     if(!view.canApprove||view.sourceDigest!==input.expectedSourceDigest||view.checkSetDigest!==input.expectedCheckSetDigest)throw new AppError('VERIFICATION_REQUIRED',409);
     const approval:VerificationApproval={id:randomUUID(),requestId:input.requestId,runId:input.runId,workspaceId:input.workspaceId,sourceDigest:input.expectedSourceDigest,checkSetDigest:input.expectedCheckSetDigest,createdAt:new Date().toISOString()};
     this.store.transaction(()=>{this.store.db.prepare('INSERT INTO verification_approvals VALUES(?,?,?)').run(approval.id,approval.requestId,JSON.stringify(approval));this.store.append('verification.approved',input.runId,{approvalId:approval.id,workspaceId:input.workspaceId});});return approval;
+  }
+  /** Host-owned candidate context; never accepts commands from the queue caller. */
+  integrationProtectedFiles(projectPath:string):string[] {
+    return [...new Set(this.commands(projectPath).flatMap(command=>command.protectedFiles??[]))];
+  }
+  integrationConfigDigest(projectPath:string):string {
+    return hash(this.commands(projectPath).map(command=>({id:command.id,digest:command.configDigest})));
+  }
+  async verifyIntegration(input:{id:string;projectPath:string;approvedBaseline:string;requiredChecks:string[];configDigest:string;context:VerificationContext;assertCurrent:()=>void}):Promise<'passed'|'failed'|'blocked'|'stale'> {
+    this.ensureAvailable();
+    this.store.db.exec('CREATE TABLE IF NOT EXISTS integration_checks(id TEXT PRIMARY KEY,body TEXT NOT NULL);');
+    // A restarted command may still be running. No automatic re-execution.
+    const history=this.store.db.prepare('SELECT body FROM integration_checks').all().map(row=>JSON.parse(String(row.body)));
+    if(this.agentBusy()||history.some(row=>row.status==='running'))return 'blocked';
+    const commands=this.commands(input.projectPath);
+    if(!commands.length||!input.requiredChecks.length||input.requiredChecks.some(id=>!commands.some(c=>c.id===id))||this.integrationConfigDigest(input.projectPath)!==input.configDigest)return 'blocked';
+    this.integrationRunning=true;
+    try{
+      const fingerprint=()=>{input.assertCurrent();if(this.integrationConfigDigest(input.projectPath)!==input.configDigest)throw new Error('CONFIG_CHANGED');return input.context.fingerprint();};
+      const expected=fingerprint();
+      for(const command of commands){
+        const checkId=randomUUID(),save=(body:object)=>this.store.db.prepare('INSERT INTO integration_checks VALUES(?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body').run(checkId,JSON.stringify({integrationId:input.id,approvedBaseline:input.approvedBaseline,configDigest:input.configDigest,sourceDigest:expected,commandId:command.id,...body}));
+        save({status:'running'});
+        const {configDigest:_,protectedFiles:__,...preview}=command;
+        const result=await runVerification(preview,{...input.context,fingerprint:()=>{const current=fingerprint();if(current!==expected)throw new Error('SOURCE_CHANGED');return current;}});
+        save({status:result.status,result});
+        if(result.status!=='passed'||result.exitCode!==0)return result.status==='stale'?'stale':'failed';
+      }
+      return fingerprint()===expected?'passed':'stale';
+    }catch{return 'stale';}finally{this.integrationRunning=false;}
   }
   async settle(){await this.pending?.promise;}
   async close(){this.pending?.abort.abort();await this.settle();}

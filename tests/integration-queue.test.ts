@@ -1,0 +1,165 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtempSync,mkdirSync,writeFileSync,readFileSync} from 'node:fs';
+import {join} from 'node:path';
+import {randomUUID} from 'node:crypto';
+import {tmpdir} from './temp.ts';
+import {Store} from '../server/store.ts';
+import {Projects} from '../server/projects.ts';
+import {ParallelWorkerService} from '../server/parallel-workers.ts';
+import {WorkerSpaces,generalAttemptPath} from '../server/worker-spaces.ts';
+import {repositoryIdentity} from '../server/repository-resource.ts';
+import {trustedGit} from '../server/git-process.ts';
+import {VerificationService} from '../server/verification-service.ts';
+import {MergeService} from '../server/merge-service.ts';
+import {IntegrationQueue} from '../server/integration-queue.ts';
+
+function fixture(kind:'code'|'general'='code',args=['-e','process.exit(0)']){
+  const root=mkdtempSync(join(tmpdir(),'orbit-integration-')),repo=join(root,'repo');mkdirSync(repo);
+  const git=(...args:string[])=>trustedGit(repo,args,{identity:true}).toString().trim();
+  if(kind==='code'){git('init','-b','dev');writeFileSync(join(repo,'a.txt'),'base\n');writeFileSync(join(repo,'b.txt'),'base\n');git('add','.');git('commit','-m','base');}
+  const store=new Store(join(root,'state.sqlite')),projects=new Projects(store,join(root,'managed'),[repo],join(root,'created'));
+  const project=kind==='code'?projects.register(repo):projects.createProject({requestId:randomUUID(),name:'General',kind}).project;
+  const base=kind==='code'?git('rev-parse','HEAD'):'0'.repeat(40),workers=new ParallelWorkerService(store),spaces=new WorkerSpaces(store,projects,workers);
+  const verification=new VerificationService(store,projects,[{projectPath:project.path,id:'full',label:'Full regression',executable:process.execPath,args,timeoutMs:10000}]);
+  const merge=new MergeService(store,projects,verification,()=>false);
+  const policy={approvedBaseline:'a'.repeat(64),defaultBranch:'trunk',requiredChecks:['full']};
+  const makeQueue=()=>new IntegrationQueue(store,projects,workers,spaces,verification,merge,()=>policy);
+  const queue=makeQueue();
+  const worker=(file:string,content:string)=>{
+    const attempt=randomUUID(),path=kind==='code'?file:join(generalAttemptPath(project.path,attempt),'output');
+    const r=workers.reserve({requestId:randomUUID(),ownerIncarnation:'test',batch:{id:randomUUID(),projectId:project.id,planningVersionId:'approved',graphRevision:1,planningHash:policy.approvedBaseline,taskIds:[attempt],contractDigests:[],inputArtifactHashes:[],runtimeChoices:[{taskId:attempt,runtimeId:'claude-code'}],parallelLimit:2},attempt:{id:attempt,taskId:attempt,runtimeId:'claude-code',dispatchRequestId:randomUUID()},claims:[kind==='code'?{kind:'repository_file',repositoryId:repositoryIdentity(join(repo,'.git')).repositoryId,path:{path,canonicalPath:path,aliasStatus:'verified_no_alias'},mode:'write'}:{kind:'isolated_folder',host:'local',path:{path,canonicalPath:path,aliasStatus:'verified_no_alias'}}]});
+    const space=spaces.create(r,kind==='code'?{batchId:r.batch.id,projectId:project.id,repositoryId:repositoryIdentity(join(repo,'.git')).repositoryId,baseSha:base}:undefined);
+    writeFileSync(join(space.path,kind==='code'?file:'output/'+file),content);
+    workers.transition(r,'dispatched');workers.confirmTerminal(r,{kind:'terminal_confirmed',dispatchRequestId:r.attempt.dispatchRequestId,evidenceId:'terminated'});
+    return {r,space,enqueue:(targetBranch='dev')=>queue.enqueue({requestId:randomUUID(),fence:r,targetBranch:kind==='code'?targetBranch:null})};
+  };
+  return {root,repo,git,store,project,workers,spaces,verification,merge,policy,queue,makeQueue,worker,base};
+}
+test('two workers integrate sequentially from their own base onto latest HEAD',async()=>{
+ const f=fixture();try{const a=f.worker('a.txt','A\n'),b=f.worker('b.txt','B\n');const x=a.enqueue(),y=b.enqueue();await f.queue.drain();
+ assert.equal(f.queue.get(x.id).status,'applied');assert.equal(f.queue.get(y.id).status,'applied');
+ assert.equal(readFileSync(join(f.repo,'a.txt'),'utf8'),'A\n');assert.equal(readFileSync(join(f.repo,'b.txt'),'utf8'),'B\n');
+ assert.equal(f.workers.read(a.r.reservationId).state,'released');assert.equal(f.git('rev-parse','HEAD~2'),f.base);
+ }finally{f.store.close();}
+});
+test('conflict refuses without target writes',async()=>{const f=fixture();try{const w=f.worker('a.txt','worker\n'),q=w.enqueue();writeFileSync(join(f.repo,'a.txt'),'target\n');f.git('add','.');f.git('commit','-m','move');const head=f.git('rev-parse','HEAD');await f.queue.drain();assert.equal(f.queue.get(q.id).status,'refused');assert.equal(f.git('rev-parse','HEAD'),head);}finally{f.store.close();}});
+test('undeclared changes refuse and release only terminal reservation',async()=>{const f=fixture();try{const w=f.worker('a.txt','A');writeFileSync(join(w.space.path,'b.txt'),'hidden');const q=w.enqueue();await f.queue.drain();assert.equal(f.queue.get(q.id).status,'refused');assert.equal(f.git('rev-parse','HEAD'),f.base);assert.equal(f.workers.read(w.r.reservationId).state,'released');}finally{f.store.close();}});
+test('failed full verification never applies',async()=>{const f=fixture('code',['-e','process.exit(1)']);try{const q=f.worker('a.txt','A').enqueue();await f.queue.drain();assert.equal(f.queue.get(q.id).status,'refused');assert.equal(f.git('rev-parse','HEAD'),f.base);}finally{f.store.close();}});
+test('missing required check blocks and retains reservation',async()=>{const f=fixture();try{f.policy.requiredChecks.push('missing');const w=f.worker('a.txt','A'),q=w.enqueue();await f.queue.drain();assert.equal(f.queue.get(q.id).status,'blocked');assert.equal(f.workers.read(w.r.reservationId).state,'terminal_confirmed');}finally{f.store.close();}});
+test('protected branch names refuse',async()=>{for(const branch of ['main','master','trunk']){const f=fixture();try{const q=f.worker('a.txt','A').enqueue(branch);await f.queue.drain();assert.equal(f.queue.get(q.id).status,'refused');assert.equal(f.git('rev-parse','HEAD'),f.base);}finally{f.store.close();}}});
+test('general output manifest integrates without Git and refuses existing output',async()=>{const f=fixture('general');try{const q=f.worker('result.txt','result').enqueue();await f.queue.drain();assert.equal(f.queue.get(q.id).status,'applied');assert.equal(readFileSync(join(f.project.path,'output/result.txt'),'utf8'),'result');const q2=f.worker('result.txt','replacement').enqueue();await f.queue.drain();assert.equal(f.queue.get(q2.id).status,'refused');assert.equal(readFileSync(join(f.project.path,'output/result.txt'),'utf8'),'result');}finally{f.store.close();}});
+
+test('server-wide durable slot excludes another queue while verification is pending',async()=>{
+ const f=fixture();try{
+  const x=f.worker('a.txt','A').enqueue(),y=f.worker('b.txt','B').enqueue();
+  const original=f.verification.verifyIntegration.bind(f.verification);let enter!:()=>void,release!:()=>void;
+  const entered=new Promise<void>(r=>enter=r),barrier=new Promise<void>(r=>release=r);let calls=0,active=0,max=0;
+  f.verification.verifyIntegration=async input=>{calls++;active++;max=Math.max(max,active);if(calls===1){enter();await barrier;}try{return await original(input);}finally{active--;}};
+  const first=f.queue.drain();await entered;
+  const second=f.makeQueue();assert.equal(second.active,true);await second.drain();assert.equal(calls,1);assert.equal(second.get(y.id).status,'queued');
+  assert.throws(()=>second.reconcile(x.id,true),/STOP_CONFIRMATION/);
+  assert.throws(()=>f.merge.ensureAvailable(),/INTEGRATION_BUSY/);
+  release();await first;assert.equal(max,1);assert.equal(second.get(y.id).status,'applied');
+ }finally{f.store.close();}
+});
+test('target HEAD moved after candidate verification rebuilds and verifies again',async()=>{
+ const f=fixture();try{
+  const w=f.worker('a.txt','A'),q=w.enqueue(),original=f.verification.verifyIntegration.bind(f.verification);let calls=0;
+  f.verification.verifyIntegration=async input=>{const result=await original(input);if(++calls===1){writeFileSync(join(f.repo,'b.txt'),'new target');f.git('add','.');f.git('commit','-m','move during verification');}return result;};
+  await f.queue.drain();assert.equal(f.queue.get(q.id).status,'applied');assert.equal(calls,2);assert.equal(f.queue.get(q.id).attempts,2);
+  assert.equal(readFileSync(join(f.repo,'b.txt'),'utf8'),'new target');assert.equal(readFileSync(join(w.space.path,'b.txt'),'utf8'),'base\n');
+ }finally{f.store.close();}
+});
+test('candidate changed after verification rebuilds rather than applying unverified bytes',async()=>{
+ const f=fixture();try{
+  const q=f.worker('a.txt','A').enqueue(),original=f.verification.verifyIntegration.bind(f.verification);let calls=0;
+  f.verification.verifyIntegration=async input=>{const result=await original(input);if(++calls===1)writeFileSync(join(input.context.cwd,'a.txt'),'tampered');return result;};
+  await f.queue.drain();assert.equal(f.queue.get(q.id).status,'applied');assert.equal(calls,2);assert.equal(readFileSync(join(f.repo,'a.txt'),'utf8'),'A');
+ }finally{f.store.close();}
+});
+test('restart after Git apply before queue receipt reconciles without a second apply',async()=>{
+ const f=fixture();try{
+  const q=f.worker('a.txt','A').enqueue(),original=f.merge.applyIntegration.bind(f.merge);let calls=0;
+  f.merge.applyIntegration=(input,check)=>{calls++;original(input,check);throw new Error('simulated queue receipt loss');};
+  await f.queue.drain();assert.equal(f.queue.get(q.id).status,'blocked');const head=f.git('rev-parse','HEAD');
+  const restarted=f.makeQueue();assert.equal(restarted.reconcile(q.id,true).status,'applied');await restarted.drain();
+  assert.equal(calls,1);assert.equal(f.git('rev-parse','HEAD'),head);assert.equal(restarted.reconcile(q.id,true).status,'applied');
+ }finally{f.store.close();}
+});
+test('unknown restart state remains blocked and never blindly reapplies',async()=>{
+ const f=fixture();try{
+  const q=f.worker('a.txt','A').enqueue();
+  f.store.db.prepare('UPDATE integration_queue SET slot=1,body=? WHERE id=?').run(JSON.stringify({...q,status:'building'}),q.id);
+  const restarted=f.makeQueue();assert.equal(restarted.reconcile(q.id,true).status,'blocked');await restarted.drain();assert.equal(f.git('rev-parse','HEAD'),f.base);
+  assert.equal(f.workers.read(q.fence.reservationId).state,'terminal_confirmed');
+ }finally{f.store.close();}
+});
+test('local remote HEAD protects repository default without a remote operation',async()=>{
+ const f=fixture();try{f.git('symbolic-ref','refs/remotes/origin/HEAD','refs/remotes/origin/dev');const q=f.worker('a.txt','A').enqueue();await f.queue.drain();assert.equal(f.queue.get(q.id).reason,'INTEGRATION_TARGET_PROTECTED');assert.equal(f.git('rev-parse','HEAD'),f.base);}finally{f.store.close();}
+});
+test('queue request replay is idempotent and rejects changed payload',async()=>{
+ const f=fixture();try{const w=f.worker('a.txt','A'),input={requestId:randomUUID(),fence:w.r,targetBranch:'dev'},q=f.queue.enqueue(input);assert.equal(f.queue.enqueue(input).id,q.id);assert.throws(()=>f.queue.enqueue({...input,targetBranch:'other'}),/IDEMPOTENCY_CONFLICT/);assert.equal(f.queue.list().length,1);}finally{f.store.close();}
+});
+
+test('closed Store restart reconciles a durable applying intent from Git',async()=>{
+ const f=fixture();let reopened:Store|undefined;
+ try{
+  const q=f.worker('a.txt','A').enqueue(),original=f.merge.applyIntegration.bind(f.merge);let calls=0;
+  f.merge.applyIntegration=(input,check)=>{
+   calls++;const result=original(input,check);
+   f.store.db.prepare('UPDATE merge_records SET body=? WHERE id=?').run(JSON.stringify({...result,status:'applying',completionBasis:null}),input.id);
+   throw new Error('crash after Git before completion journal');
+  };
+  await f.queue.drain();const head=f.git('rev-parse','HEAD');f.store.close();
+  reopened=new Store(join(f.root,'state.sqlite'));
+  const projects=new Projects(reopened,join(f.root,'managed'),[f.repo],join(f.root,'created'));
+  const workers=new ParallelWorkerService(reopened),spaces=new WorkerSpaces(reopened,projects,workers);
+  const verification=new VerificationService(reopened,projects,[]),merge=new MergeService(reopened,projects,verification,()=>false);
+  const queue=new IntegrationQueue(reopened,projects,workers,spaces,verification,merge,()=>f.policy);
+  assert.equal(merge.record(q.id).status,'lost');assert.equal(queue.reconcile(q.id,true).status,'applied');await queue.drain();
+  assert.equal(calls,1);assert.equal(f.git('rev-parse','HEAD'),head);assert.equal(merge.record(q.id).completionBasis,'observed_after_recovery');
+ }finally{if(reopened)reopened.close();else f.store.close();}
+});
+test('all configured checks execute on candidate even if required list names only one',async()=>{
+ const f=fixture();try{
+  const verification=new VerificationService(f.store,new Projects(f.store,join(f.root,'managed'),[f.repo]),['full','contract'].map(id=>({projectPath:f.repo,id,label:id,executable:process.execPath,args:['-e',id==='contract'?'process.exit(1)':'process.exit(0)'],timeoutMs:10000})));
+  const projects=new Projects(f.store,join(f.root,'managed'),[f.repo]),merge=new MergeService(f.store,projects,verification,()=>false);
+  const queue=new IntegrationQueue(f.store,projects,f.workers,f.spaces,verification,merge,()=>f.policy);
+  const w=f.worker('a.txt','A'),q=queue.enqueue({requestId:randomUUID(),fence:w.r,targetBranch:'dev'});await queue.drain();
+  assert.equal(queue.get(q.id).status,'refused');assert.equal(f.git('rev-parse','HEAD'),f.base);
+  assert.equal(f.store.db.prepare('SELECT COUNT(*) AS n FROM integration_checks').get()!.n,2);
+ }finally{f.store.close();}
+});
+test('general out-of-scope files never enter output area',async()=>{
+ const f=fixture('general');try{const w=f.worker('result.txt','result');writeFileSync(join(w.space.path,'undeclared.txt'),'outside');const q=w.enqueue();await f.queue.drain();assert.equal(f.queue.get(q.id).status,'refused');assert.equal(f.workers.read(w.r.reservationId).state,'released');}finally{f.store.close();}
+});
+test('worker cannot auto-promote a configured protected verification file',async()=>{
+ const f=fixture();try{
+  const projects=new Projects(f.store,join(f.root,'managed'),[f.repo]);
+  const verification=new VerificationService(f.store,projects,[{projectPath:f.repo,id:'full',label:'full',executable:process.execPath,args:['-e','process.exit(0)'],timeoutMs:10000,protectedFiles:['a.txt']}]);
+  const queue=new IntegrationQueue(f.store,projects,f.workers,f.spaces,verification,new MergeService(f.store,projects,verification,()=>false),()=>f.policy);
+  const w=f.worker('a.txt','weakened verification'),q=queue.enqueue({requestId:randomUUID(),fence:w.r,targetBranch:'dev'});await queue.drain();
+  assert.equal(queue.get(q.id).status,'refused');assert.equal(f.git('rev-parse','HEAD'),f.base);
+ }finally{f.store.close();}
+});
+test('release failure preserves applied outcome and retries only reservation release',async()=>{
+ const f=fixture('general');try{
+  const q=f.worker('result.txt','result').enqueue(),original=f.workers.release.bind(f.workers);let calls=0;
+  f.workers.release=(...args)=>{if(++calls===1)throw new Error('release unavailable');return original(...args);};
+  await f.queue.drain();assert.equal(f.queue.get(q.id).status,'applied');assert.equal(f.queue.get(q.id).released,false);assert.equal(f.queue.active,true);
+  assert.equal(f.queue.reconcile(q.id,true).released,true);assert.equal(f.queue.active,false);assert.equal(calls,2);
+  assert.equal(readFileSync(join(f.project.path,'output/result.txt'),'utf8'),'result');
+ }finally{f.store.close();}
+});
+test('declared Unicode path integrates without Git display quoting',async()=>{
+ const f=fixture();try{const q=f.worker('결과.txt','approved').enqueue();await f.queue.drain();assert.equal(f.queue.get(q.id).status,'applied');assert.equal(readFileSync(join(f.repo,'결과.txt'),'utf8'),'approved');}finally{f.store.close();}
+});
+test('uncertain authoritative merge recovery retains queue and reservation',async()=>{
+ const f=fixture();try{
+  const q=f.worker('a.txt','A').enqueue(),original=f.merge.applyIntegration.bind(f.merge);
+  f.merge.applyIntegration=(input,check)=>{original(input,check);throw new Error('receipt lost');};await f.queue.drain();
+  f.merge.recover=()=>({...f.merge.record(q.id),status:'unknown',completionBasis:null});
+  assert.equal(f.queue.reconcile(q.id,true).status,'blocked');assert.equal(f.workers.read(q.fence.reservationId).state,'terminal_confirmed');assert.equal(f.queue.active,true);
+ }finally{f.store.close();}
+});
