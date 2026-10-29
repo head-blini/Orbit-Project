@@ -28,7 +28,7 @@ import {TaskGraphService} from './task-graph.ts';
 import {AppPreviewHost} from './app-preview.ts';
 import {assertGitProject} from './projects.ts';
 import {ProjectProgressService} from './project-progress.ts';
-import {quotaSignal} from '../shared/project-progress.ts';
+import {quotaSignal,type ProgressSignals} from '../shared/project-progress.ts';
 import {quotaFromClaudeWindows} from './runtimes/claude-task.ts';
 
 function json(res:ServerResponse,status:number,value:unknown){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(value));}
@@ -444,10 +444,12 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
         // Read-only: signals come from the current snapshot and cached usage; nothing is refreshed or started.
         if(url.search)throw new AppError('INVALID_FIELDS',400);
         const state=controller.snapshot();
+        // Headroom needs a fresh subscription observation; a stale rejection still blocks new runs (conservative).
+        const current=(runtimeId:string,quota:NonNullable<ProgressSignals['quota']>)=>quota==='available'&&!(controller.subscriptionUsage?.snapshot()??[]).some(entry=>entry.observation.runtimeId===runtimeId&&entry.observation.freshness==='fresh')?'unknown':quota;
         // Signals follow the project's runtime: general projects run on Claude Code, code projects on Codex.
         const general=controller.store.projects().some(project=>project.id===progressRoute[1]&&project.kind==='general');
-        json(res,200,progress.read(progressRoute[1],general?{recoveryRequired:!!state.soloRecoveryRequired,quota:quotaFromClaudeWindows(controller.claudeQuota())}
-          :{provider:state.provider,recoveryRequired:!!state.soloRecoveryRequired,quota:quotaSignal(controller.usageSnapshot())}));return;
+        json(res,200,progress.read(progressRoute[1],general?{recoveryRequired:!!state.soloRecoveryRequired,quota:current('claude-code',quotaFromClaudeWindows(controller.claudeQuota()))}
+          :{provider:state.provider,recoveryRequired:!!state.soloRecoveryRequired,quota:current('codex',quotaSignal(controller.usageSnapshot()))}));return;
       }
       if(req.method==='GET'&&registryRoute&&!registryRoute[2]){
         if(url.search)throw new AppError('INVALID_FIELDS',400);
@@ -475,6 +477,7 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
       }
       if(req.method==='GET'&&url.pathname==='/api/control-plane'){if(url.search)throw new AppError('INVALID_FIELDS',400);json(res,200,controlPlaneStatus(controller.snapshot().provider));return;}
       if(req.method==='GET'&&url.pathname==='/api/capabilities'){json(res,200,buildCapabilityRegistry(controller.snapshot().provider,nativeProbe.get()));return;}
+      if(req.method==='GET'&&url.pathname==='/api/usage/subscriptions'){if(url.search)throw new AppError('INVALID_FIELDS',400);json(res,200,controller.subscriptionUsage?.snapshot()??[]);return;}
       if(req.method==='GET'&&url.pathname==='/api/usage'){json(res,200,controller.usageSnapshot());return;}
       const analyticsRoute=url.pathname.match(/^\/api\/projects\/([a-f0-9-]{36})\/analytics$/);
       if(req.method==='GET'&&analyticsRoute){
