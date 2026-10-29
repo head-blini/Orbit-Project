@@ -121,3 +121,11 @@ test('the earliest window reset makes an observation stale without changing any 
   const result=claude([window(0.25),{...window(0.5,'allowed',at),id:'seven_day'}]);
   assert.equal(result.freshness,'stale');assert.deepEqual(result.buckets?.map(b=>b.primary?.remainingPercent),[75,50]);
 });
+
+test('every observed reset is checked regardless of bucket order or missing earlier resets',()=>{
+  for(const windows of [
+    [window(0.25),{...window(0.5,'allowed',at),id:'seven_day'}],
+    [window(0.25,'allowed',null),{...window(0.5,'allowed',at),id:'seven_day'}],
+    [{...window(0.5,'allowed',at),id:'seven_day'},window(0.25)],
+  ])assert.equal(claude(windows).freshness,'stale');
+});

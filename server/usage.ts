@@ -156,14 +156,14 @@ function subscriptionObservation(context:SubscriptionUsageContext,interfaceId:st
   if(context.evidence==='unknown')reasons.push('EVIDENCE_UNKNOWN');
   const observed=timestamp(observedAt);
   if(!observed)reasons.push('OBSERVED_AT_INVALID');
-  const resets=windows.map(w=>w.resetsAt).filter((value):value is string=>value!==null).sort();
+  const resets=windows.map(w=>w.resetsAt).filter((value):value is string=>value!==null);
   return {
     providerId:context.providerId,runtimeId:context.runtimeId,connectionRef:context.connectionRef,
     accountRef,identityStatus:accountRef?'observed':'unknown',
     source:{interfaceId,evidence:context.evidence,evidenceRefs:[...context.evidenceRefs??[]]},
     observedAt:observed,providerObservedAt:null,lastAttemptAt:timestamp(context.lastAttemptAt),
     dataStatus:known?complete&&observed?'available':'partial':'unknown',
-    freshness:subscriptionUsageFreshness(observed,context.now,resets[0]??null,context.connected),
+    freshness:subscriptionUsageFreshness(observed,context.now,resets.find(at=>Date.parse(at)<=Date.parse(context.now))??null,context.connected),
     providerStatus:status,unknownReasons:reasons,buckets,
     poolRef:hasPool?pool!.poolRef:null,sharing:hasPool?pool!.sharing:'unknown',poolEvidenceRefs:hasPool?[...pool!.evidenceRefs]:[],
   };

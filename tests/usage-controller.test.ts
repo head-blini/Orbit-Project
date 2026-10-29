@@ -68,3 +68,53 @@ test('HTTP cached usage is inert; refresh requires session Origin CSRF and empty
     await f.controller.connect();assert.equal((await post({})).status,200);assert.equal(f.rpc.usageCalls,2);
   }finally{server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));await f.close();}
 });
+
+test('subscription observations drop old generations without clearing the new pending refresh',async()=>{
+  const root=mkdtempSync(join(tmpdir(),'orbit-usage-generation-')),store=new Store(':memory:');
+  const old=new Fake(),next=new Fake();let calls=0,finishOld!:(value:unknown)=>void,finishNext!:(value:unknown)=>void;
+  const controller=new Controller(store,createWorkspace(root),()=>calls++===0?old:next);
+  try{
+    await controller.connect();old.hold=new Promise(resolve=>{finishOld=resolve;});const first=controller.refreshUsage();
+    old.emit('closed');await controller.connect();next.hold=new Promise(resolve=>{finishNext=resolve;});
+    const second=controller.refreshUsage();assert.notEqual(first,second);
+    finishOld({rateLimits:{primary:{usedPercent:99}}});await first;
+    assert.equal(controller.subscriptionUsage.snapshot().length,0);
+    assert.equal(controller.refreshUsage(),second);
+    finishNext({rateLimits:{primary:{usedPercent:25}}});await second;
+    const [entry]=controller.subscriptionUsage.snapshot();assert.equal(entry.observation.buckets?.[0].primary?.remainingPercent,75);
+    assert.equal(entry.observation.accountRef,null);assert.equal(entry.observation.identityStatus,'unknown');
+    assert.equal(old.usageCalls,2);assert.equal(next.usageCalls,2);
+  }finally{await controller.close();store.close();}
+});
+
+test('failed quota refresh changes only lastAttemptAt, including activity-only success',async t=>{
+  const f=fixture();const start=new Date('2026-10-29T00:00:00.000Z');t.mock.timers.enable({apis:['Date'],now:start});
+  try{
+    await f.controller.connect();await f.controller.refreshUsage();
+    const before=f.controller.subscriptionUsage.snapshot()[0].observation;
+    t.mock.timers.tick(61000);
+    f.rpc.hold=Promise.reject(new Error('fixture failure'));
+    await f.controller.refreshUsage();
+    const after=f.controller.subscriptionUsage.snapshot()[0].observation;
+    assert.equal(after.lastAttemptAt,'2026-10-29T00:01:01.000Z');assert.equal(after.freshness,'stale');
+    assert.deepEqual({...after,lastAttemptAt:before.lastAttemptAt,freshness:before.freshness},before);
+    assert.equal(f.rpc.usageCalls,4);
+  }finally{await f.close();}
+});
+
+test('subscription persistence adds no RPCs and excludes raw account and quota secrets',async()=>{
+  const f=fixture(),methods:string[]=[],secret='sk-fixture-private-0123456789',request=f.rpc.request.bind(f.rpc);
+  f.rpc.request=async(method,params)=>{
+    methods.push(method);const value=await request(method,params);
+    if(method==='account/read')return {...value,account:{...value.account,email:'private@example.test',token:secret}};
+    if(method==='account/rateLimits/read')return {...value,raw:{token:secret}};
+    return value;
+  };
+  try{
+    await f.controller.connect();methods.length=0;await f.controller.refreshUsage();
+    assert.deepEqual(methods,['account/rateLimits/read','account/usage/read']);
+    const events=JSON.stringify(f.store.eventsAfter(0));assert.ok(!events.includes(secret));assert.ok(!events.includes('private@example.test'));
+    const [entry]=f.controller.subscriptionUsage.snapshot();assert.equal(entry.observation.accountRef,null);
+    f.controller.subscriptionUsage.snapshot();await f.controller.refreshUsage();assert.equal(methods.length,2);
+  }finally{await f.close();}
+});
