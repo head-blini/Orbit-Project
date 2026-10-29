@@ -1,10 +1,12 @@
 import type {CapabilityEntry,OrchestrationRegistry,RuntimeId} from '../shared/capability-orchestration.ts';
+import type {ToolInvocationRecord} from '../shared/tool-capabilities.ts';
+import {projectCapabilityTools,type CapabilityToolContext} from './capability-adapters.ts';
 import type {Store} from './store.ts';
 import {providerExecutionEvidence} from './provider-evidence.ts';
 import {qualityRunEvidence} from './quality-loop-native.ts';
 
 /** Read-only history projection. Metadata and connection state cannot increment validation. */
-export function enrichCapabilityValidation<T extends OrchestrationRegistry>(registry:T,store:Store):T {
+export function enrichCapabilityValidation<T extends OrchestrationRegistry>(registry:T,store:Store,tools?:CapabilityToolContext&{records:readonly ToolInvocationRecord[]}):T {
  const result=structuredClone(registry),empty=()=>({nativeRuns:0,mockRuns:0,unknownRuns:0,lastRunId:null as string|null});
  for(const provider of result.providers)for(const capability of provider.capabilities)capability.validation=empty();
  for(const run of store.runs()){
@@ -17,5 +19,7 @@ export function enrichCapabilityValidation<T extends OrchestrationRegistry>(regi
   count(runtime==='codex'?'execute.code':'execute.general');
   if(qualityRunEvidence(store,run).source==='native_observed')count('model.actual');
  }
+ // Tool records are already item-bound evidence; completed task runs cannot supply them.
+ if(tools)projectCapabilityTools(result,tools,tools.records);
  return result;
 }

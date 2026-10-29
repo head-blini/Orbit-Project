@@ -1,5 +1,8 @@
 import type {CapabilityDiscoveryInput,CapabilityEntry,OrchestrationCapabilityId,OrchestrationRegistry,ProviderCapabilityAdapter,ProviderCapabilityView,RuntimeId} from '../shared/capability-orchestration.ts';
 import type {NativeProbe} from '../shared/capabilities.ts';
+import type {ToolDiscoverySection,ToolInvocationRecord} from '../shared/tool-capabilities.ts';
+import type {ToolPermissionStore} from './tool-permissions.ts';
+import {aggregate,itemDigest,toolGrantable} from './tool-capability-ledger.ts';
 import {containsCredential} from './privacy.ts';
 import {inspectOutbound} from './guardrails/outbound.ts';
 
@@ -79,6 +82,33 @@ export const providerCapabilityAdapters:readonly ProviderCapabilityAdapter[]=Obj
   Object.freeze({runtimeId:'codex' as const,discover:(input:CapabilityDiscoveryInput)=>discoverProvider('codex',input)}),
   Object.freeze({runtimeId:'claude-code' as const,discover:(input:CapabilityDiscoveryInput)=>discoverProvider('claude-code',input)}),
 ]);
-export function discoverCapabilities(input:CapabilityDiscoveryInput):OrchestrationRegistry {
-  return {schemaVersion:1,observedAt:observedAt(own(own(input,'probe'),'checkedAt')),providers:providerCapabilityAdapters.map(adapter=>adapter.discover(input)),actualModel:'unknown',executionAuthorized:false};
+/** Trusted server inputs for one task; never accept grants or totals from a client. */
+export interface CapabilityToolContext {
+  projectId:string;taskId:string;
+  sections:readonly ToolDiscoverySection[];
+  permissions:Pick<ToolPermissionStore,'validFor'>;
+}
+
+/** Read-only projection. Current task grants are rechecked on every projection. */
+export function projectCapabilityTools(registry:OrchestrationRegistry,context:CapabilityToolContext,records:readonly ToolInvocationRecord[]=[]):void {
+  const grants=context.sections.flatMap(section=>section.items.flatMap(meta=>{
+    if(meta.kind!==section.kind||!toolGrantable(section.runtimeId,section.kind))return [];
+    const grant=context.permissions.validFor({runtimeId:section.runtimeId,kind:section.kind,itemId:meta.id},itemDigest(meta),context.projectId,context.taskId);
+    return grant?[grant]:[];
+  }));
+  registry.tools=aggregate(context.sections,grants,records);
+  for(const provider of registry.providers){
+    const mcp=provider.capabilities.find(capability=>capability.id==='mcp');
+    if(!mcp)continue;
+    const permitted=registry.tools.states.some(state=>state.key.runtimeId===provider.runtimeId&&state.key.kind==='mcp'&&state.permitted!==null);
+    mcp.policy=permitted?'allowed':'blocked';
+    mcp.evidence=mcp.evidence.filter(evidence=>evidence!=='orbit.extension.activation_not_authorized'&&evidence!=='orbit.tool.task_grant.permitted');
+    mcp.evidence.push(permitted?'orbit.tool.task_grant.permitted':'orbit.extension.activation_not_authorized');
+  }
+}
+
+export function discoverCapabilities(input:CapabilityDiscoveryInput,tools?:CapabilityToolContext):OrchestrationRegistry {
+  const registry:OrchestrationRegistry={schemaVersion:1,observedAt:observedAt(own(own(input,'probe'),'checkedAt')),providers:providerCapabilityAdapters.map(adapter=>adapter.discover(input)),actualModel:'unknown',executionAuthorized:false};
+  if(tools)projectCapabilityTools(registry,tools);
+  return registry;
 }
