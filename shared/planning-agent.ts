@@ -29,3 +29,11 @@ export interface PlanningAgentPanelProps {
   post:(path:string,body:object)=>Promise<unknown>;
   onSaved:(version:PlanningVersion)=>void;
 }
+
+/** Read defaults never mutate the version content or its historical hash. */
+export function planningDepth(value:unknown):'simple'|'detailed' {return value==='simple'?'simple':'detailed';}
+export function planningDepthReason(draft:PlanningDraft):string {
+  return draft.depthReason?.trim() || (planningDepth(draft.depth)==='simple'
+    ?'간단한 목표와 최소 작업으로 정리합니다.'
+    :'깊이가 명확하지 않으면 상세 명세로 검토합니다.');
+}

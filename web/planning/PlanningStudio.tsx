@@ -1,3 +1,4 @@
+import {planningDepth,planningDepthReason} from '../../shared/planning-agent.ts';
 import { useEffect, useRef, useState } from 'react';
 import type { PlanningDraft, PlanningVersion, TaskDraft } from '../../shared/parallel.ts';
 import { approvalIssues, MAX_PLANNING_BYTES, parsePlanningDraft, serializePlanningDraft } from '../../server/planning/parser.ts';
@@ -159,7 +160,7 @@ function PlanningProject(props: PlanningStudioProps) {
       </div>
       <div aria-label="기획안 미리보기">
         <h3>미리보기</h3>
-        {parsed.ok ? <PlanningPreview draft={parsed.draft} /> : <ul role="alert">{parsed.issues.map((issue, index) => <li key={index}>{issue.field}: {issue.code}</li>)}</ul>}
+        {parsed.ok ? <PlanningPreview draft={parsed.draft} disabled={busy} onDepthChange={depth=>edit({...input,format:'json',text:serializePlanningDraft({...parsed.draft,depth,depthReason:'사용자가 승인 전에 명세 깊이를 선택했습니다.'})})} /> : <ul role="alert">{parsed.issues.map((issue, index) => <li key={index}>{issue.field}: {issue.code}</li>)}</ul>}
       </div>
     </div>
     {selected && <p>저장 버전 {selected.revision}: {selected.state}. {dirty ? '편집 내용은 새 버전으로 저장해야 합니다.' : '저장된 버전과 일치합니다.'}</p>}
@@ -197,13 +198,20 @@ export function PlanningExportActions({projectId,version,dirty,busy,onExport}:{p
   </div>;
 }
 
-export function PlanningPreview({ draft }: { draft: PlanningDraft }) {
+export function PlanningPreview({ draft,disabled=false,onDepthChange }: { draft: PlanningDraft;disabled?:boolean;onDepthChange?:(depth:'simple'|'detailed')=>void }) {
   const issues = approvalIssues(draft);
   return <div className="planning-preview">
+    <p>명세 깊이: {planningDepth(draft.depth)==='simple'?'간단히 정리':'자세히 정리'}</p>
+    <p>{planningDepthReason(draft)}</p>
+    {onDepthChange&&<label>명세 깊이 선택<select value={planningDepth(draft.depth)} disabled={disabled} onChange={event=>onDepthChange(planningDepth(event.target.value))}>
+      <option value="simple">간단히 정리</option><option value="detailed">자세히 정리</option>
+    </select><small>변경한 내용은 새 버전으로 저장한 뒤 승인하세요. 기존 완료 조건은 유지됩니다.</small></label>}
     <h4>{draft.title || '제목 없는 초안'}</h4><p>{draft.goal || '목표를 입력하세요.'}</p>
     {draft.requirements.map(requirement => <article key={requirement.label}><h5>{requirement.label}</h5><p>{requirement.description}</p>
       <ul>{requirement.acceptanceCriteria.map((criterion, index) => <li key={index}>{criterion}</li>)}</ul></article>)}
     <h4>제약 사항</h4><ul>{draft.constraints.map((constraint, index) => <li key={index}>{constraint}</li>)}</ul>
+    {!!draft.nonGoals?.length&&<section aria-label="하지 않을 것"><h4>하지 않을 것</h4><ul>{draft.nonGoals.map((text,index)=><li key={index}>{text}</li>)}</ul></section>}
+    {!!draft.risks?.length&&<section aria-label="위험 요소"><h4>위험 요소</h4><ul>{draft.risks.map((text,index)=><li key={index}>{text}</li>)}</ul></section>}
     {!!draft.decisions?.length && <section aria-label="기획 결정 사항"><h4>결정 사항</h4>
       {draft.decisions.map((item,index) => <article key={index}><h5>{item.topic || '주제 미입력'}</h5>
         <dl className="planning-metadata-values"><dt>결정</dt><dd>{item.decision || '결정 미입력'}</dd><dt>근거</dt><dd>{item.rationale || '근거 미입력'}</dd></dl>

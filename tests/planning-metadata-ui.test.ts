@@ -65,3 +65,18 @@ test('comparison uses human metadata labels and escapes both JSON displays witho
   assert.match(html,/&lt;script&gt;new topic&lt;\/script&gt;/);assert.match(html,/&lt;img src=x&gt;/);assert.doesNotMatch(html,/<a(?:\s|>)|<script|<img|<iframe/);assert.equal(calls,0);
   assert.match(html,/<button[^>]*disabled[^>]*>선택한 후속 Task 초안 생성/);
 });
+
+
+test('depth preview offers plain-language override without dropping acceptance, exclusions or risks',async()=>{
+  const {studio}=await components();let selected:string|undefined;
+  const value:PlanningDraft={...draft,depth:'simple',depthReason:'Small request <script>claim()</script>',nonGoals:['No extra research'],risks:['Missing inputs']};
+  const props={draft:value,onDepthChange:(depth:'simple'|'detailed')=>{selected=depth;}};
+  const html=renderToStaticMarkup(createElement(studio.PlanningPreview,props));
+  assert.match(html,/간단히 정리/);assert.match(html,/자세히 정리/);assert.match(html,/새 버전으로 저장/);
+  assert.match(html,/Small request &lt;script&gt;/);assert.match(html,/No extra research/);assert.match(html,/Missing inputs/);
+  assert.match(html,/저장한 내용이 유지된다/);assert.equal(selected,undefined);
+  const tree=studio.PlanningPreview(props);
+  function visit(node:any):void {if(!node||typeof node!=='object')return;if(node.type==='select')node.props.onChange({target:{value:'detailed'}});for(const child of [node.props?.children].flat(Infinity))visit(child);}
+  visit(tree);assert.equal(selected,'detailed');assert.equal(value.depth,'simple');
+  const old=renderToStaticMarkup(createElement(studio.PlanningPreview,{draft}));assert.match(old,/명세 깊이: 자세히 정리/);
+});

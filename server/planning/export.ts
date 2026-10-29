@@ -39,7 +39,7 @@ export function serializePlanningExport(draft:PlanningDraft,format:'json'|'markd
     // also bounds their combined size. Retain the existing credential detector's
     // coverage without its 64k output truncation being mistaken for a finding.
     const fields=[draft.title,draft.goal,...draft.requirements.flatMap(requirement=>[
-      requirement.label,requirement.description,...requirement.acceptanceCriteria]),...draft.constraints,...draft.openQuestions,...(draft.nonGoals??[]),
+      requirement.label,requirement.description,...requirement.acceptanceCriteria]),...draft.constraints,...draft.openQuestions,...(draft.nonGoals??[]),draft.depthReason??'',...(draft.risks??[]),
       ...(draft.decisions??[]).flatMap(decision=>[decision.topic,decision.decision,decision.rationale]),
       ...(draft.provenance?[draft.provenance.kind,draft.provenance.providerId??'',draft.provenance.externalUrl??'',draft.provenance.author??'',
         ...(draft.provenance.references??[]).flatMap(reference=>[reference.title,reference.url])]:[])];

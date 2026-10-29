@@ -11,6 +11,8 @@ export interface PlanningDraft {
   constraints:string[]; openQuestions:string[]; source:PlanningSource;
   decisions?:PlanningDecision[]; provenance?:PlanningProvenance;
   nonGoals?:string[];
+  /** Absent on historical versions; interpret as detailed without changing hashed content. */
+  depth?:'simple'|'detailed'; depthReason?:string; risks?:string[];
 }
 export type PlanningParseResult = {ok:true;draft:PlanningDraft} | {ok:false;issues:{field:string;code:string}[]};
 export interface PlanningVersion {
