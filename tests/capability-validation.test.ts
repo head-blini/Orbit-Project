@@ -5,6 +5,9 @@ import {Store} from '../server/store.ts';
 import {discoverCapabilities} from '../server/capability-adapters.ts';
 import {enrichCapabilityValidation} from '../server/capability-validation.ts';
 import type {OrchestrationCapabilityId,OrchestrationRegistry,RuntimeId} from '../shared/capability-orchestration.ts';
+import {ToolPermissionStore} from '../server/tool-permissions.ts';
+import {itemDigest} from '../server/tool-capability-ledger.ts';
+import type {ToolDiscoverySection,ToolInvocationRecord,ToolItemMeta} from '../shared/tool-capabilities.ts';
 const registry=()=>discoverCapabilities({probe:null,codexReady:false});
 const entry=(r:OrchestrationRegistry,runtime:RuntimeId,id:OrchestrationCapabilityId)=>r.providers.find(p=>p.runtimeId===runtime)!.capabilities.find(c=>c.id===id)!;
 function run(store:Store,source:'native'|'mock'|'unknown',runtime:RuntimeId='codex',observed=true){
@@ -39,5 +42,33 @@ test('actual model validation needs observed assistant attribution and preserves
   const r=enrichCapabilityValidation(registry(),store),model=entry(r,'claude-code','model.actual');
   assert.deepEqual(model.validation,{nativeRuns:1,mockRuns:1,unknownRuns:0,lastRunId:mock.id});assert.equal(model.policy,'blocked');assert.equal(model.observation,'unknown');
   assert.equal(entry(r,'claude-code','execute.general').validation!.nativeRuns,2);assert.equal(entry(r,'claude-code','status').validation!.nativeRuns,0);
+ }finally{store.close();}
+});
+
+
+test('tool evidence counts stay separate from execution and model history and require native matching grants',()=>{
+ const store=new Store(':memory:');try{
+  const permissions=new ToolPermissionStore(store);
+  const meta:ToolItemMeta={kind:'mcp',id:'a'.repeat(64),scope:'thread',handlerType:null,nativeTrust:null,pluginOwned:false,runtimeVersion:'1.0.0',adapterRevision:'fixture'};
+  const key={runtimeId:'codex' as const,kind:'mcp' as const,itemId:meta.id},digest=itemDigest(meta);
+  const grant=permissions.grant({projectId:'project',taskId:'task',requestId:'request',key,itemDigest:digest,confirmed:true});
+  const sections:ToolDiscoverySection[]=[{runtimeId:'codex',kind:'mcp',status:'available',items:[meta]}];
+  const context={projectId:'project',taskId:'task',sections,permissions};
+  const records:ToolInvocationRecord[]=['mock','unknown','local'].map(evidenceSource=>({key,grantId:grant.grantId,itemDigest:digest,evidenceSource:evidenceSource as ToolInvocationRecord['evidenceSource']}));
+  const r=discoverCapabilities({probe:null,codexReady:false},context),seq=store.lastSeq();
+  const mock=enrichCapabilityValidation(r,store,{...context,records});
+  assert.deepEqual(mock.tools!.totals,{keys:1,installed:1,permitted:1,invoked:{native:0,mock:1,unknown:2},verified:0});
+  records.push({key,grantId:grant.grantId,itemDigest:digest,evidenceSource:'native'},{key,grantId:'wrong',itemDigest:digest,evidenceSource:'native'},{key,grantId:grant.grantId,itemDigest:'b'.repeat(64),evidenceSource:'native'});
+  const toolsOnly=enrichCapabilityValidation(r,store,{...context,records});
+  assert.deepEqual(toolsOnly.tools!.totals,{keys:1,installed:1,permitted:1,invoked:{native:3,mock:1,unknown:2},verified:1});
+  for(const provider of toolsOnly.providers)for(const c of provider.capabilities)assert.deepEqual(c.validation,{nativeRuns:0,mockRuns:0,unknownRuns:0,lastRunId:null});
+  assert.equal(store.lastSeq(),seq);assert.equal(r.tools!.totals.invoked.native,0);
+  run(store,'native');run(store,'mock','claude-code');
+  const mixed=enrichCapabilityValidation(r,store,{...context,records});
+  assert.deepEqual(mixed.tools,toolsOnly.tools);assert.equal(entry(mixed,'codex','execute.code').validation!.nativeRuns,1);
+  assert.equal(entry(mixed,'claude-code','execute.general').validation!.mockRuns,1);assert.equal(entry(mixed,'codex','model.actual').validation!.nativeRuns,0);
+  permissions.revoke(grant.grantId);
+  const revoked=enrichCapabilityValidation(r,store,{...context,records});
+  assert.equal(revoked.tools!.totals.verified,0);assert.equal(entry(revoked,'codex','mcp').policy,'blocked');
  }finally{store.close();}
 });
