@@ -135,3 +135,15 @@ test('invalid fields and corrupted plan bytes cannot create a goal with forged a
     assert.throws(()=>f.goals.create('project-a',createInput(plan)),/PLAN_INTEGRITY/);assert.equal(f.goals.list('project-a').length,0);
   }finally{f.store.close();}
 });
+test('general project run (projectId, no workspaceId) counts only for its own project goal',()=>{
+  const f=fixture();try{
+    const plan=f.approve(),[task]=f.studio.mutate('project-a','plans',plan.id,'task-drafts',{}) as SavedTask[];
+    const meta={taskId:task.id,planningVersionId:plan.id,requirementLabels:['R1'],runtime:'claude-code' as const};
+    const own=f.store.createRun('general-own','digest','Not exposed',undefined,{...meta,projectId:'project-a'});
+    f.store.updateRun(own.id,{execution:'completed'},'run.completed');
+    f.store.createRun('general-foreign','digest','Not exposed',undefined,{...meta,projectId:'project-b'});
+    f.goals.create('project-a',createInput(plan));
+    const req=f.goals.list('project-a')[0].requirements[0];
+    assert.deepEqual(req.runs,[{id:own.id,execution:'completed'}]);assert.equal(req.runsTotal,1);assert.equal(req.acceptance,'unverified');
+  }finally{f.store.close();}
+});
