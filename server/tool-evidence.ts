@@ -85,6 +85,7 @@ export function readRecordedToolInvocations(store:Store,run:Run):CompletionToolI
     result.push({...record,evidenceSource,id:invocation.invocationId,projectId:invocation.projectId,taskId:invocation.taskId,runId:run.id,planningContentHash:invocation.planningContentHash,grant});
   };
   for(const group of groups.values()){
+    // Approval covers the MCP server; toolName identifies the observed call within this event group, not a tool-level permission.
     const toolName=group.map(e=>e.data.item.tool).filter(nonempty).sort()[0]??'';
     const binding:ToolGrantBinding={grantId:invocation.grantId,key,itemDigest:invocation.itemDigest,invocationId:invocation.invocationId,
       projectId:invocation.projectId,taskId:invocation.taskId,runId:run.id,threadId:launch!.threadId,approvedDigest:invocation.digest,serverName:launch!.serverName,toolName};
