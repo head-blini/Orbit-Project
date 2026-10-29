@@ -2,7 +2,9 @@ import {CapabilityRouting,type CapabilityRoutePost} from './capability-routing.t
 import type {CodexModelAttribution} from '../shared/codex-model-attribution.ts';
 import type {QualityLoopRecord} from '../shared/quality-loop-record.ts';
 import {getUiMode,subscribeUiMode} from './ui-mode.ts';
-import {qualityOrigin,completionView,verifiedTaskCount} from './project-work-model.ts';
+import {qualityOrigin,completionView,verifiedTaskCount,plainStatus} from './project-work-model.ts';
+import {ProgressImpact} from './progress-impact.tsx';
+import {TaskGraphPanel} from './task-graph-panel.tsx';
 import {useEffect,useRef,useState} from 'react';
 import type {ConnectionFreshness,ProgressTask,ProjectProgress,TaskStage,ProgressVerification} from '../shared/project-progress.ts';
 import type {HandoffPackage} from '../shared/handoff.ts';
@@ -50,8 +52,9 @@ function TaskRow({task,actions,advanced,projectId,routePost,routeDisabled}:{task
     <summary>
       <span className="progress-task-title">{task.title}</span>
       <span className={'progress-stage tone-'+stageTone[task.stage]}>{stageLabels[task.stage]}</span>
-      {completionView(task)&&<span className={'progress-stage tone-'+(completionView(task)!.done?'good':'wait')}>{completionView(task)!.label}</span>}
-      {task.qualityLoops?.[0]&&<span className="progress-stage">{qualityLabel(task.qualityLoops[0])}</span>}
+      {advanced?<>{completionView(task)&&<span className={'progress-stage tone-'+(completionView(task)!.done?'good':'wait')}>{completionView(task)!.label}</span>}
+      {task.qualityLoops?.[0]&&<span className="progress-stage">{qualityLabel(task.qualityLoops[0])}</span>}</>
+        :<span className={'progress-stage tone-'+plainStatus(task).tone}>{plainStatus(task).label}</span>}
       <span className="progress-meta">담당 {runtime(task.assignee)} · 마지막 관측 {task.lastObservedAt?time(task.lastObservedAt):'없음'}</span>
     </summary>
     <dl className="progress-facts">
@@ -74,7 +77,8 @@ function TaskRow({task,actions,advanced,projectId,routePost,routeDisabled}:{task
 }
 
 /** Pure view: renders only recorded state, no inferred percentages or ETA. */
-export function ProjectProgressView({progress,freshness,lastEventAt,actions,compact,routePost,routeDisabled}:{progress:ProjectProgress;freshness:ConnectionFreshness;lastEventAt:string|null;actions?:TaskActions;routePost?:CapabilityRoutePost;routeDisabled?:boolean;
+export function ProjectProgressView({progress,freshness,lastEventAt,actions,compact,routePost,routeDisabled,online}:{progress:ProjectProgress;freshness:ConnectionFreshness;lastEventAt:string|null;actions?:TaskActions;routePost?:CapabilityRoutePost;routeDisabled?:boolean;
+  /** When set, the read-only task graph / integration queue panel is mounted. */online?:boolean;
   /** The project screen shows its own summary; compact keeps only the task list. */compact?:boolean}){
   const {totals,criteria}=progress;
   const [mode,setMode]=useState(getUiMode);
@@ -97,6 +101,8 @@ export function ProjectProgressView({progress,freshness,lastEventAt,actions,comp
       {progress.untaskedRuns>0&&<p className="progress-note">작업과 연결되지 않은 직접 실행 {progress.untaskedRuns}개는 작업 진행에 포함하지 않았습니다.</p>}
       <p className="progress-note">AI 응답 완료와 검증 통과는 다른 상태입니다. 시간·노력 비율이나 남은 시간은 추정하지 않습니다.</p>
     </section>}
+    {!compact&&<ProgressImpact progress={progress} advanced={mode==='advanced'}/>}
+    {!compact&&online!==undefined&&progress.plan&&<TaskGraphPanel projectId={progress.projectId} planningVersionId={progress.plan.id} online={online}/>}
     <section className="surface" aria-label="작업별 진행">
       {!compact&&<div className="section-heading"><div><h2>작업</h2><p>작업을 펼치면 실행 기록과 검증 결과를 볼 수 있습니다.</p></div></div>}
       {progress.tasks.length?progress.tasks.map(task=><TaskRow key={task.id} task={task} actions={actions} advanced={mode==='advanced'} projectId={progress.projectId} routePost={routePost} routeDisabled={routeDisabled}/>):<p className="progress-empty">승인된 기획에서 만든 작업이 아직 없습니다.</p>}
@@ -172,7 +178,7 @@ export function ProjectProgressPanel({projectId,projectKind,online,lastSeq,lastE
   return <>
     {error&&<div className="banner error" role="alert">{error}</div>}
     {projectKind==='code'&&!compact&&<p className="progress-note">코드 프로젝트 작업은 시작하기·에이전트 센터에서 검증 기준을 확인한 뒤 실행합니다.</p>}
-    {progress?<ProjectProgressView progress={progress} freshness={freshness} lastEventAt={lastEventAt} actions={actions} compact={compact} routePost={post} routeDisabled={!online}/>:!error&&<section className="surface"><p>진행 기록을 불러오는 중입니다.</p></section>}
+    {progress?<ProjectProgressView progress={progress} freshness={freshness} lastEventAt={lastEventAt} actions={actions} compact={compact} routePost={post} routeDisabled={!online} online={online}/>:!error&&<section className="surface"><p>진행 기록을 불러오는 중입니다.</p></section>}
   </>;
 }
 
