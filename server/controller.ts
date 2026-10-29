@@ -15,7 +15,8 @@ import type { SavedTask } from '../shared/parallel.ts';
 import { VerificationService,type VerificationConfiguration } from './verification-service.ts';
 import {VerificationSetupService} from './verification-setup.ts';
 import type {TaskVerificationPreview} from '../shared/acceptance.ts';
-import { collectCodexUsage,unknownUsage } from './usage.ts';
+import {SubscriptionUsageStore} from './subscription-usage.ts';
+import { collectCodexUsage,unknownUsage,normalizeCodexSubscriptionUsage } from './usage.ts';
 import type { CodexUsage } from '../shared/usage.ts';
 import { SourceGraphService } from './source-graph-service.ts';
 import { ModelHubService,registryHubConfigurations,type ModelHubTransports } from './model-hub-service.ts';
@@ -71,6 +72,7 @@ export class Controller {
   readonly reviews:ReviewService;
   readonly planningSuggestions:PlanningAgentService;
   readonly aiPreferences:ProjectAiPreferencesService;
+  readonly subscriptionUsage:SubscriptionUsageStore;
   private usage:CodexUsage=unknownUsage();private usagePending:Promise<CodexUsage>|null=null;
   private extensionCache:ExtensionInventory|null=null;private extensionPending:Promise<ExtensionInventory>|null=null;
   private knownMcpNames:readonly string[]|null=null;
@@ -86,7 +88,8 @@ export class Controller {
   assertExecutionAvailable(){this.qualityAvailable();if(this.soloRecoveryRequired())throw new AppError('SOLO_RECOVERY_REQUIRED',409);}
   constructor(store:Store,workspace:string,factory:(workspace:string,write:boolean)=>RpcPort,projects?:Projects,verificationConfig:VerificationConfiguration[]=[],modelHubConfig:readonly ModelHubConfiguration[]=[],claudeOptions:ClaudeTaskServiceOptions={},claudePlanningOptions:ClaudePlanningOptions={},qualityOptions:Pick<QualityNativeOptions,'findExecutable'|'claudeFactory'|'codexReview'>={},registryOptions:ControllerRegistryOptions={}){
     this.store=store;this.workspace=workspace;this.factory=factory;this.projects=projects;
-    this.claudeTasks=new ClaudeTaskService(store,projects,claudeOptions);
+    this.subscriptionUsage=new SubscriptionUsageStore(store);
+    this.claudeTasks=new ClaudeTaskService(store,projects,claudeOptions,this.subscriptionUsage);
     this.aiPreferences=new ProjectAiPreferencesService(store);
     this.soloLost=store.unresolvedNativeConnections();
     this.telemetry=new RunTelemetry(metrics=>this.store.saveRunMetrics(metrics));
@@ -268,12 +271,14 @@ export class Controller {
     if(this.provider!=='ready'||!this.rpc)throw new AppError('NOT_CONNECTED',409);
     if(this.usagePending)return this.usagePending;
     if(this.usage.checkedAt&&Date.now()-Date.parse(this.usage.checkedAt)>=0&&Date.now()-Date.parse(this.usage.checkedAt)<60000)return Promise.resolve(this.usageSnapshot());
-    const rpc=this.rpc,generation=this.generation;
-    this.usagePending=collectCodexUsage((method,params)=>rpc.request(method,params)).then(report=>{
+    const rpc=this.rpc,generation=this.generation,connectionRef=this.ownerIncarnation+':'+generation,at=new Date().toISOString();
+    const pending=collectCodexUsage((method,params)=>rpc.request(method,params)).then(report=>{
       if(generation!==this.generation||rpc!==this.rpc||this.provider!=='ready')return unknownUsage();
+      if(report.buckets?.length)this.subscriptionUsage.record(normalizeCodexSubscriptionUsage(report,{providerId:'codex',runtimeId:'codex',connectionRef,evidence:rpc.evidenceSource??'unknown',observedAt:report.checkedAt,lastAttemptAt:at,now:new Date().toISOString(),connected:true}));
+      else this.subscriptionUsage.attempt('codex',connectionRef,at);
       this.usage=report;return this.usageSnapshot();
-    }).finally(()=>{this.usagePending=null;});
-    return this.usagePending;
+    }).finally(()=>{if(this.usagePending===pending)this.usagePending=null;});
+    this.usagePending=pending;return pending;
   }
   async selectWorkspace(id:string){
     this.idle();if(!this.projects)throw new AppError('UNSUPPORTED',404);const w=this.projects.validate(id);this.switching=true;
@@ -282,7 +287,7 @@ export class Controller {
   }
   private approvalPolicy(){return this.workspaceId?'on-request':'untrusted';}
   private sandbox(){return this.workspaceId?{type:'workspaceWrite',writableRoots:[],networkAccess:false,excludeTmpdirEnvVar:true,excludeSlashTmp:true}:{type:'readOnly',networkAccess:false};}
-  private status(status:ProviderStatus,issue:string|null=null){this.provider=status;this.issue=issue;if(status!=='ready'){this.clearExtensions();this.launchValidated=false;this.usage=unknownUsage();}this.store.append('provider.status',null,{status,issue});}
+  private status(status:ProviderStatus,issue:string|null=null){this.provider=status;this.issue=issue;if(status!=='ready'){this.subscriptionUsage.disconnect('codex');this.usagePending=null;this.clearExtensions();this.launchValidated=false;this.usage=unknownUsage();}this.store.append('provider.status',null,{status,issue});}
   private active():Run|undefined{return this.store.runs().find(r=>r.runtime!=='claude-code'&&!terminal(r.execution));}
   async connect():Promise<void>{
     assertGitProject(this.store,this.workspaceId);
@@ -607,5 +612,5 @@ export class Controller {
     // Closing the connection is best effort, never evidence permitting a new dispatch.
     try{if(rpc)await rpc.close();}catch{/* The generation remains fenced and recovery stays required. */}
   }
-  async close(){await this.qualityLoops.close();await this.claudeTasks.close();await this.planningSuggestions.close();await this.reviews.close();await this.workflows.close();await this.modelHub.close();await this.verification.close();this.loseActive();this.telemetry.disconnect();this.modelTracker.disconnect();const rpc=this.rpc;this.rpc=null;++this.generation;if(rpc)await rpc.close();this.provider='disconnected';this.launchValidated=false;this.clearExtensions();}
+  async close(){await this.qualityLoops.close();await this.claudeTasks.close();await this.planningSuggestions.close();await this.reviews.close();await this.workflows.close();await this.modelHub.close();await this.verification.close();this.loseActive();this.telemetry.disconnect();this.modelTracker.disconnect();const rpc=this.rpc;this.rpc=null;++this.generation;if(rpc)await rpc.close();this.provider='disconnected';this.subscriptionUsage.disconnect('codex');this.usagePending=null;this.launchValidated=false;this.clearExtensions();}
 }

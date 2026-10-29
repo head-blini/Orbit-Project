@@ -1,3 +1,5 @@
+import {SubscriptionUsageStore} from './subscription-usage.ts';
+import {normalizeClaudeSubscriptionUsage} from './usage.ts';
 import {createHash} from 'node:crypto';
 import type {Run} from '../shared/types.ts';
 import {terminal} from '../shared/types.ts';
@@ -25,9 +27,10 @@ type Active={runner:Runner;done:Promise<void>};
 
 /** One owner per saved task; native execution remains entirely in ClaudeCodeRun. */
 export class ClaudeTaskService {
+  readonly subscriptionUsage:SubscriptionUsageStore;
   private store:Store;private projects?:Projects;private options:ClaudeTaskServiceOptions;
   private active=new Map<string,Active>();private latestQuota:Quota|null=null;private closing=false;
-  constructor(store:Store,projects?:Projects,options:ClaudeTaskServiceOptions={}){this.store=store;this.projects=projects;this.options=options;}
+  constructor(store:Store,projects?:Projects,options:ClaudeTaskServiceOptions={},subscriptionUsage=new SubscriptionUsageStore(store)){this.subscriptionUsage=subscriptionUsage;this.store=store;this.projects=projects;this.options=options;}
   quota():Quota|null{return this.latestQuota?structuredClone(this.latestQuota):null;}
   submit(projectId:string,taskId:string,requestId:string):Run {
     return this.dispatch(projectId,taskId,requestId);
@@ -83,7 +86,7 @@ export class ClaudeTaskService {
       return this.store.updateRun(run.id,{execution:'failed'},'run.failed',{reason:'RUNTIME_NOT_STARTED'});
     }
     const active:Active={runner,done:Promise.resolve()};this.active.set(run.id,active);
-    active.done=this.execute(run.id,runner).finally(()=>this.active.delete(run.id));
+    active.done=this.execute(run.id,runner).finally(()=>{this.subscriptionUsage.disconnect('claude-code',run.id);this.active.delete(run.id);});
     return this.store.getRun(run.id)!;
   }
   private observe(id:string,event:ClaudeEvent){
@@ -97,7 +100,8 @@ export class ClaudeTaskService {
       case 'tool':this.store.append('claude.tool',id,{name:event.name});break;
       case 'quota':{
         const quota:Quota={kind:'quota',status:event.status,windows:event.windows.map(({id,utilization,resetsAt,status})=>({id,utilization,resetsAt,status}))};
-        this.store.append('claude.quota',id,{status:quota.status,windows:quota.windows});this.latestQuota=structuredClone(quota);break;
+        const observed=this.store.append('claude.quota',id,{status:quota.status,windows:quota.windows});
+        this.subscriptionUsage.record(normalizeClaudeSubscriptionUsage(quota,{providerId:'claude-code',runtimeId:'claude-code',connectionRef:id,evidence:this.options.runnerFactory?'mock':'native',evidenceRefs:['event:'+observed.seq],observedAt:observed.at,lastAttemptAt:observed.at,now:observed.at,connected:true}));this.latestQuota=structuredClone(quota);break;
       }
       // Result/error lines are not exit observations. Only start()'s outcome is terminal.
     }
@@ -124,7 +128,7 @@ export class ClaudeTaskService {
     catch{throw new AppError('INTERRUPT_UNCERTAIN',503);}
   }
   async close():Promise<void>{
-    this.closing=true;
+    this.closing=true;this.subscriptionUsage.disconnect('claude-code');
     for(const [id,active] of this.active){
       try{this.interrupt(id);}
       catch{
@@ -134,5 +138,6 @@ export class ClaudeTaskService {
       }
     }
     await Promise.all([...this.active.values()].map(active=>active.done));
+    this.subscriptionUsage.disconnect('claude-code');
   }
 }
