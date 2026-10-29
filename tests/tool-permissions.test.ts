@@ -108,3 +108,13 @@ test('grants persist across Store restart',()=>{
     }finally{store.close();}
   }finally{rmSync(dir,{recursive:true,force:true});}
 });
+
+test('consumeInTransaction refuses outside a transaction and leaves the grant active',()=>{
+  const {store,tools}=fixture();try{
+    const g=tools.grant(input());const seq=store.lastSeq();
+    assert.throws(()=>tools.consumeInTransaction(g.grantId,bind()),/TRANSACTION_REQUIRED/);
+    assert.equal(tools.validFor(key() as never,itemDigest(meta()),'p1','t1')?.grantId,g.grantId);
+    assert.equal(store.lastSeq(),seq);
+    assert.equal(store.transaction(()=>tools.consumeInTransaction(g.grantId,bind())).state,'used');
+  }finally{store.close();}
+});

@@ -82,15 +82,23 @@ export class ToolPermissionStore {
   /** One-time: the conditional UPDATE marks it used atomically; a second consume fails. */
   consume(grantId:string,input:unknown):ToolPermissionGrant {
     const want=binding(input,[]);
-    return this.store.transaction(()=>{
-      const g=this.get(grantId);
-      if(g.state!=='active')throw new AppError('TOOL_GRANT_NOT_ACTIVE',409);
-      if(!same(g,want))throw new AppError('TOOL_GRANT_BINDING_MISMATCH',409);
-      if(g.itemDigest!==want.itemDigest)throw new AppError('TOOL_GRANT_METADATA_CHANGED',409);
-      const now=new Date().toISOString();
-      if(this.store.db.prepare("UPDATE tool_grants SET state='used',updated_at=? WHERE grant_id=? AND state='active'").run(now,g.grantId).changes!==1)throw new AppError('TOOL_GRANT_NOT_ACTIVE',409);
-      const used=this.row(g.grantId)!;this.audit('used',used,'TOOL_GRANT_USED');return used;
-    });
+    return this.store.transaction(()=>this.consumeInTransaction(grantId,want));
+  }
+
+  /** Same as consume() for callers already inside Store.transaction (Store forbids nesting); refuses outside one. */
+  consumeInTransaction(grantId:string,input:unknown):ToolPermissionGrant {
+    if(!this.store.db.isTransaction)throw new Error('TRANSACTION_REQUIRED');
+    const want=binding(input,[]);
+    const g=this.get(grantId);
+    if(g.state!=='active')throw new AppError('TOOL_GRANT_NOT_ACTIVE',409);
+    if(!same(g,want))throw new AppError('TOOL_GRANT_BINDING_MISMATCH',409);
+    if(g.itemDigest!==want.itemDigest)throw new AppError('TOOL_GRANT_METADATA_CHANGED',409);
+    const now=new Date().toISOString();
+    // Binding is repeated in the WHERE so the transition itself is exact, not only the prior read.
+    if(this.store.db.prepare(`UPDATE tool_grants SET state='used',updated_at=? WHERE grant_id=? AND state='active'
+      AND project_id=? AND task_id=? AND runtime_id=? AND kind=? AND item_id=? AND item_digest=?`)
+      .run(now,g.grantId,want.projectId,want.taskId,want.key.runtimeId,want.key.kind,want.key.itemId,want.itemDigest).changes!==1)throw new AppError('TOOL_GRANT_NOT_ACTIVE',409);
+    const used=this.row(g.grantId)!;this.audit('used',used,'TOOL_GRANT_USED');return used;
   }
 
   /** Idempotent. A used grant stays used; neither used nor revoked grants ever count. */
