@@ -1,4 +1,5 @@
 /** Event-shape assumption: controller.ts and codex-planning.test.ts establish item/completed with threadId/turnId/item; tool-evidence.test.ts supplies a synthetic journal projection with item {id,type:'mcpToolCall',status:'completed',server,tool} and data.binding. This is NOT a confirmed Codex wire contract: T7/T8 must validate the projection before wiring it; other shapes remain unknown. */
+import {toolGrantable} from './tool-capability-ledger.ts';
 import {createHash} from 'node:crypto';
 import type {AppEvent,Run} from '../shared/types.ts';
 import type {ToolGrant,ToolInvocationRecord} from '../shared/tool-capabilities.ts';
@@ -23,7 +24,7 @@ export function readToolInvocations(events:readonly AppEvent[],run:Run,grantBind
   const mock=origin?.source==='mock'||outcome?.source==='mock';
   const native=!mock&&origin?.source==='native'&&origin.interface==='codex.app_server'&&nonempty(run.turnId);
   const b=grantBinding;
-  const grantMatches=b.key.runtimeId==='codex'&&b.key.kind==='mcp'&&run.runtime==='codex'
+  const grantMatches=toolGrantable(b.key.runtimeId,b.key.kind)&&run.runtime==='codex'
     &&bindingFields.every(field=>nonempty(b[field]))
     &&b.projectId===run.projectId&&b.taskId===run.taskId&&b.runId===run.id
     &&b.key.itemId===createHash('sha256').update(JSON.stringify(['mcp',b.serverName])).digest('hex');
