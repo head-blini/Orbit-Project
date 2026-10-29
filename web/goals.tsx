@@ -1,3 +1,4 @@
+import {currentGoalCompletion} from '../shared/goals.ts';
 import {useLayoutEffect,useRef,useState,useSyncExternalStore} from 'react';
 import type {GoalEvidenceReference,TrackedGoal,TrackedGoalView,TrackingState} from '../shared/goals.ts';
 import type {PlanningVersion} from '../shared/parallel.ts';
@@ -20,8 +21,23 @@ function validGoal(value:TrackedGoal,projectId:string){
     &&Number.isSafeInteger(value.revision)&&value.revision>0&&typeof value.planningVersionId==='string'&&typeof value.planningHash==='string'
     &&typeof value.createdAt==='string'&&typeof value.updatedAt==='string';
 }
+function validDecision(value:unknown):boolean {
+  if(!value||typeof value!=='object')return false;
+  const d=value as Record<string,unknown>;
+  return typeof d.status==='string'&&typeof d.source==='string'&&typeof d.freshness==='string'&&textArray(d.evidenceIds)&&textArray(d.blockers);
+}
+function validCompletion(value:unknown):boolean {
+  if(value===null)return true;
+  if(!value||typeof value!=='object')return false;
+  const c=value as Record<string,unknown>;
+  return typeof c.verifiedDone==='boolean'&&typeof c.qualityPassed==='boolean'&&Array.isArray(c.gates)
+    &&c.gates.every(g=>validDecision(g)&&typeof g.id==='string')
+    &&validDecision(c.independentReview)&&validDecision(c.userApproval)
+    &&(c.tools===undefined||Array.isArray(c.tools)&&c.tools.every(validDecision));
+}
 function validView(value:TrackedGoalView,projectId:string){
   return !!value&&validGoal(value.goal,projectId)&&typeof value.title==='string'&&typeof value.objective==='string'&&typeof value.planCurrent==='boolean'
+    &&(value.taskCompletions===undefined||Array.isArray(value.taskCompletions)&&value.taskCompletions.every(t=>t&&typeof t.taskId==='string'&&(t.runId===null||typeof t.runId==='string')&&typeof t.verifiedDone==='boolean'&&validCompletion(t.completion)))
     &&typeof value.evidenceScope==='string'&&textArray(value.blockers)&&Array.isArray(value.requirements)&&value.requirements.every(requirement=>
       !!requirement&&typeof requirement.label==='string'&&typeof requirement.description==='string'&&textArray(requirement.acceptanceCriteria)&&textArray(requirement.taskIds)
       &&requirement.acceptance==='unverified'&&Number.isSafeInteger(requirement.runsTotal)&&requirement.runsTotal>=0&&Array.isArray(requirement.runs)&&requirement.runs.every(run=>!!run&&typeof run.id==='string'&&typeof run.execution==='string')
@@ -171,6 +187,16 @@ export function GoalTrackingView({state,onRefresh,onSelectPlan,onCreate,onSetSta
         <p>{view.objective}</p><p className="subtle">목표 {goal.id} · 개정 {goal.revision} · {timestamp(goal.updatedAt)}</p>
         <p><b>{view.planCurrent?'현재 승인 기획':'이전 기획 · 현재성 상실'}</b> · {goal.planningVersionId}</p>
         {!view.planCurrent&&<p className="subtle">이 목표는 기존 기획에 연결된 기록입니다. 새 기획은 별도의 목표 추적으로 연결하세요.</p>}
+        <p><b>{state.loaded&&online&&view.planCurrent&&view.verifiedDone&&view.taskCompletions?.length&&view.taskCompletions.every(t=>t.verifiedDone&&currentGoalCompletion(t.completion))?'연결 작업 검증 완료':'연결 작업 완료 미확인'}</b></p>
+        <details><summary>작업 완료 근거</summary>{(view.taskCompletions??[]).map(task=><div key={task.taskId}>
+          <p>작업 {task.taskId} · 실행 {task.runId??'없음'} · {state.loaded&&online&&view.planCurrent&&task.verifiedDone&&currentGoalCompletion(task.completion)?'현재 검증 통과':'완료 미확인'}</p>
+          <ul>{(task.completion?[...task.completion.gates,{id:'독립 검토',...task.completion.independentReview},{id:'사용자 승인',...task.completion.userApproval}]:[]).map(gate=><li key={gate.id}>{gate.id} · {gate.status} · {gate.source} · {gate.freshness} · 근거 {gate.evidenceIds.join(', ')||'없음'}</li>)}</ul>
+        </div>)}</details>
+        <details><summary>연결 결과물</summary>{view.deliverables?.length?<ul>{view.deliverables.map(file=><li key={file.id}>
+          {file.path} · 실행 {file.runId} · {file.runAt??'생성 시각 미확인'} · SHA256 {file.sha256}
+          <a href={`/api/projects/${encodeURIComponent(goal.projectId)}/deliverables/${encodeURIComponent(file.deliverableId)}/versions/${encodeURIComponent(file.id)}/download`} download>이 버전 받기</a>
+          <small> 저장된 파일이 바뀌었거나 없으면 다운로드할 수 없습니다.</small>
+        </li>)}</ul>:<p>출처가 확인된 연결 결과물이 없습니다.</p>}</details>
         <details><summary>기획 연결 정보</summary><p className="subtle">기획 해시: <code>{goal.planningHash}</code></p><p className="subtle">생성: {timestamp(goal.createdAt)}</p></details>
         <div className="actions">
           {goal.state!=='cancelled'&&<><button disabled={!idle} onClick={()=>onSetState(goal.id,goal.state==='paused'?'tracking':'paused')}>{goal.state==='paused'?'추적 재개':'추적 일시정지'}</button><button disabled={!idle} onClick={()=>onSetState(goal.id,'cancelled')}>추적 취소</button></>}

@@ -1,3 +1,4 @@
+import {DeliverableVersions,deliverableId} from './deliverable-versions.ts';
 import {ToolInvocationService} from './tool-invocation.ts';
 import {ToolPermissionStore} from './tool-permissions.ts';
 import {itemDigest,toolGrantable} from './tool-capability-ledger.ts';
@@ -54,7 +55,7 @@ import {RunTelemetry} from './run-telemetry.ts';
 import {CodexModelTracker} from './codex-model-attribution.ts';
 import {getDevelopmentResult} from './development-results.ts';
 import {staticAppPreviewCapability} from './app-preview-policy.ts';
-import {listDeliverables,previewDeliverable} from './deliverables.ts';
+import {listDeliverables,previewDeliverable,readOutputDeliverable,findOutputPath} from './deliverables.ts';
 import {addMaterials,listMaterials} from './materials.ts';
 import {ClaudeTaskService,type ClaudeTaskServiceOptions} from './claude-task-service.ts';
 import {QualityLoopService} from './quality-loop-service.ts';
@@ -110,6 +111,7 @@ export class Controller {
   private toolClosing:Promise<void>|null=null;
   private toolRun:{runId:string;request:Readonly<ToolLaunchRequest>;serverName:string}|null=null;
   readonly progress:ProjectProgressService;
+  readonly deliverableVersions:DeliverableVersions;
   readonly qualityLoops:QualityLoopService;
   private qualityScope=false;
   private qualityPorts:QualityServicePorts;
@@ -142,6 +144,13 @@ export class Controller {
   constructor(store:Store,workspace:string,factory:(workspace:string,write:boolean)=>RpcPort,projects?:Projects,verificationConfig:VerificationConfiguration[]=[],modelHubConfig:readonly ModelHubConfiguration[]=[],claudeOptions:ClaudeTaskServiceOptions={},claudePlanningOptions:ClaudePlanningOptions={},qualityOptions:Pick<QualityNativeOptions,'findExecutable'|'claudeFactory'|'codexReview'>={},registryOptions:ControllerRegistryOptions={}){
     this.candidateCompletion=registryOptions.candidateCompletion??(item=>this.readIntegrationCandidate(item));this.completionPolicy=registryOptions.completion?.policy;
     this.store=store;this.workspace=workspace;this.factory=factory;this.projects=projects;
+    this.deliverableVersions=new DeliverableVersions(store);
+    // No model or validation is run by this observer. A failed observation cannot alter execution state.
+    store.on('event',event=>{
+      if(!event.runId||event.kind!=='run.completed')return;
+      const run=store.getRun(event.runId);
+      if(run?.projectId&&!run.workspaceId&&run.execution==='completed')try{this.observeDeliverables(run.projectId,run.id);}catch{/* Explicit refresh can retry unavailable files. */}
+    });
     this.subscriptionUsage=new SubscriptionUsageStore(store);
     this.claudeTasks=new ClaudeTaskService(store,projects,claudeOptions,this.subscriptionUsage);
     this.aiPreferences=new ProjectAiPreferencesService(store);
@@ -839,7 +848,24 @@ export class Controller {
   deliverables(projectId:string){
     if(!this.projects)throw new AppError('PROJECT_CREATION_UNAVAILABLE',409);
     const project=this.projects.generalProject(projectId),tasks=(new Studio(this.store).read(projectId,'tasks') as SavedTask[]).map(task=>({id:task.id,title:task.title}));
-    return listDeliverables(project.path,tasks);
+    const list=listDeliverables(project.path,tasks);
+    return {...list,items:list.items.map(item=>({...item,...(item.role==='output'?{id:deliverableId(projectId,item.path)}:{})}))};
+  }
+  observeDeliverables(projectId:string,completedRunId?:string){
+    const list=this.deliverables(projectId);
+    this.deliverableVersions.observe(projectId,this.projects!.generalProject(projectId).path,list,completedRunId);
+    return list;
+  }
+  deliverableHistory(projectId:string,id:string){
+    if(!this.projects)throw new AppError('PROJECT_CREATION_UNAVAILABLE',409);
+    return this.deliverableVersions.list(projectId,this.projects.generalProject(projectId).path,id);
+  }
+  deliverableDownload(projectId:string,id:string,versionId?:string){
+    if(!this.projects)throw new AppError('PROJECT_CREATION_UNAVAILABLE',409);
+    const root=this.projects.generalProject(projectId).path;
+    if(versionId)return this.deliverableVersions.download(projectId,root,id,versionId);
+    const path=findOutputPath(root,path=>deliverableId(projectId,path)===id);
+    return readOutputDeliverable(root,path);
   }
   /** User materials of a general project (inputs/). Adding never overwrites. */
   materials(projectId:string){if(!this.projects)throw new AppError('PROJECT_CREATION_UNAVAILABLE',409);return listMaterials(this.projects.generalProject(projectId).path);}

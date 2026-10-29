@@ -1,6 +1,6 @@
 import type {NumericSourceCheck} from '../shared/quality-progress.ts';
 import {createHash} from 'node:crypto';
-import {closeSync,fstatSync,lstatSync,openSync,readSync,readdirSync,constants} from 'node:fs';
+import {closeSync,fstatSync,lstatSync,openSync,readSync,readdirSync,realpathSync,constants} from 'node:fs';
 import {extname,join,normalize,relative,sep,isAbsolute} from 'node:path';
 import type {Deliverable,DeliverableChecks,DeliverableList,DeliverablePreview} from '../shared/deliverables.ts';
 import {safeText} from './privacy.ts';
@@ -138,4 +138,44 @@ export function readDeliverable(root:string,path:string,beforeOpen?:()=>void):De
   const again=checkedPath(root,clean).stats;
   if(again.some((stat,index)=>stat.dev!==stats[index].dev||stat.ino!==stats[index].ino))throw new AppError('DELIVERABLE_CHANGED',409);
   return {path:clean.split(sep).join('/'),bytes:file.buffer,sha256:createHash('sha256').update(file.buffer).digest('hex'),size:file.size,contentType:mediaType(clean)};
+}
+
+/** Download boundary: canonical output paths only, including no hard-link aliases. */
+export function readOutputDeliverable(root:string,path:string):DeliverableBytes {
+  if(path!==normalize(path).split(sep).join('/')||path.split('/').some(part=>!part||part==='.'||part==='..')||path.split('/')[0].toLowerCase()==='inputs')throw new AppError('INVALID_PATH',400);
+  const rootStat=lstatSync(root);
+  if(rootStat.isSymbolicLink()||!rootStat.isDirectory()||realpathSync(root)!==root)throw new AppError('DELIVERABLE_NOT_FOUND',404);
+  const before=checkedPath(root,path),leaf=before.stats.at(-1)!;
+  if(leaf.nlink!==1)throw new AppError('DELIVERABLE_NOT_FOUND',404);
+  const file=readDeliverable(root,path);
+  const after=checkedPath(root,path),currentRoot=lstatSync(root);
+  if(currentRoot.dev!==rootStat.dev||currentRoot.ino!==rootStat.ino||currentRoot.isSymbolicLink()||realpathSync(root)!==root
+    ||after.stats.some((stat,index)=>stat.dev!==before.stats[index].dev||stat.ino!==before.stats[index].ino)
+    ||after.stats.at(-1)!.nlink!==1||after.stats.at(-1)!.mtimeMs!==leaf.mtimeMs||after.stats.at(-1)!.ctimeMs!==leaf.ctimeMs)throw new AppError('DELIVERABLE_CHANGED',409);
+  return file;
+}
+
+export function downloadHeaders(file:DeliverableBytes):Record<string,string> {
+  const name=file.path.split('/').at(-1)!.replace(/[^A-Za-z0-9._-]/g,'_').slice(0,120).replace(/^\.+/,'')||'result';
+  const allowed=new Set(['text/plain','text/markdown','text/csv','application/json','application/pdf','image/png','image/jpeg',
+    media['.docx'],media['.pptx'],media['.xlsx']]);
+  return {'Content-Disposition':`attachment; filename="${name}"`,'Content-Type':allowed.has(file.contentType)?file.contentType:'application/octet-stream',
+    'Content-Length':String(file.size),'X-Content-Type-Options':'nosniff'};
+}
+
+/** Resolve an opaque ID by directory metadata only; read bytes only after selecting one output. */
+export function findOutputPath(root:string,matches:(path:string)=>boolean):string {
+  let visited=0;
+  const walk=(dir:string,depth:number):string|null=>{
+    for(const entry of readdirSync(dir,{withFileTypes:true}).sort((a,b)=>a.name.localeCompare(b.name))){
+      if(visited>=MAX_FILES)return null;
+      if(sensitive(entry.name)||entry.isSymbolicLink()||depth===0&&entry.name.toLowerCase()==='inputs')continue;
+      const full=join(dir,entry.name),path=relative(root,full).split(sep).join('/');
+      // Validate each directory before descent; the selected file is checked again by the byte reader.
+      if(entry.isDirectory()&&depth<MAX_DEPTH){checkedPath(root,path);const found=walk(full,depth+1);if(found)return found;}
+      else if(entry.isFile()){visited++;if(matches(path))return path;}
+    }
+    return null;
+  };
+  const path=walk(root,0);if(!path)throw new AppError('DELIVERABLE_NOT_FOUND',404);return path;
 }
