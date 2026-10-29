@@ -8,7 +8,7 @@ import {TaskGraphPanel} from './task-graph-panel.tsx';
 import {ClaudeRecoveryControl,QuotaResumeNote} from './claude-recovery.tsx';
 import {useEffect,useRef,useState} from 'react';
 import type {ConnectionFreshness,ProgressTask,ProjectProgress,TaskStage,ProgressVerification,ClaudeRunRecovery} from '../shared/project-progress.ts';
-import type {HandoffPackage} from '../shared/handoff.ts';
+import type {HandoffHistoryEntry,HandoffPackage} from '../shared/handoff.ts';
 
 export const stageLabels:Record<TaskStage,string>={
   not_started:'대기',quota_wait:'한도 대기',running:'실행 중',interrupt_requested:'중단 요청됨 · 종료 미확인',verifying:'검증 중',
@@ -34,7 +34,7 @@ const runtime=(value:string|null)=>value?runtimeLabels[value]??value:'미지정'
 /** Stages where a new explicit run may start. A lost run is never retried from here. */
 export const runnableStages:readonly TaskStage[]=['not_started','error','interrupted','verification_failed','response_unverified','revalidation_required'];
 export interface TaskActions {
-  runtimeLabel:string;canRun:boolean;busy:boolean;pendingTaskId:string|null;handoff:{taskId:string;markdown:string}|null;
+  runtimeLabel:string;canRun:boolean;busy:boolean;pendingTaskId:string|null;handoff:{taskId:string;markdown:string;history:HandoffHistoryEntry[]}|null;
   onRun(task:ProgressTask):void;onInterrupt(task:ProgressTask):void;onHandoff(task:ProgressTask):void;
   /** Explicit lost-run recovery; absent where the runtime has no such action. */onRecover?(runId:string):void;
 }
@@ -47,6 +47,9 @@ function TaskButtons({task,actions,released}:{task:ProgressTask;actions:TaskActi
     {actions.canRun&&task.stage==='running'&&task.latestRunId&&<button disabled={actions.busy} onClick={()=>actions.onInterrupt(task)}>중단 요청</button>}
     <button disabled={actions.busy} onClick={()=>actions.onHandoff(task)}>인계 자료 보기</button>
     {actions.handoff?.taskId===task.id&&<pre className="progress-handoff" aria-label="인계 자료">{actions.handoff.markdown}</pre>}
+    {actions.handoff?.taskId===task.id&&<ul className="progress-handoff-history" aria-label="인계 이력">
+      {actions.handoff.history.length?actions.handoff.history.map(entry=><li key={entry.seq}>{time(entry.at)} · {runtime(entry.destination)}로 전달 · {entry.receipt==='acknowledged'?'실행기가 시작을 확인함':'전달됨 · 시작 확인 기록 없음'}{entry.receipt==='delivered'&&entry.runExecution&&['failed','lost','interrupted'].includes(entry.runExecution)?` (실행 상태: ${entry.runExecution})`:''}</li>):<li>아직 실행기로 전달된 기록이 없습니다.</li>}
+    </ul>}
   </div>;
 }
 
@@ -136,7 +139,7 @@ export function ProjectProgressPanel({projectId,projectKind,online,lastSeq,lastE
   compact?:boolean;onProgress?:(progress:ProjectProgress)=>void}){
   const report=useRef(onProgress);report.current=onProgress;
   const [progress,setProgress]=useState<ProjectProgress|null>(null),[error,setError]=useState('');
-  const [busy,setBusy]=useState(false),[pending,setPending]=useState(()=>readPending(projectId)),[handoff,setHandoff]=useState<{taskId:string;markdown:string}|null>(null);
+  const [busy,setBusy]=useState(false),[pending,setPending]=useState(()=>readPending(projectId)),[handoff,setHandoff]=useState<{taskId:string;markdown:string;history:HandoffHistoryEntry[]}|null>(null);
   const ticket=useRef(0);
   useEffect(()=>{setProgress(null);setError('');setHandoff(null);setPending(readPending(projectId));},[projectId]);
   useEffect(()=>{
@@ -191,7 +194,10 @@ export function ProjectProgressPanel({projectId,projectKind,online,lastSeq,lastE
     try{
       const response=await fetch(`/api/projects/${encodeURIComponent(projectId)}/tasks/${encodeURIComponent(task.id)}/handoff`,{cache:'no-store'});
       if(!response.ok)throw new Error();const value=await response.json() as HandoffPackage;
-      if(value.taskId!==task.id||typeof value.markdown!=='string')throw new Error();setHandoff({taskId:task.id,markdown:value.markdown});
+      if(value.taskId!==task.id||typeof value.markdown!=='string')throw new Error();
+      const log=await fetch(`/api/projects/${encodeURIComponent(projectId)}/tasks/${encodeURIComponent(task.id)}/handoff-history`,{cache:'no-store'});
+      const history=log.ok?(await log.json() as {entries:HandoffHistoryEntry[]}).entries:[];
+      setHandoff({taskId:task.id,markdown:value.markdown,history});
     }catch{setError('인계 자료를 불러오지 못했습니다.');}
   });
   const actions:TaskActions|undefined=projectKind==='general'&&post?{runtimeLabel:'Claude Code',canRun:true,busy:busy||!online,pendingTaskId:pending?.taskId??null,handoff,onRun:run,onInterrupt:interrupt,onHandoff:showHandoff,onRecover:recover}

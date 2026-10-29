@@ -10,6 +10,7 @@ import type {Projects} from './projects.ts';
 import {Studio} from './studio.ts';
 import {generalAcceptance} from './acceptance.ts';
 import {HandoffService} from './handoff-service.ts';
+import {recordHandoffDelivery} from './handoff-history.ts';
 import {AppError} from './errors.ts';
 import {containsCredential} from './privacy.ts';
 import {outboundDenial} from './providers/policy.ts';
@@ -140,6 +141,7 @@ export class ClaudeTaskService {
     }catch{
       return this.store.updateRun(run.id,{execution:'failed'},'run.failed',{reason:'RUNTIME_NOT_STARTED'});
     }
+    recordHandoffDelivery(this.store,run,'claude-code',handoff);
     const active:Active={runner,done:Promise.resolve()};this.active.set(run.id,active);
     active.done=this.execute(run.id,runner).finally(()=>{this.subscriptionUsage.disconnect('claude-code',run.id);this.active.delete(run.id);if(runner.owned?.())this.held.set(run.id,runner);});
     return this.store.getRun(run.id)!;

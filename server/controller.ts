@@ -33,6 +33,8 @@ import { evaluateLaunch,outboundDenial,providerConnections } from './providers/p
 import {briefPiiInspectionText} from './planning/execution.ts';
 import {repairPiiInspectionText} from './repair-pii.ts';
 import { Studio,exact } from './studio.ts';
+import { HandoffService } from './handoff-service.ts';
+import { recordHandoffDelivery } from './handoff-history.ts';
 import type { SavedTask } from '../shared/parallel.ts';
 import { VerificationService,type VerificationConfiguration } from './verification-service.ts';
 import {VerificationSetupService} from './verification-setup.ts';
@@ -926,7 +928,14 @@ export class Controller {
     const {prompt,...task}=new Studio(this.store).execution(projectId,taskId);
     const acceptance=this.taskVerificationPreview(projectId,taskId,workspace.id);
     if(acceptance?.digest!==input.expectedAcceptanceDigest)throw new AppError('ACCEPTANCE_PREVIEW_STALE',409);
-    return this.start({...input,prompt},{...task,projectId,runtime:'codex'},acceptance??undefined,worker);
+    // Handoff context for the delivery record only; an unbuildable package never blocks or alters the launch.
+    let pkg:ReturnType<HandoffService['build']>|null=null;try{pkg=new HandoffService(this.store,new Studio(this.store)).build(projectId,taskId);}catch{/* no record */}
+    try{return await this.start({...input,prompt},{...task,projectId,runtime:'codex'},acceptance??undefined,worker);}
+    finally{
+      // Also covers SUBMIT_UNCERTAIN: the run exists durably. Refused launches create no run, so nothing is recorded.
+      const created=this.store.findRequest(input.requestId)?.run;
+      if(pkg&&created&&created.runtime==='codex'&&created.taskId===taskId)recordHandoffDelivery(this.store,created,'codex',pkg);
+    }
   }
   async submit(input:{requestId:string;prompt:string;workspaceId?:string|null}):Promise<Run>{return this.start(input);}
   private async start(input:{requestId:string;prompt:string;workspaceId?:string|null},task?:Pick<Run,'taskId'|'planningVersionId'|'planningContentHash'|'requirementLabels'|'projectId'|'runtime'>,acceptance?:TaskVerificationPreview,worker?:WorkerDispatchContext,tool?:{request:Readonly<ToolLaunchRequest>;serverName:string},piiText?:string):Promise<Run>{
