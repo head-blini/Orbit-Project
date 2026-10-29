@@ -179,6 +179,14 @@ test('CQG-6b: handoff colliding with project inputs refuses even identical bytes
   assert.throws(()=>f.spaces.create(f.reserve(),undefined,handoff),/WORKER_SPACE_INPUT_CONFLICT/);
  }finally{f.close();}
 });
+for(const [first,second] of [['output/A.md','output/a.md'],['output/a','output/a/b']])test(`CQG-6b: aliasing handoff paths ${first} and ${second} refuse before any write`,()=>{
+ const f=fixture();try{
+  const sha=createHash('sha256').update('x').digest('hex'),r=f.reserve();
+  const handoff={predecessors:[{taskId:'p1',integrationId:'i1',commitSha:null,files:[{path:first,sha256:sha}]},{taskId:'p2',integrationId:'i2',commitSha:null,files:[{path:second,sha256:sha}]}]};
+  assert.throws(()=>f.spaces.create(r,undefined,handoff),/WORKER_SPACE_INPUT_CONFLICT/);
+  assert.equal(existsSync(join(generalAttemptPath(f.project.path,r.attempt.id),'inputs/output')),false);
+ }finally{f.close();}
+});
 test('CQG-6b: attempt handoff pin survives restart and rejects changed or omitted handoff',()=>{
  const f=fixture();try{
   const handoff=handoffFile(f),r=f.reserve(),s=f.spaces.create(r,undefined,handoff);

@@ -190,6 +190,8 @@ export class WorkerSpaces {
           }catch{fail('INPUT_CHANGED');}
         };
         if(files.size){
+          // Handed-off paths must not alias each other by case fold or file-vs-directory.
+          for(const a of files.keys())for(const b of files.keys())if(a!==b&&(fold(a)===fold(b)||fold(b).startsWith(fold(a)+'/')))fail('INPUT_CONFLICT');
           const inputs=tree(destination);
           for(const path of files.keys()){
             if(inputs.files.some(f=>fold(f.path)===fold(path)||fold(path).startsWith(fold(f.path)+'/'))
