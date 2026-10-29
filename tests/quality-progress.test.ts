@@ -162,7 +162,7 @@ test('existing code verification and explicit user approval are independent of A
 });
 test('HTTP GET exposes quality without executing providers or changing stored evidence',async()=>{
  const f=fixture();let calls=0;
- const controller={store:f.store,snapshot:()=>({provider:'disconnected'}),claudeQuota:()=>null,deliverables:f.deliverables,submit:()=>{calls++;throw Error('FORBIDDEN');}} as unknown as Controller;
+ const controller={store:f.store,snapshot:()=>({provider:'disconnected'}),claudeQuota:()=>null,claudeRecoveries:()=>[],deliverables:f.deliverables,submit:()=>{calls++;throw Error('FORBIDDEN');}} as unknown as Controller;
  const server=createHttpServer(controller,'unused');
  try{
   await qualityVerifyGeneral(f.store,f.projects,f.context);await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
@@ -207,7 +207,7 @@ test('accepted round without matching review step evidence is unavailable, not s
 
 test('GET request handler returns quality and authenticates without storage or provider side effects',async()=>{
  const f=fixture();let calls=0;
- const controller={store:f.store,snapshot:()=>({provider:'disconnected'}),claudeQuota:()=>null,deliverables:f.deliverables,submit:()=>{calls++;throw Error('FORBIDDEN');}} as unknown as Controller;
+ const controller={store:f.store,snapshot:()=>({provider:'disconnected'}),claudeQuota:()=>null,claudeRecoveries:()=>[],deliverables:f.deliverables,submit:()=>{calls++;throw Error('FORBIDDEN');}} as unknown as Controller;
  const server=createHttpServer(controller,'unused');
  // Transport-only test double: the production request handler and session gate execute unchanged.
  server.address=()=>({address:'127.0.0.1',family:'IPv4',port:12345});

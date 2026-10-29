@@ -15,7 +15,7 @@ test('progress shows quota headroom only from a fresh observation; stale rejecti
   const approved=studio.mutate('project-a','plans',plan.id,'approve',{expectedRevision:1}) as PlanningVersion;studio.mutate('project-a','plans',approved.id,'task-drafts',{});
   let freshness='fresh',claudeQuota:unknown={kind:'quota',status:'allowed',windows:[{id:'five_hour',utilization:0.2,resetsAt:null,status:'allowed'}]};
   const subscriptionUsage={snapshot:()=>[{observation:{runtimeId:'claude-code',freshness},connected:true}]};
-  const controller={store,snapshot:()=>({provider:'disconnected',soloRecoveryRequired:false}),usageSnapshot:()=>null,claudeQuota:()=>claudeQuota,subscriptionUsage} as unknown as Controller;
+  const controller={store,snapshot:()=>({provider:'disconnected',soloRecoveryRequired:false}),usageSnapshot:()=>null,claudeQuota:()=>claudeQuota,claudeRecoveries:()=>[],subscriptionUsage} as unknown as Controller;
   const server=createHttpServer(controller,'unused');await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
   const origin='http://127.0.0.1:'+(server.address() as {port:number}).port;
   try{
