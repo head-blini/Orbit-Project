@@ -54,13 +54,15 @@ export function approvedWorkerBase(store:Store,projects:Projects,batch:ApprovedE
   });
   // The newest direct predecessor is the one containing every other predecessor.
   // Never derive the base from the moving target ref.
-  const latest=predecessors.find(item=>predecessors.every(other=>isAncestor(project.path,other.candidate!.commitSha,item.candidate!.commitSha)));
-  if(!latest||!isAncestor(project.path,workspace.baseSha,latest.candidate!.commitSha))fail('BASELINE_CHANGED');
+  // Git refusals (missing object, malformed SHA, unavailable/moved target) fail closed as typed scheduler codes.
+  const git=<T>(code:string,work:()=>T):T=>{try{return work();}catch{return fail(code);}};
+  const ancestor=(a:string,b:string)=>git('BASELINE_CHANGED',()=>isAncestor(project.path,a,b));
+  const latest=predecessors.find(item=>predecessors.every(other=>ancestor(other.candidate!.commitSha,item.candidate!.commitSha)));
+  if(!latest||!ancestor(workspace.baseSha,latest.candidate!.commitSha))fail('BASELINE_CHANGED');
   baseSha=latest.candidate!.commitSha;
   for(const item of predecessors){
    if(!item.targetBranch||item.targetBranch!==latest.targetBranch)fail('BASELINE_CHANGED');
-   const target=inspectIntegrationTarget(project.path,item.targetBranch,item.defaultBranch);
-   if(!isAncestor(project.path,baseSha,target.head))fail('DEPENDENCY_OUTPUT_CHANGED');
+   if(!git('DEPENDENCY_OUTPUT_CHANGED',()=>isAncestor(project.path,baseSha,inspectIntegrationTarget(project.path,item.targetBranch!,item.defaultBranch).head)))fail('DEPENDENCY_OUTPUT_CHANGED');
   }
  }
  return {batchId:batch.id,projectId:batch.projectId,repositoryId:resource.repositoryId,baseSha};

@@ -193,6 +193,21 @@ test('CQG-6b: incomparable direct predecessor commits refuse BASELINE_CHANGED',a
  }finally{await f.close();}
 });
 
+test('CQG-6b: target branch not checked out refuses DEPENDENCY_OUTPUT_CHANGED before reservation',async()=>{
+ const f=await codeFixture();try{
+  f.apply();trustedGit(f.project.path,['checkout','-b','elsewhere']);
+  await assert.rejects(f.submit(2),/WORKER_DEPENDENCY_OUTPUT_CHANGED/);assert.equal(f.scheduler.list().length,0);
+  assert.equal(f.rpc.calls.filter(c=>c.method==='turn/start').length,0);
+ }finally{await f.close();}
+});
+for(const commitSha of ['f'.repeat(40),'not-a-sha'])test(`CQG-6b: predecessor commit ${commitSha} refuses BASELINE_CHANGED before reservation`,async()=>{
+ const f=await codeFixture();try{
+  const item=f.apply();item.candidate.commitSha=commitSha;
+  f.store.db.prepare('UPDATE integration_queue SET body=? WHERE id=?').run(JSON.stringify(item),item.id);
+  await assert.rejects(f.submit(2),/WORKER_BASELINE_CHANGED/);assert.equal(f.scheduler.list().length,0);
+  assert.equal(f.rpc.calls.filter(c=>c.method==='turn/start').length,0);
+ }finally{await f.close();}
+});
 for(const change of ['identical bytes','different bytes','unrelated file'] as const)test(`CQG-6b: later applied integration with ${change}`,async()=>{
  const f=await codeFixture();try{
   const predecessor=f.apply();
