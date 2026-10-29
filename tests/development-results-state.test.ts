@@ -59,7 +59,7 @@ function fixture(){
   const source=ts.transpileModule(readFileSync(url,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText;
   const module={exports:{} as {DevelopmentResultPanel:(props:PanelProps)=>ReactNode}};
   new Function('require','module','exports','fetch','setTimeout','clearTimeout',source)(
-    (id:string)=>id==='react'?hooks:id==='./app-preview.tsx'?{AppPreviewPanel:PreviewStub}:require(id),module,module.exports,
+    (id:string)=>id==='react'?hooks:id==='./app-preview.tsx'?{AppPreviewPanel:PreviewStub}:id==='./reuse-vendor.tsx'?{ReuseVendorPanel:()=>null}:require(id),module,module.exports,
     (path:string)=>new Promise(resolve=>requests.push({path,resolve})),
     (callback:()=>void,delay:number)=>{const id=nextTimer++;timers.set(id,{at:now+delay,run:callback});return id;},
     (id:number)=>{timers.delete(id);},

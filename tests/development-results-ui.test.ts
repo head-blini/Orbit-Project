@@ -9,7 +9,7 @@ import ts from 'typescript';
 async function components(){
  const root=new URL('../web/',import.meta.url).href;
  const hook=registerHooks({load(url,context,next){if(url.endsWith('.css'))return {format:'module',source:'export {};',shortCircuit:true};if(url.startsWith(root)&&url.endsWith('.tsx'))return {format:'module',source:ts.transpileModule(readFileSync(new URL(url),'utf8'),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText,shortCircuit:true};return next(url,context);}});
- try{return {...await import('../web/development-results.tsx'),...await import('../web/pages.tsx'),...await import('../web/app-preview.tsx'),...await import('../web/agent-center.tsx'),...await import('../web/studios.tsx')};}finally{hook.deregister();}
+ try{return {...await import('../web/development-results.tsx'),...await import('../web/pages.tsx'),...await import('../web/app-preview.tsx'),...await import('../web/reuse-vendor.tsx'),...await import('../web/agent-center.tsx'),...await import('../web/studios.tsx')};}finally{hook.deregister();}
 }
 const run=(id:string,execution='completed',workspaceId='w')=>({id,workspaceId,execution,createdAt:'2026-10-27T00:00:00Z',updatedAt:'2026-10-27T00:00:00Z',prompt:'fixture',response:'',verification:'not_run'});
 const state:any={provider:'disconnected',runs:[run('first'),run('second')],lastSeq:5,selectedWorkspaceId:'w',workspaces:[{id:'w',projectId:'p',status:'ready',path:'/fixture',branch:'orbit/w',baseSha:'a'.repeat(40)}]};
@@ -58,4 +58,19 @@ test('Planning result links require the exact project, workspace, Task and plann
  assert.equal(taskResultRun('p',task,{...snapshot,runs:[{...correct,workspaceId:'elsewhere'}]}),null);
  const markup=renderToStaticMarkup(createElement(AgentCenter,{state:snapshot,matches:true,online:true,onResult:()=>{},prompt:'',pending:null} as any));
  assert.match(markup,/이 실행의 결과 확인/);
+});
+test('reuse vendor list shows adopt decisions with an import button, then files, sha256 prefix, license and source',async()=>{
+ const {ReuseVendorList}=await components();
+ const decision={planningVersionId:'plan',topic:'재사용: left-pad',decision:'재사용 채택: left-pad 1.3.0 (WTFPL) · https://www.npmjs.com/package/left-pad · 확인 2026-10-30T12:04:05+09:00'};
+ const entry={name:'left-pad',version:'1.3.0',license:{decision:'WTFPL',package:'WTFPL'},sourceDecision:decision.topic,sourceUrl:'https://www.npmjs.com/package/left-pad',
+  files:[{path:'vendor/left-pad-1.3.0/left-pad.min.js',url:'https://cdn.jsdelivr.net/npm/left-pad@1.3.0/dist/left-pad.min.js',sha256:'f'.repeat(64),bytes:23}],licenseFile:'license_file:absent',checkedAt:'2026-10-30T12:04:05+09:00',planningVersionId:'plan'};
+ const html=(view:any,extra:any={})=>renderToStaticMarkup(createElement(ReuseVendorList,{view,busy:false,disabled:false,error:'',onImport:()=>{},...extra}));
+ const before=html({evidence:{entries:[]},decisions:[decision]});
+ assert.match(before,/aria-label="재사용: left-pad 재사용 구성요소 가져오기"/);assert.match(before,/재사용 구성요소 가져오기<\/button>/);assert.doesNotMatch(before,/sha256/);
+ const after=html({evidence:{entries:[entry]},decisions:[decision]});
+ assert.match(after,/vendor\/left-pad-1\.3\.0\/left-pad\.min\.js<\/code> · sha256 ffffffffffff · 23 bytes/);assert.doesNotMatch(after,/f{13}/);
+ assert.match(after,/라이선스 WTFPL/);assert.match(after,/license_file:absent/);assert.match(after,/출처 https:\/\/www\.npmjs\.com\/package\/left-pad/);
+ assert.match(html({evidence:{entries:[]},decisions:[decision]},{error:'재사용 구성요소를 가져오지 못했습니다: REUSE_VENDOR_UNSUPPORTED'}),/role="alert">[^<]*REUSE_VENDOR_UNSUPPORTED/);
+ assert.match(html({evidence:{entries:[]},decisions:[decision]},{disabled:true}),/<button disabled=""/);
+ assert.match(html({evidence:{entries:[]},decisions:[]}),/채택된 재사용 구성요소가 없습니다/);
 });
