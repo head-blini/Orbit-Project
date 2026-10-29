@@ -1,6 +1,9 @@
 import type {IntegrationCompletionEvidence,IntegrationItem} from '../server/integration-queue.ts';
 import {defaultCompletionPolicy} from '../server/project-progress.ts';
-import {completionPolicyDigest} from '../server/task-completion.ts';
+import {completionPolicyDigest,evaluateTaskCompletion} from '../server/task-completion.ts';
+import type {CompletionBinding,CompletionEvidence,TaskCompletion} from '../shared/task-completion.ts';
+import type {Run} from '../shared/types.ts';
+import {generalCheckerDigest} from '../server/quality-progress.ts';
 import type {QualityDimension} from '../shared/quality-progress.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -94,24 +97,43 @@ test('protected main, master and trusted default are refused before dispatch',as
 
 // Candidate-specific native observations are fixtures. A bare command verdict is
 // intentionally insufficient; the successful path also supplies every CQG gate.
-function candidateFixture(f:ReturnType<typeof setup>,item:Readonly<IntegrationItem>):IntegrationCompletionEvidence {
+// The same evidence shape is bound either to the candidate or to the source attempt's artifact.
+const fixturePolicy={...defaultCompletionPolicy('general'),dependencyRelease:'quality_passed' as const};
+function fixtureBinding(f:ReturnType<typeof setup>,item:Readonly<IntegrationItem>):CompletionBinding {
  const r=JSON.parse(String(f.store.db.prepare('SELECT body FROM worker_reservations WHERE id=?').get(item.fence.reservationId)!.body)) as import('../shared/parallel-workers.ts').WorkerReservation;
  const hash=(v:unknown)=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
- const policy={...defaultCompletionPolicy('general'),dependencyRelease:'quality_passed' as const};
- const binding={projectId:item.projectId,taskId:r.attempt.taskId,runId:'candidate-producer',planningVersionId:r.batch.planningVersionId,planningContentHash:item.approvedBaseline,acceptanceDigest:'acceptance',artifactId:item.id,artifactDigest:item.candidateDigest,graphRevision:String(r.batch.graphRevision),contractDigest:hash(r.batch.contractDigests),policyDigest:completionPolicyDigest(policy),configDigest:item.configDigest,artifactScope:'task_manifest' as const,baseSha:null,inputSnapshotDigest:item.space.inputDigest};
- const model=(id:string)=>({providerId:'fixture',modelId:id,runId:'candidate-'+id,sessionId:'session-'+id,source:'native_observed' as const,evidenceSource:'native' as const});
+ return {projectId:item.projectId,taskId:r.attempt.taskId,runId:f.store.findRequest(r.attempt.dispatchRequestId)!.run.id,planningVersionId:r.batch.planningVersionId,planningContentHash:item.approvedBaseline,acceptanceDigest:'acceptance',artifactId:item.id,artifactDigest:item.candidateDigest,graphRevision:String(r.batch.graphRevision),contractDigest:hash(r.batch.contractDigests),policyDigest:completionPolicyDigest(fixturePolicy),configDigest:item.configDigest,artifactScope:'task_manifest' as const,baseSha:null,inputSnapshotDigest:item.space.inputDigest};
+}
+function fixtureEvidence(binding:CompletionBinding):CompletionEvidence {
+ const model=(id:string)=>({providerId:'fixture',modelId:id,runId:id==='producer'?binding.runId:'candidate-'+id,sessionId:'session-'+id,source:'native_observed' as const,evidenceSource:'native' as const});
  const d=(status:QualityDimension['status']='not_run',evidenceIds:string[]=[]):QualityDimension=>({status,evidenceIds,blockers:[],nextAction:null});
- const id=item.id+'review',artifact={id:item.id,digest:item.candidateDigest!};
- const review={modelKey:'fixture/reviewer',sessionId:'session-reviewer',baselineDigest:item.approvedBaseline,artifactDigest:item.candidateDigest!,criteria:[{criterion:'Cite evidence',status:'met' as const,evidence:'candidate fixture checked'}],findings:[]};
- const evidence:IntegrationCompletionEvidence['evidence']={quality:{execution:{...d('completed'),evidenceSource:'native'},format:d(),codeVerification:d(),semantic:d('passed',[id]),independentReview:d('completed',[id]),repair:d(),revalidation:d(),userApproval:d(),evidence:[]},producer:{binding,model:model('producer')},bindings:{},checks:[],commands:[],gateResults:[],approvals:[],loops:[{id,projectId:item.projectId,taskId:binding.taskId,sourceRunId:binding.runId,baseline:{id:binding.planningVersionId,digest:item.approvedBaseline,criteria:['Cite evidence']},producer:model('producer'),reviewers:[{id:'reviewer',providerId:'fixture',modelId:'reviewer'}],recoveryRequired:false,result:{status:'passed',issue:null,calls:1,repairs:0,artifact,rounds:[{number:1,artifact,reviews:[{reviewerId:'reviewer',result:review}],failures:[]}]},steps:[{id:'step',index:1,kind:'review',state:'completed',requestDigest:'request',startedAt:'start',finishedAt:'finish',issue:null,evidence:model('reviewer'),result:review}],verification:{status:'passed',checkIds:[],issue:null}}]};
- for(const [key,kind] of [[id,'quality_loop'],[item.id+'format','artifact_check'],[item.id+'numeric','artifact_check']] as const){evidence.bindings[key]={...binding};evidence.quality.evidence.push({id:key,kind,binding:{...binding},evidenceSource:kind==='quality_loop'?'native':'local',freshness:'current',recordedStatus:'passed',blockers:[]});}
- evidence.gateResults=[{gate:'artifact_format',evidenceId:item.id+'format',status:'passed'},{gate:'numeric_source',evidenceId:item.id+'numeric',status:'passed'}];
+ const id=binding.artifactId+'review',artifact={id:binding.artifactId!,digest:binding.artifactDigest!};
+ const review={modelKey:'fixture/reviewer',sessionId:'session-reviewer',baselineDigest:binding.planningContentHash!,artifactDigest:artifact.digest,criteria:[{criterion:'Cite evidence',status:'met' as const,evidence:'candidate fixture checked'}],findings:[]};
+ const evidence:CompletionEvidence={quality:{execution:{...d('completed'),evidenceSource:'native'},format:d(),codeVerification:d(),semantic:d('passed',[id]),independentReview:d('completed',[id]),repair:d(),revalidation:d(),userApproval:d(),evidence:[]},producer:{binding,model:model('producer')},bindings:{},checks:[],commands:[],gateResults:[],approvals:[],loops:[{id,projectId:binding.projectId!,taskId:binding.taskId!,sourceRunId:binding.runId!,baseline:{id:binding.planningVersionId!,digest:binding.planningContentHash!,criteria:['Cite evidence']},producer:model('producer'),reviewers:[{id:'reviewer',providerId:'fixture',modelId:'reviewer'}],recoveryRequired:false,result:{status:'passed',issue:null,calls:1,repairs:0,artifact,rounds:[{number:1,artifact,reviews:[{reviewerId:'reviewer',result:review}],failures:[]}]},steps:[{id:'step',index:1,kind:'review',state:'completed',requestDigest:'request',startedAt:'start',finishedAt:'finish',issue:null,evidence:model('reviewer'),result:review}],verification:{status:'passed',checkIds:[],issue:null}}]};
+ for(const [key,kind] of [[id,'quality_loop'],[binding.artifactId+'format','artifact_check'],[binding.artifactId+'numeric','artifact_check']] as const){evidence.bindings[key]={...binding};evidence.quality.evidence.push({id:key,kind,binding:{...binding},evidenceSource:kind==='quality_loop'?'native':'local',freshness:'current',recordedStatus:'passed',blockers:[]});}
+ evidence.gateResults=[{gate:'artifact_format',evidenceId:binding.artifactId+'format',status:'passed'},{gate:'numeric_source',evidenceId:binding.artifactId+'numeric',status:'passed'}];
+ return evidence;
+}
+function candidateFixture(f:ReturnType<typeof setup>,item:Readonly<IntegrationItem>):IntegrationCompletionEvidence {
+ const binding=fixtureBinding(f,item),evidence:IntegrationCompletionEvidence['evidence']=fixtureEvidence(binding),semantic=item.id+'semantic';
+ // CQG-6c: a candidate's semantic_review gate is satisfied only by a local candidate-bound check.
+ evidence.bindings[semantic]={...binding};evidence.quality.evidence.push({id:semantic,kind:'artifact_check',binding:{...binding},evidenceSource:'local',freshness:'current',recordedStatus:'passed',blockers:[]});
+ evidence.gateResults.push({gate:'semantic_review',evidenceId:semantic,status:'passed'});
  return {subject:{integrationId:item.id,candidateDigest:item.candidateDigest!,targetDigest:item.generalTargetDigest},binding,evidence};
+}
+// The source attempt's completion is computed by the real CQG-1 evaluator, never hand-set.
+function sourceFixture(f:ReturnType<typeof setup>,item:Readonly<IntegrationItem>,done=true):TaskCompletion {
+ const hash=(v:unknown)=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
+ const binding={...fixtureBinding(f,item),artifactId:item.space.attemptId,artifactDigest:hash(item.manifest)},evidence=fixtureEvidence(binding);
+ if(!done)evidence.gateResults=evidence.gateResults.filter(g=>g.gate!=='numeric_source');
+ const completion=evaluateTaskCompletion(evidence,fixturePolicy,binding);
+ assert.equal(completion.verifiedDone,done,completion.reasonCodes.join(','));
+ return completion;
 }
 for(const verdict of ['passed','failed','blocked'] as const){
  test(`terminal completion automatically queues full candidate verification: ${verdict}`,async()=>{
   const f=setup();try{
-   f.controller.initializeWorkers(f.execution,{targetBranch:'dev',projects:[{projectPath:f.project.path,defaultBranch:'trunk',requiredChecks:['full']}]},{policy:()=>({...defaultCompletionPolicy('general'),dependencyRelease:'quality_passed'}),candidate:item=>candidateFixture(f,item)});
+   f.controller.initializeWorkers(f.execution,{targetBranch:'dev',projects:[{projectPath:f.project.path,defaultBranch:'trunk',requiredChecks:['full']}]},{policy:()=>({...defaultCompletionPolicy('general'),dependencyRelease:'quality_passed'}),candidate:item=>candidateFixture(f,item),source:item=>sourceFixture(f,item)});
    let checks=0;f.controller.verification.verifyIntegration=async input=>{checks++;assert.deepEqual(input.requiredChecks,['full']);input.assertCurrent();return verdict;};
    const batch=f.controller.createWorkerBatch(f.project.id,{...f.inputBatch,executions:f.inputBatch.executions.slice(0,1)});
    await f.controller.submitWorkerBatch(f.project.id,batch.id,{requestId:randomUUID()});
@@ -125,6 +147,58 @@ for(const verdict of ['passed','failed','blocked'] as const){
   }finally{await f.close();}
  });
 }
+
+test('passed candidate whose source attempt is not verified done refuses auto-apply',async()=>{
+ const f=setup();try{
+  f.controller.initializeWorkers(f.execution,{targetBranch:'dev',projects:[{projectPath:f.project.path,defaultBranch:'trunk',requiredChecks:['full']}]},{policy:()=>({...defaultCompletionPolicy('general'),dependencyRelease:'quality_passed'}),candidate:item=>candidateFixture(f,item),source:item=>sourceFixture(f,item,false)});
+  let checks=0;f.controller.verification.verifyIntegration=async input=>{checks++;input.assertCurrent();return 'passed';};
+  const batch=f.controller.createWorkerBatch(f.project.id,{...f.inputBatch,executions:f.inputBatch.executions.slice(0,1)});
+  await f.controller.submitWorkerBatch(f.project.id,batch.id,{requestId:randomUUID()});
+  const space=f.controller.workerBatch(f.project.id,batch.id).spaces[0];
+  const {writeFileSync,existsSync}=await import('node:fs');writeFileSync(join(space.path,'output/report.txt'),'verified output');
+  f.runners[0].finish();await tick();await tick();await tick();
+  const item=f.controller.workerIntegrationQueue(f.project.id).items[0];assert.equal(checks,1);
+  assert.equal(item.status,'refused');assert.match(item.reason??'',/CQG_SOURCE_NOT_VERIFIED_DONE/);
+  assert.doesNotMatch(item.reason??'',/CQG_SOURCE_BINDING_MISMATCH|CQG_CANDIDATE_SUBJECT_MISMATCH/);
+  assert.equal(existsSync(join(f.project.path,'output/report.txt')),false);
+ }finally{await f.close();}
+});
+
+for(const done of [true,false])test(`real Controller source reader delivers the source attempt completion: ${done?'verified done applies':'not done refuses'}`,async()=>{
+ const f=setup();try{
+  // No injected source reader: the queue reads the source through readIntegrationSource and the
+  // ProjectProgress CQG-1 read model. Only the trusted host evidence adapter (CompletionReaders.evidence)
+  // supplies fixture observations; their binding is derived independently here, so any mismatch with the
+  // read model's own derivation fails CQG-1 instead of being copied through.
+  let current:Readonly<IntegrationItem>|undefined;
+  f.controller.initializeWorkers(f.execution,{targetBranch:'dev',projects:[{projectPath:f.project.path,defaultBranch:'trunk',requiredChecks:['full']}]},{policy:()=>fixturePolicy,candidate:item=>{
+   // Fixture gap, not product behaviour: CQG-1 requires a bound acceptance digest, but general Claude
+   // worker runs are dispatched without one (and capability-execution rejects a changed digest while
+   // running), so it is bound only after terminal detection, when the queue reads candidate evidence.
+   current=item;const run=f.store.getRun(fixtureBinding(f,item).runId!)!;
+   if(!run.acceptanceDigest)f.store.db.prepare('UPDATE runs SET body=? WHERE id=?').run(JSON.stringify({...run,acceptanceDigest:'acceptance'}),run.id);
+   return candidateFixture(f,item);
+  }});
+  let sourceReads=0;
+  Reflect.get(f.controller.progress,'qualityReaders').evidence=(base:CompletionEvidence,run:Run)=>{
+   if(!current||run.id!==fixtureBinding(f,current).runId)return base;
+   const hash=(v:unknown)=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
+   const evidence=fixtureEvidence({...fixtureBinding(f,current),artifactId:current.space.attemptId,artifactDigest:hash(current.manifest),configDigest:generalCheckerDigest()});sourceReads++;
+   if(!done)evidence.gateResults=evidence.gateResults.filter(g=>g.gate!=='numeric_source');
+   return evidence;
+  };
+  let checks=0;f.controller.verification.verifyIntegration=async input=>{checks++;input.assertCurrent();return 'passed';};
+  const batch=f.controller.createWorkerBatch(f.project.id,{...f.inputBatch,executions:f.inputBatch.executions.slice(0,1)});
+  await f.controller.submitWorkerBatch(f.project.id,batch.id,{requestId:randomUUID()});
+  const space=f.controller.workerBatch(f.project.id,batch.id).spaces[0];
+  const {writeFileSync,existsSync}=await import('node:fs');writeFileSync(join(space.path,'output/report.txt'),'verified output');
+  f.runners[0].finish();await tick();await tick();await tick();
+  const item=f.controller.workerIntegrationQueue(f.project.id).items[0];assert.equal(checks,1);assert.ok(sourceReads>0);
+  assert.equal(item.status,done?'applied':'refused',item.reason??'');
+  if(!done){assert.match(item.reason??'',/CQG_SOURCE_NOT_VERIFIED_DONE/);assert.doesNotMatch(item.reason??'',/CQG_SOURCE_BINDING_MISMATCH|CQG_CANDIDATE_SUBJECT_MISMATCH/);}
+  assert.equal(existsSync(join(f.project.path,'output/report.txt')),done);
+ }finally{await f.close();}
+});
 
 test('server restart fences running attempts and replay never dispatches or applies',async()=>{
  const {Store}=await import('../server/store.ts'),{Projects}=await import('../server/projects.ts'),{Controller}=await import('../server/controller.ts');
