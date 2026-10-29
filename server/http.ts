@@ -24,6 +24,7 @@ import { PlanningHandoffService } from './planning-handoff-service.ts';
 import { HandoffService } from './handoff-service.ts';
 import {controlPlaneStatus} from './control-plane.ts';
 import {GoalService} from './goal-service.ts';
+import {TaskGraphService} from './task-graph.ts';
 import {AppPreviewHost} from './app-preview.ts';
 import {assertGitProject} from './projects.ts';
 import {ProjectProgressService} from './project-progress.ts';
@@ -41,6 +42,7 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
   const studio=new Studio(controller.store);
   const handoff=new HandoffService(controller.store,studio);
   const goals=new GoalService(controller.store);
+  const taskGraphs=new TaskGraphService(controller.store);
   const progress=new ProjectProgressService(controller.store,studio,{deliverables:id=>controller.deliverables(id),verification:(workspaceId,runId)=>controller.verification.view(workspaceId,runId)});
   const planningHandoff=new PlanningHandoffService(controller.store,(workspaceId,runId)=>controller.verification.view(workspaceId,runId),id=>controller.workspaceDiff(id));
   const nativeProbe=options.nativeProbe??createNativeProbeService();
@@ -142,6 +144,7 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
         json(res,200,controller.store.soloOperation(soloOperation[1]));return;
       }
       const studioRoute=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/(plans|artifacts|tasks)(?:\/([a-f0-9-]{36})\/(revisions|approve|task-drafts|history|diff|replan))?$/);
+      const taskGraphRoute=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/task-graphs\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})(?:\/(revisions|history|state))?$/);
       const goalRoute=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/goals(?:\/([a-f0-9-]{36})\/(state|history))?$/);
       const appPreviewRoute=url.pathname.match(/^\/api\/workspaces\/([a-f0-9-]{36})\/app-preview$/);
       const verificationSetupRoute=url.pathname.match(/^\/api\/workspaces\/([a-f0-9-]{36})\/verification-setup$/);
@@ -158,7 +161,7 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
         const largeStudioInput=studioRoute&&studioRoute[2]!=='tasks'&&(!studioRoute[3]||studioRoute[4]==='revisions');
         const planningSuggestion=url.pathname.match(/^\/api\/projects\/([a-f0-9-]{36})\/planning-suggestions\/(preview|start|recover|([a-f0-9-]{36})\/(interrupt|save))$/);
         const materialsPost=/^\/api\/projects\/[a-f0-9-]{36}\/materials$/.test(url.pathname);
-        const data=await body(req,largeStudioInput?6*256*1024+256*1024:materialsPost?10*(128*1024+512):planningSuggestion?64000:18000);
+        const data=await body(req,largeStudioInput?6*256*1024+256*1024:materialsPost?10*(128*1024+512):planningSuggestion?64000:taskGraphRoute?1024*1024+4096:18000);
         if(qualityRoute){
           if(url.search)throw new AppError('INVALID_FIELDS',400);
           const projectId=qualityRoute[1],action=qualityRoute[2];
@@ -189,6 +192,12 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
         if(appPreviewRoute){
           if(url.search)throw new AppError('INVALID_FIELDS',400);exact(data,['entryPath','expectedSourceDigest']);controller.assertAppPreviewAvailable();
           json(res,200,appPreview.create(appPreviewRoute[1],data as unknown as Parameters<AppPreviewHost['create']>[1]));return;
+        }
+        if(taskGraphRoute){
+          // Graph editing is not planning approval or execution authorization; the path owns the planning version.
+          if(url.search||taskGraphRoute[3]!=='revisions')throw new AppError('NOT_FOUND',404);
+          if(Object.hasOwn(data,'planningVersionId'))throw new AppError('INVALID_FIELDS',400);
+          json(res,200,taskGraphs.save(taskGraphRoute[1],{...data,planningVersionId:taskGraphRoute[2]} as unknown as Parameters<TaskGraphService['save']>[1]));return;
         }
         if(goalRoute){
           if(url.search)throw new AppError('INVALID_FIELDS',400);
@@ -421,6 +430,18 @@ export function createHttpServer(controller:Controller,assets:string,options:{na
         const general=controller.store.projects().some(project=>project.id===progressRoute[1]&&project.kind==='general');
         json(res,200,progress.read(progressRoute[1],general?{recoveryRequired:!!state.soloRecoveryRequired,quota:quotaFromClaudeWindows(controller.claudeQuota())}
           :{provider:state.provider,recoveryRequired:!!state.soloRecoveryRequired,quota:quotaSignal(controller.usageSnapshot())}));return;
+      }
+      if(req.method==='GET'&&taskGraphRoute){
+        const [,projectId,versionId,action]=taskGraphRoute,keys=[...url.searchParams.keys()],raw=url.searchParams.get('revision');
+        if(action==='revisions'||action==='history'&&keys.length||keys.some(key=>key!=='revision')||keys.length>1||raw!==null&&!/^[1-9][0-9]{0,8}$/.test(raw))throw new AppError('INVALID_FIELDS',400);
+        const revision=raw===null?undefined:Number(raw);
+        if(action==='history'){json(res,200,taskGraphs.history(projectId,versionId));return;}
+        if(!action){json(res,200,taskGraphs.read(projectId,versionId,revision));return;}
+        // Facts come only from recorded progress. Nothing is marked done until the Continuous Quality Gate (backlog 8) defines it.
+        const nodes=new Set(taskGraphs.read(projectId,versionId,revision).nodes.map(node=>node.taskId));
+        const reasons:Partial<Record<string,string>>={lost:'TASK_RUN_LOST',error:'TASK_RUN_FAILED',verification_failed:'TASK_VERIFICATION_FAILED'};
+        const blocked=progress.read(projectId,{}).tasks.filter(task=>nodes.has(task.id)&&reasons[task.stage]).map(task=>({taskId:task.id,reasonCodes:[reasons[task.stage]!]}));
+        json(res,200,taskGraphs.view(projectId,versionId,{verifiedDoneIds:[],blocked},revision));return;
       }
       if(req.method==='GET'&&goalRoute){
         if(url.search)throw new AppError('INVALID_FIELDS',400);
