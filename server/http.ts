@@ -27,7 +27,6 @@ import {GoalService} from './goal-service.ts';
 import {TaskGraphService} from './task-graph.ts';
 import {AppPreviewHost} from './app-preview.ts';
 import {assertGitProject} from './projects.ts';
-import {ProjectProgressService} from './project-progress.ts';
 import {quotaSignal,type ProgressSignals} from '../shared/project-progress.ts';
 import {quotaFromClaudeWindows} from './runtimes/claude-task.ts';
 
@@ -43,7 +42,7 @@ export function createHttpServer(controller:Controller,assets:string,options:{wo
   const handoff=new HandoffService(controller.store,studio);
   const goals=new GoalService(controller.store);
   const taskGraphs=new TaskGraphService(controller.store);
-  const progress=new ProjectProgressService(controller.store,studio,{deliverables:id=>controller.deliverables(id),verification:(workspaceId,runId)=>controller.verification.view(workspaceId,runId)});
+  const progress=controller.progress;
   const planningHandoff=new PlanningHandoffService(controller.store,(workspaceId,runId)=>controller.verification.view(workspaceId,runId),id=>controller.workspaceDiff(id));
   // Share the Controller's caches so registry readiness and the readiness API never diverge.
   const nativeProbe=options.nativeProbe??controller.nativeProbe??createNativeProbeService();
@@ -485,11 +484,7 @@ export function createHttpServer(controller:Controller,assets:string,options:{wo
         const revision=raw===null?undefined:Number(raw);
         if(action==='history'){json(res,200,taskGraphs.history(projectId,versionId));return;}
         if(!action){json(res,200,taskGraphs.read(projectId,versionId,revision));return;}
-        // Facts come only from recorded progress. Nothing is marked done until the Continuous Quality Gate (backlog 8) defines it.
-        const nodes=new Set(taskGraphs.read(projectId,versionId,revision).nodes.map(node=>node.taskId));
-        const reasons:Partial<Record<string,string>>={lost:'TASK_RUN_LOST',error:'TASK_RUN_FAILED',verification_failed:'TASK_VERIFICATION_FAILED'};
-        const blocked=progress.read(projectId,{}).tasks.filter(task=>nodes.has(task.id)&&reasons[task.stage]).map(task=>({taskId:task.id,reasonCodes:[reasons[task.stage]!]}));
-        json(res,200,taskGraphs.view(projectId,versionId,{verifiedDoneIds:[],blocked},revision));return;
+        json(res,200,progress.graph(projectId,versionId,revision).state);return;
       }
       if(req.method==='GET'&&goalRoute){
         if(url.search)throw new AppError('INVALID_FIELDS',400);

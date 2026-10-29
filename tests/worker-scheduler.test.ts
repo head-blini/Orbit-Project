@@ -1,8 +1,9 @@
+import {ProjectProgressService} from '../server/project-progress.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {randomUUID} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {join} from 'node:path';
-import {chmodSync,readdirSync} from 'node:fs';
+import {chmodSync,readdirSync,mkdirSync,writeFileSync} from 'node:fs';
 import {claudeFixture,FakeClaudeRun,outcome,tick,planningInput} from './claude-task-fixture.ts';
 import {CapabilityExecutionService} from '../server/capability-execution.ts';
 import {CapabilityRoutingService} from '../server/capability-routing.ts';
@@ -26,7 +27,7 @@ function setup(barrier?:Promise<void>){
  const batch:ApprovedExecutionBatch={id:randomUUID(),projectId:f.project.id,planningVersionId:version.id,planningHash:version.contentHash,graphRevision:1,taskIds:tasks.map(t=>t.id),contractDigests:[],inputArtifactHashes:[],runtimeChoices:tasks.map(t=>({taskId:t.id,runtimeId:'claude-code'})),parallelLimit:2};
  const scheduler=new WorkerScheduler(f.store,f.projects,execution);
  const claims=(i:number):WorkerResourceClaim[]=>[{kind:'isolated_folder',host:'local',path:resolveWorkerPath(f.project.path,join(generalAttemptPath(f.project.path,plans[i].id),'output'),true)}];
- const submit=(i:number,s=scheduler)=>s.submit({batch,executionId:plans[i].id,approval:{confirmed:true,expectedPlanDigest:plans[i].planDigest},claims:claims(i),verifiedDoneIds:[]});
+ const submit=(i:number,s=scheduler)=>s.submit({batch,executionId:plans[i].id,approval:{confirmed:true,expectedPlanDigest:plans[i].planDigest},claims:claims(i)});
  return {...f,tasks,version,registry,plans,batch,execution,scheduler,runners,paths,guards,claims,submit,async close(){for(const r of runners)r.finish(outcome('interrupted'));await tick();const writable=(p:string)=>{chmodSync(p,0o700);for(const e of readdirSync(p,{withFileTypes:true}))if(e.isDirectory())writable(join(p,e.name));};writable(f.dir);await f.close();}};
 }
 
@@ -49,11 +50,12 @@ test('AX01: two independent native-loop fakes overlap behind a barrier; dependen
  }finally{release();await f.close();}
 });
 
-test('stale baseline after reservation refuses dispatch and retains ownership',async()=>{
+test('stale baseline after reservation refuses dispatch and releases with not-dispatched evidence',async()=>{
  const f=setup();try{
   f.store.on('event',event=>{if(event.kind==='worker.reserved')f.studio.mutate(f.project.id,'plans',f.version.id,'revisions',{requestId:randomUUID(),expectedRevision:1,input:planningInput});});
   await assert.rejects(f.submit(0),/STALE|CHANGED/);assert.equal(f.runners.length,0);
   assert.equal(f.scheduler.list().length,1);
+  assert.equal(f.scheduler.list()[0].state,'released');assert.equal(f.scheduler.list()[0].evidence?.kind,'not_dispatched');
  }finally{await f.close();}
 });
 
@@ -88,7 +90,7 @@ test('reservation generations fence late pre-spawn callbacks and changed request
  const f=setup();try{
   const a=await f.submit(0);new WorkerScheduler(f.store,f.projects,f.execution);
   assert.throws(f.guards[0],/FENCE_STALE/);
-  await assert.rejects(f.scheduler.submit({batch:{...f.batch,parallelLimit:1},executionId:f.plans[0].id,approval:{confirmed:true,expectedPlanDigest:f.plans[0].planDigest},claims:f.claims(0),verifiedDoneIds:[]}),/IDEMPOTENCY_CONFLICT/);
+  await assert.rejects(f.scheduler.submit({batch:{...f.batch,parallelLimit:1},executionId:f.plans[0].id,approval:{confirmed:true,expectedPlanDigest:f.plans[0].planDigest},claims:f.claims(0)}),/IDEMPOTENCY_CONFLICT/);
   assert.equal(f.scheduler.read(a.reservationId).state,'lost_unknown');
  }finally{await f.close();}
 });
@@ -169,7 +171,7 @@ test('code batch freezes approved workspace base, uses the existing single Codex
   const plans=tasks.map(t=>execution.plan(project.id,{requestId:randomUUID(),routeId:routing.recommend(project.id,{requestId:randomUUID(),taskId:t.id,text:'코드 구현'},registry).id,workspaceId:workspace!.id}));
   const scheduler=new WorkerScheduler(store,projects,execution),batch:ApprovedExecutionBatch={id:randomUUID(),projectId:project.id,planningVersionId:plan.id,planningHash:plan.contentHash,graphRevision:1,taskIds:tasks.map(t=>t.id),contractDigests:[],inputArtifactHashes:[],runtimeChoices:tasks.map(t=>({taskId:t.id,runtimeId:'codex'})),parallelLimit:2};
   const repositoryId=repositoryIdentity(join(project.path,'.git')).repositoryId;
-  const submit=(i:number)=>scheduler.submit({batch,executionId:plans[i].id,approval:{confirmed:true,expectedPlanDigest:plans[i].planDigest},verifiedDoneIds:[],claims:[{kind:'repository_file',repositoryId,path:resolveWorkerPath(project.path,`file-${i}.txt`),mode:'write'}]});
+  const submit=(i:number)=>scheduler.submit({batch,executionId:plans[i].id,approval:{confirmed:true,expectedPlanDigest:plans[i].planDigest},claims:[{kind:'repository_file',repositoryId,path:resolveWorkerPath(project.path,`file-${i}.txt`),mode:'write'}]});
   const a=await submit(0);assert.equal(a.state,'running');
   const run=store.findRequest(a.attempt.dispatchRequestId)!.run,worker=store.workspaces().find(w=>w.id===run.workspaceId)!;
   assert.notEqual(worker.id,workspace!.id);assert.equal(worker.baseSha,workspace!.baseSha);
@@ -192,7 +194,7 @@ test('lost attempt keeps conflicting claims while disjoint claims remain usable'
  const f=setup();try{
   const a=await f.submit(0);f.runners[0].finish(outcome('unknown'));await tick();f.scheduler.reconcile();
   assert.equal(f.scheduler.read(a.reservationId).state,'lost_unknown');
-  await assert.rejects(f.scheduler.submit({batch:f.batch,executionId:f.plans[1].id,approval:{confirmed:true,expectedPlanDigest:f.plans[1].planDigest},claims:f.claims(0),verifiedDoneIds:[]}),/RESOURCE_CONFLICT/);
+  await assert.rejects(f.scheduler.submit({batch:f.batch,executionId:f.plans[1].id,approval:{confirmed:true,expectedPlanDigest:f.plans[1].planDigest},claims:f.claims(0)}),/RESOURCE_CONFLICT/);
   await f.submit(1);assert.equal(f.runners.length,2);
  }finally{await f.close();}
 });
@@ -221,5 +223,33 @@ test('late output path substitution is refused immediately before runtime dispat
    const path=join(generalAttemptPath(f.project.path,f.plans[0].id),'output');rmSync(path,{recursive:true});symlinkSync(f.dir,path,'dir');
   }});
   const result=await f.submit(0);assert.equal(result.state,'lost_unknown');assert.equal(f.runners.length,0);
+ }finally{await f.close();}
+});
+
+for(const scenario of [{staleAt:0,fault:''},{staleAt:2,fault:''},{staleAt:4,fault:''},{staleAt:0,fault:'not-integrated'},{staleAt:0,fault:'hash-changed'},{staleAt:0,fault:'input-missing'}])test(`fresh completion reader: stale at ${scenario.staleAt}, output ${scenario.fault||'valid'}`,async()=>{
+ const {staleAt,fault}=scenario;
+ const f=setup();try{
+  const progress=new ProjectProgressService(f.store,f.studio),hash=(v:unknown)=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
+  mkdirSync(join(f.project.path,'inputs/output'),{recursive:true});if(fault!=='input-missing')writeFileSync(join(f.project.path,'inputs/output/report.txt'),'bound output');
+  mkdirSync(join(f.project.path,'output'),{recursive:true});writeFileSync(join(f.project.path,'output/report.txt'),'bound output');
+  const manifest={files:[{path:'output/report.txt',status:'present',sha256:createHash('sha256').update('bound output').digest('hex'),outOfScope:false}],sourceDigest:'source',reservationId:'predecessor',inputsUnchanged:true,outOfScope:false};
+  f.store.db.exec('CREATE TABLE IF NOT EXISTS integration_queue(body TEXT)');
+  f.store.db.prepare('INSERT INTO integration_queue(body) VALUES(?)').run(JSON.stringify({projectId:f.project.id,status:fault==='not-integrated'?'queued':'applied',space:{attemptId:'predecessor',kind:'general'},manifest}));
+  if(fault==='hash-changed')writeFileSync(join(f.project.path,'output/report.txt'),'changed');
+  let reads=0;
+  const reader={graph:(project:string,version:string)=>{
+   const snapshot=progress.graph(project,version);reads++;
+   if(staleAt&&reads>=staleAt)return snapshot;
+   const completion=snapshot.progress.tasks[0].completion!;
+   completion.verifiedDone=true;completion.binding.artifactId='predecessor';completion.binding.artifactDigest=hash(manifest);
+   snapshot.state.nodes=snapshot.state.nodes.map(n=>n.taskId===f.tasks[0].id?{taskId:n.taskId,state:'done'}:n.taskId===f.tasks[2].id?{taskId:n.taskId,state:'ready'}:n);
+   return snapshot;
+  }};
+  const scheduler=new WorkerScheduler(f.store,f.projects,f.execution,undefined,reader);
+  if(fault){await assert.rejects(f.submit(2,scheduler),/DEPENDENCY_OUTPUT_/);assert.equal(f.runners.length,0);
+   if(fault==='input-missing'){assert.equal(scheduler.list()[0].state,'released');assert.equal(scheduler.list()[0].evidence?.kind,'not_dispatched');}
+   else assert.equal(scheduler.list().length,0);
+  }else if(staleAt){await assert.rejects(f.submit(2,scheduler),/DEPENDENCIES_WAITING/);assert.equal(f.runners.length,0);assert.equal(scheduler.list()[0].state,'released');assert.equal(scheduler.list()[0].evidence?.kind,'not_dispatched');}
+  else{await f.submit(2,scheduler);assert.equal(f.runners.length,1);assert.ok(reads>=4);}
  }finally{await f.close();}
 });
