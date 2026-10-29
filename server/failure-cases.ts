@@ -90,7 +90,7 @@ export class FailureCaseStore implements FailureCaseReader {
     return {id:caseId,deleted:true};
   }
   /** Read-only: hashes the current source body, never returns or stores it. */
-  private sourceBodySha256(table:FailureCaseSourceTable,recordId:string):string{
+  sourceBodySha256(table:FailureCaseSourceTable,recordId:string):string{
     const source=SOURCES[table];let row:Record<string,unknown>|undefined;
     try{row=this.store.db.prepare(`SELECT ${source.body} AS body FROM ${table} WHERE ${source.id}=?`).get(recordId);}
     catch{row=undefined;}// A missing source table is the same as a missing record.

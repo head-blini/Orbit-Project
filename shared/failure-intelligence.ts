@@ -178,3 +178,11 @@ export function ruleHypotheses(families:readonly FailureFamily[]):Hypothesis[] {
   }
   return result;
 }
+
+/** Browser-safe HTTP view (FE-4). Counts split real (native/local) from mock/unknown; no raw text, runIds or requestIds. */
+export interface FailureFamilyView {
+  familyId:string;category:FailureCategory;code:string;source:FailureSource;commandIdOrGate:string|null;runtime:string|null;
+  taskId:string|null;bindingDigest:string;realCount:number;mockCount:number;unknownCount:number;lastSeen:string;failureIds:string[];realFailureIds:string[];
+}
+export interface FailureCaseView {id:string;familyId:string;failureId:string;createdAt:string;sourceTable:string;}
+export interface FailureIndexView {projectId:string;families:FailureFamilyView[];hypotheses:Hypothesis[];cases:FailureCaseView[];}

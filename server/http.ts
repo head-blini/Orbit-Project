@@ -28,6 +28,7 @@ import {controlPlaneStatus} from './control-plane.ts';
 import {GoalService} from './goal-service.ts';
 import {TaskGraphService} from './task-graph.ts';
 import {ProjectProgressService} from './project-progress.ts';
+import {FailureIntelligenceService} from './failure-intelligence-service.ts';
 import {AppPreviewHost} from './app-preview.ts';
 import {assertGitProject} from './projects.ts';
 import {quotaSignal,type ProgressSignals} from '../shared/project-progress.ts';
@@ -48,6 +49,7 @@ export function createHttpServer(controller:Controller,assets:string,options:{wo
   const taskGraphs=new TaskGraphService(controller.store);
   // Partial controllers (tests, embedded hosts) fall back to a reader without completion policy, i.e. 'wait'.
   const progress=controller.progress??new ProjectProgressService(controller.store,studio,{deliverables:id=>controller.deliverables(id),verification:(workspaceId,runId)=>controller.verification.view(workspaceId,runId)});
+  const failureIntel=new FailureIntelligenceService(controller.store);
   const goals=new GoalService(controller.store,{
     progress:id=>progress.read(id,{}),deliverables:id=>controller.deliverableVersions?.references(id)??[],
   });
@@ -131,6 +133,12 @@ export function createHttpServer(controller:Controller,assets:string,options:{wo
         if(!controller.store.projects().some(p=>p.id===qualityRoute[1]))throw new AppError('PROJECT_NOT_FOUND',404);
         json(res,200,{records:controller.qualityLoops.records(qualityRoute[1])});return;
       }
+      const failureIndexRoute=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/failure-index$/);
+      if(req.method==='GET'&&failureIndexRoute){
+        if(url.search)throw new AppError('INVALID_FIELDS',400);
+        json(res,200,failureIntel.view(failureIndexRoute[1]));return;
+      }
+      const failureCaseRoute=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/failure-cases(?:\/([A-Za-z0-9][A-Za-z0-9_.:-]{0,127})\/delete)?$/);
       const handoffLog=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/tasks\/([a-f0-9-]{36})\/handoff-history$/);
       if(req.method==='GET'&&handoffLog){
         if(url.search)throw new AppError('INVALID_FIELDS',400);
@@ -197,6 +205,12 @@ export function createHttpServer(controller:Controller,assets:string,options:{wo
         if(observeDeliverables){
           if(url.search)throw new AppError('INVALID_FIELDS',400);exact(data,[]);
           json(res,200,controller.observeDeliverables(observeDeliverables[1]));return;
+        }
+        if(failureCaseRoute){
+          if(url.search)throw new AppError('INVALID_FIELDS',400);
+          if(failureCaseRoute[2]){exact(data,['confirmed']);json(res,200,failureIntel.deleteCase(failureCaseRoute[1],failureCaseRoute[2],data.confirmed as boolean));return;}
+          exact(data,['requestId','failureId','confirmed']);
+          json(res,200,failureIntel.createCase(failureCaseRoute[1],data as {requestId:string;failureId:string;confirmed:boolean}));return;
         }
         if(qualityRoute){
           if(url.search)throw new AppError('INVALID_FIELDS',400);
