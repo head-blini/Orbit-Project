@@ -1,3 +1,4 @@
+import type {ToolKey,ToolGrant,ToolInvocationRecord} from './tool-capabilities.ts';
 import type {QualityEvidenceBinding, QualityEvidenceSource, QualityFreshness, QualityProgress, QualityStatus} from './quality-progress.ts';
 import type {QualityLoopRecord, QualityModelEvidence} from './quality-loop-record.ts';
 import type {CheckRecord, VerificationApproval, VerificationCommandPreview} from './verification.ts';
@@ -9,6 +10,7 @@ export type CompletionGateId = CodeGate | typeof GENERAL_GATES[number];
 export interface CompletionPolicy {
   projectKind:'code'|'general';
   requiredGates:CompletionGateId[];
+  requiredTools?:ToolKey[];
   gateCommandMap:Partial<Record<CodeGate, string[]>>;
   notApplicable:{gate:CompletionGateId;reason:string;approvedBy:string;approvedAt:string}[];
   requireIndependentReview:boolean;
@@ -27,7 +29,11 @@ export interface CompletionGate {
   source:QualityEvidenceSource;freshness:QualityFreshness;blockers:string[];
 }
 export type CompletionDecision = Omit<CompletionGate, 'id'>;
+export interface CompletionToolInvocation extends ToolInvocationRecord {
+  id:string;projectId:string;taskId:string;runId:string;planningContentHash:string;grant:ToolGrant|null;
+}
 export interface TaskCompletion {
+  tools?:(CompletionDecision & {key:ToolKey})[];
   binding:CompletionBinding;policyDigest:string;gates:CompletionGate[];qualityPassed:boolean;
   independentReview:CompletionDecision;userApproval:CompletionDecision;verifiedDone:boolean;reasonCodes:string[];
 }
@@ -38,6 +44,7 @@ export type CompletionLoop = Pick<QualityLoopRecord, 'id'|'projectId'|'taskId'|'
  * Policy and bindings must come from trusted approved server readers, never worker claims.
  */
 export interface CompletionEvidence {
+  toolInvocations?:CompletionToolInvocation[];
   quality:QualityProgress;
   bindings:Record<string, CompletionBinding>;
   producer?:{binding:CompletionBinding;model:QualityModelEvidence};

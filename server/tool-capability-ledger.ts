@@ -9,6 +9,16 @@ const keyId=(key:ToolKey)=>JSON.stringify([key.runtimeId,key.kind,key.itemId]);
 const bySort=(a:string,b:string)=>a<b?-1:a>b?1:0;
 export const itemDigest=(meta:ToolItemMeta):string=>createHash('sha256').update(JSON.stringify([meta.kind,meta.id,meta.scope??null,meta.handlerType??null,meta.nativeTrust??null,meta.pluginOwned??null,meta.runtimeVersion??null,meta.adapterRevision??null])).digest('hex');
 
+/** Verification consumes journal proof, never a launch result or an active permission alone. */
+export function toolInvocationVerified(record:ToolInvocationRecord,grant:ToolGrant|null|undefined):boolean {
+  return !!grant&&toolGrantable(record.key.runtimeId,record.key.kind)&&keyId(grant.key)===keyId(record.key)
+    &&grant.grantId===record.grantId&&grant.itemDigest===record.itemDigest
+    &&record.evidenceSource==='native'&&record.nativeObserved===true&&record.callCompleted===true
+    &&!!record.invocationId&&!!record.approvedDigest&&record.bindingDigest===record.approvedDigest
+    &&((grant.state===undefined||grant.state==='active')&&!grant.consumedBy
+      ||grant.state==='used'&&grant.consumedBy?.invocationId===record.invocationId&&grant.consumedBy.approvalDigest===record.approvedDigest);
+}
+
 /** Pure. installed!=permitted!=invoked!=verified; no state promotes another. 'local' evidence counts as unknown. */
 export function aggregate(sections:readonly ToolDiscoverySection[],grants:readonly ToolGrant[],records:readonly ToolInvocationRecord[]):ToolAggregate {
   const keys=new Map<string,ToolKey>(),current=new Map<string,string>(),sectionStatus=new Map<string,string>();
@@ -20,10 +30,10 @@ export function aggregate(sections:readonly ToolDiscoverySection[],grants:readon
     const digest=current.get(id);
     const installed=digest!==undefined?'discovered':sectionStatus.get(JSON.stringify([key.runtimeId,key.kind]))==='available'?'absent':'unknown';
     // grant is void unless its digest equals the current metadata digest
-    const grant=toolGrantable(key.runtimeId,key.kind)&&digest!==undefined?sortedGrants.find(g=>keyId(g.key)===id&&g.itemDigest===digest)??null:null;
+    const grant=toolGrantable(key.runtimeId,key.kind)&&digest!==undefined?sortedGrants.find(g=>(g.state===undefined||g.state==='active')&&keyId(g.key)===id&&g.itemDigest===digest)??null:null;
     const invoked={native:0,mock:0,unknown:0};let verified=0;
     for(const record of records){if(keyId(record.key)!==id)continue;
-      if(record.evidenceSource==='native'){invoked.native++;if(grant&&record.grantId===grant.grantId&&record.itemDigest===grant.itemDigest)verified++;}
+      if(record.evidenceSource==='native'){invoked.native++;if(digest===record.itemDigest&&sortedGrants.some(g=>toolInvocationVerified(record,g)))verified++;}
       else if(record.evidenceSource==='mock')invoked.mock++;else invoked.unknown++;}
     return {key,installed,permitted:grant?{grantId:grant.grantId,itemDigest:grant.itemDigest}:null,invoked,verified};
   });

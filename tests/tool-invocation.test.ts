@@ -1,3 +1,4 @@
+import {AppError} from '../server/errors.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -181,5 +182,45 @@ test('invoke consumes the grant exactly once through the shared T2 transition',a
     assert.equal(f.store.db.prepare('SELECT state FROM tool_grants WHERE grant_id=?').get(g.grantId)!.state,'used');
     await assert.rejects(f.service.invoke({...input,requestId:'invoke2'}),/ROUTE_CHANGED/);
     assert.equal(f.store.eventsAfter(0).filter(e=>e.kind==='tool.grant.used').length,1);assert.equal(f.state.calls,1);
+  }finally{f.store.close();}
+});
+
+test('permission preview then approval creates a bound invocation preview and durable consumption receipt',async()=>{
+  const f=fixture();try{
+    const preview=f.service.previewApproval(selection);
+    assert.equal(f.grants.validFor(key,itemDigest(original),'p1','t1'),null);
+    const input={requestId:'approval1',previewId:preview.previewId,expectedDigest:preview.digest,confirmed:true as const};
+    const approved=f.service.approve(input);
+    assert.deepEqual(f.service.approve(input),approved);
+    const result=await f.service.invoke({requestId:'invoke1',previewId:approved.previewId,expectedDigest:approved.digest,confirmed:true});
+    const receipt=f.store.db.prepare('SELECT * FROM tool_grant_consumptions WHERE grant_id=?').get(result.grantId)!;
+    assert.equal(receipt.invocation_id,result.invocationId);assert.equal(receipt.approval_digest,result.digest);
+  }finally{f.store.close();}
+});
+test('approval refuses stale metadata or baseline without granting',()=>{
+  const f=fixture();try{
+    const preview=f.service.previewApproval(selection);f.state.planning=hash('new');
+    assert.throws(()=>f.service.approve({requestId:'approval1',previewId:preview.previewId,expectedDigest:preview.digest,confirmed:true}),/ROUTE_CHANGED/);
+    assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM tool_grants').get()!.n,0);
+  }finally{f.store.close();}
+});
+
+test('workspace or acceptance context changes reject the approved invocation without launch',async()=>{
+  const f=fixture();try{
+    let context='workspace-and-acceptance';
+    const service=new ToolInvocationService(f.store,{...f.ports,launchContext:()=>context});
+    f.grant();const p=service.preview(selection);context='changed';
+    await assert.rejects(service.invoke({requestId:'invoke1',previewId:p.previewId,expectedDigest:p.digest,confirmed:true}),/ROUTE_CHANGED/);
+    assert.equal(f.state.calls,0);
+  }finally{f.store.close();}
+});
+
+test('context becoming unavailable at invocation is ROUTE_CHANGED and does not consume permission',async()=>{
+  const f=fixture();try{
+    let unavailable=false;
+    const service=new ToolInvocationService(f.store,{...f.ports,launchContext:()=>{if(unavailable)throw new AppError('ACCEPTANCE_FILE_UNAVAILABLE',409);return 'context';}});
+    const grant=f.grant(),p=service.preview(selection);unavailable=true;
+    await assert.rejects(service.invoke({requestId:'invoke1',previewId:p.previewId,expectedDigest:p.digest,confirmed:true}),/ROUTE_CHANGED/);
+    assert.equal(f.grants.validFor(key,itemDigest(original),'p1','t1')?.grantId,grant.grantId);assert.equal(f.state.calls,0);
   }finally{f.store.close();}
 });

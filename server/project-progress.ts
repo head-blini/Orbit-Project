@@ -1,3 +1,4 @@
+import {readRecordedToolInvocations} from './tool-evidence.ts';
 import {createHash} from 'node:crypto';
 import {CODE_GATES,GENERAL_GATES,type CompletionPolicy,type CompletionEvidence,type CompletionBinding} from '../shared/task-completion.ts';
 import {completionPolicyDigest,evaluateTaskCompletion} from './task-completion.ts';
@@ -32,7 +33,8 @@ export function readCompletionPolicies(raw:string|undefined,commands?:(path:stri
   for(const entry of values){
    if(!exact(entry,['projectPath','policy'])||typeof entry.projectPath!=='string'||!isAbsolute(entry.projectPath)||/[\x00-\x1f]/.test(entry.projectPath))throw Error();
    const p=entry.policy;
-   if(!exact(p,['projectKind','requiredGates','gateCommandMap','notApplicable','requireIndependentReview','dependencyRelease'])
+   if(!exact(p,['projectKind','requiredGates','gateCommandMap','notApplicable','requireIndependentReview','dependencyRelease',...(Object.hasOwn(p,'requiredTools')?['requiredTools']:[])])
+    ||(p.requiredTools!==undefined&&(!Array.isArray(p.requiredTools)||p.requiredTools.some((k:any)=>!exact(k,['runtimeId','kind','itemId'])||!['codex','claude-code'].includes(k.runtimeId)||!['mcp','skill','plugin','hook','subagent','slash_command'].includes(k.kind)||typeof k.itemId!=='string'||!/^[a-f0-9]{64}$/.test(k.itemId))||new Set(p.requiredTools.map((k:any)=>JSON.stringify([k.runtimeId,k.kind,k.itemId]))).size!==p.requiredTools.length))
     ||!['code','general'].includes(p.projectKind)||typeof p.requireIndependentReview!=='boolean'
     ||!['wait','quality_passed','quality_passed_and_user_approval'].includes(p.dependencyRelease)
     ||!Array.isArray(p.requiredGates)||!p.requiredGates.length||new Set(p.requiredGates).size!==p.requiredGates.length
@@ -150,6 +152,7 @@ export class ProjectProgressService {
         {graphRevision:graph&&graph.planningVersionId===saved.planningVersionId&&graph.nodes.some(n=>n.taskId===saved.id)?String(graph.revision):null,contractDigest:graph?digest([...contracts].map(([id,digest])=>({id,digest}))):null,
          policyDigest:completionPolicyDigest(policy),configDigest:run?.workspaceId?digest((view?.commands??[]).map(c=>({id:c.id,digest:c.configDigest}))):this.qualityReaders.checkerDigest??generalCheckerDigest(),
          artifactScope:project.kind==='code'?'workspace':'task_manifest',baseSha:this.store.workspaces().find(w=>w.id===run?.workspaceId)?.baseSha??null,inputSnapshotDigest});
+      if(run&&policy.requiredTools?.length)evidence={...evidence,toolInvocations:readRecordedToolInvocations(this.store,run)};
       task.completion=evaluateTaskCompletion(evidence,policy,binding);
       if(!task.planCurrent||plan?.state!=='approved'||policy.projectKind!==project.kind){
         task.completion.qualityPassed=false;task.completion.verifiedDone=false;

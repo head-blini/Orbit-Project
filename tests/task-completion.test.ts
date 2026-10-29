@@ -138,3 +138,27 @@ for(const defect of ['none','format-only source','native semantic','missing sema
  const result=evaluateCandidateCompletion(evidence,candidate.policy,candidate.binding,{subject:'integration_candidate',producer:'orbit_merge',integrationId:candidate.binding.artifactId!,candidateDigest:candidate.binding.artifactDigest!,targetDigest:null,sourceBinding:source.binding},source.evaluate());
  assert.equal(result.verifiedDone,defect==='none');
 });
+
+test('empty requiredTools preserves completion bytes and policy digest',()=>{
+  const f=fixture(),before=JSON.stringify(f.evaluate()),digest=completionPolicyDigest(f.policy);
+  f.policy.requiredTools=[];f.evidence.toolInvocations=[];
+  assert.equal(JSON.stringify(f.evaluate()),before);assert.equal(completionPolicyDigest(f.policy),digest);
+});
+for(const source of ['native','mock','unknown'] as const)test(`required tool ${source} evidence is gated independently`,()=>{
+  const f=fixture(),key={runtimeId:'codex' as const,kind:'mcp' as const,itemId:'a'.repeat(64)};
+  f.policy.requiredTools=[key];f.rebindPolicy();
+  assert.equal(f.evaluate().verifiedDone,false);
+  f.evidence.toolInvocations=[{id:'invocation',key,evidenceSource:source,grantId:'grant',itemDigest:'item',invocationId:'invocation',approvedDigest:'approval',bindingDigest:'approval',nativeObserved:true,callCompleted:true,
+    projectId:f.binding.projectId!,taskId:f.binding.taskId!,runId:f.binding.runId!,planningContentHash:f.binding.planningContentHash!,
+    grant:{grantId:'grant',key,itemDigest:'item',state:'used',consumedBy:{invocationId:'invocation',approvalDigest:'approval'}}}];
+  const result=f.evaluate();assert.equal(result.verifiedDone,source==='native');
+  assert.equal(result.tools?.[0].status,source==='native'?'passed':'recorded');
+  if(source!=='native')assert.ok(result.reasonCodes.includes('CQG_TOOL_EVIDENCE_NOT_NATIVE'));
+  f.evidence.toolInvocations[0].planningContentHash='stale';assert.equal(f.evaluate().verifiedDone,false);
+});
+
+for(const kind of ['code','general'] as const)test(`${kind}: unrequired unknown tools cannot alter existing completion bytes`,()=>{
+  const f=fixture(kind),before=JSON.stringify(f.evaluate());f.policy.requiredTools=[];
+  f.evidence.toolInvocations=[{id:'unrequired',projectId:'project',taskId:'task',runId:'run-producer',planningContentHash:'baseline',key:{runtimeId:'codex',kind:'mcp',itemId:'fixture'},evidenceSource:'unknown',grantId:null,itemDigest:null,grant:null}];
+  assert.equal(JSON.stringify(f.evaluate()),before);
+});

@@ -314,6 +314,12 @@ export function createHttpServer(controller:Controller,assets:string,options:{wo
           if(workerRoute[3]==='submit'){json(res,200,await controller.submitWorkerBatch(workerRoute[1],workerRoute[2],data));return;}
           throw new AppError('INVALID_FIELDS',400);
         }
+        const toolRoute=url.pathname.match(/^\/api\/tool-invocations\/(preview|approve|invoke)$/);
+        if(toolRoute){
+          if(url.search)throw new AppError('INVALID_FIELDS',400);
+          const service=controller.toolInvocations;
+          json(res,200,toolRoute[1]==='preview'?service.previewApproval(data):toolRoute[1]==='approve'?service.approve(data):await service.invoke(data));return;
+        }
         if(invocationRoute){if(url.search)throw new AppError('INVALID_FIELDS',400);json(res,200,await capabilityInvocation.invoke(invocationRoute[1],data as unknown as CapabilityInvocationInput));return;}
         if(executionRoute){
           if(url.search)throw new AppError('INVALID_FIELDS',400);
