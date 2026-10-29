@@ -43,6 +43,7 @@ The wrapper prints JSON: `runId`, `status` (`completed|failed|quota_exhausted|pr
 
 1. Read `last.md`. Codex's own claims are not evidence.
 2. Re-run the task's verification commands yourself (typecheck, test, build) in that worktree.
+   Also run `node scripts/orchestrator/select-regression.mjs --base <base> --run` in the worktree: it selects tests that import or read the changed server/shared files plus a mandatory set for gate files (`--json` shows reasons, `--also <test>` appends the task's own tests).
 3. If `provider_capacity` (model at capacity), the turn never ran: check the worktree is unchanged, then retry once after a wait with the same prompt. Do not switch models silently.
 4. If `quota_exhausted`, do not retry automatically. Record a checkpoint and move to work that does not need Codex.
 5. If `failed`, read `stderr.log` and the tail of `events.jsonl`, then decide: fix the prompt and use `--resume`, or reassign.
