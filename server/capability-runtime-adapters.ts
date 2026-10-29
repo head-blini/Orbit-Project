@@ -1,3 +1,4 @@
+import type {WorkerDispatchContext} from './worker-scheduler.ts';
 import type {Controller} from './controller.ts';
 import {terminal,type Run} from '../shared/types.ts';
 import type {RuntimeOperationObservation} from '../shared/runtime-operation.ts';
@@ -65,14 +66,16 @@ export class CapabilityRuntimeAdapters {
   const issue=!entry?'ADAPTER_NOT_REGISTERED':!entry.enabled?'ADAPTER_DISABLED':!safeVersion?'RUNTIME_VERSION_UNKNOWN':!compatible?'RUNTIME_VERSION_UNSUPPORTED':null;
   return {runtimeId,adapterId:entry?.definition.adapterId??null,revision:this.revisions.get(runtimeId)??0,version:safeVersion,compatible,issue,capabilities:[...(entry?.definition.capabilities??[])]};
  }
- async dispatch(runtimeId:RuntimeId,projectId:string,taskId:string,input:{requestId:string;workspaceId?:string;expectedAcceptanceDigest?:string}):Promise<Run>{
+ async dispatch(runtimeId:RuntimeId,projectId:string,taskId:string,input:{requestId:string;workspaceId?:string;expectedAcceptanceDigest?:string},worker?:WorkerDispatchContext):Promise<Run>{
   const contract=this.snapshot(runtimeId,this.observedVersions.get(runtimeId)??null);
   if(!contract.compatible)throw new AppError('CAPABILITY_RUNTIME_INCOMPATIBLE',409);
   if(!contract.capabilities.includes(runtimeId==='codex'?'execute.code':'execute.general'))throw new AppError('CAPABILITY_NOT_IMPLEMENTED',409);
   if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(key=>!['requestId','workspaceId','expectedAcceptanceDigest'].includes(key)))throw new AppError('INVALID_FIELDS',400);
   if(runtimeId==='codex'&&(typeof input.workspaceId!=='string'||!input.workspaceId)||runtimeId==='claude-code'&&Object.hasOwn(input,'workspaceId'))throw new AppError('RUNTIME_WORKSPACE_MISMATCH',409);
+  worker?.beforeDispatch();
   // Controller rechecks stored runtime selection and owns idempotency, policy and native execution.
-  return this.entries.get(runtimeId)!.definition.dispatch(projectId,taskId,input);
+  const dispatch=this.entries.get(runtimeId)!.definition.dispatch;
+  return worker?dispatch(projectId,taskId,input,worker):dispatch(projectId,taskId,input);
  }
  private ownedRun(runtimeId:RuntimeId,runId:string,projectId?:string):Run {
   if(!runtime(runtimeId))throw new AppError('INVALID_ADAPTER',400);

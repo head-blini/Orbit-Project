@@ -1,3 +1,4 @@
+import {assertWorkerOwnership,type WorkerDispatchContext} from './worker-scheduler.ts';
 import { createHash,randomUUID } from 'node:crypto';
 import {NativeLaunchNotStarted} from './native-launch-error.ts';
 import { basename } from 'node:path';
@@ -376,9 +377,9 @@ export class Controller {
       this.status(issue==='CODEX_NOT_INSTALLED'?'not_installed':issue==='CHATGPT_LOGIN_REQUIRED'?'auth_required':'error',issue);throw new AppError(issue,503);
     }
   }
-  taskVerificationPreview(projectId:string,taskId:string,workspaceId:string){
+  taskVerificationPreview(projectId:string,taskId:string,workspaceId:string,worker=false){
     assertGitProject(this.store,projectId);assertGitProject(this.store,workspaceId);
-    if(workspaceId!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);
+    if(!worker&&workspaceId!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);
     return this.verification.acceptance.preview(projectId,workspaceId,taskId);
   }
   claudeQuota(){return this.claudeTasks.quota();}
@@ -491,14 +492,29 @@ export class Controller {
     this.store.append('project.materials',null,{projectId,paths:items.map(item=>item.path)});return items;
   }
   deliverablePreview(projectId:string,path:string){if(!this.projects)throw new AppError('PROJECT_CREATION_UNAVAILABLE',409);return previewDeliverable(this.projects.generalProject(projectId).path,path);}
-  async submitTask(projectId:string,taskId:string,input:{requestId:string;workspaceId?:string;expectedAcceptanceDigest?:string}):Promise<Run>{
-    this.qualityAvailable();
+  /** Switch only the existing Codex channel. Claude attempts keep their own runners. */
+  async prepareWorkerWorkspace(worker:WorkerDispatchContext){
+    worker.beforeDispatch();this.idle();
+    const id=worker.space.workspaceId;
+    if(!id||!this.projects)throw new AppError('WORKSPACE_MISMATCH',409);
+    if(id!==this.workspaceId){
+      const w=this.projects.validate(id);this.switching=true;
+      try{
+        this.telemetry.disconnect();this.modelTracker.disconnect();
+        const rpc=this.rpc;this.rpc=null;++this.generation;if(rpc)await rpc.close();
+        worker.beforeDispatch();this.workspaceId=id;this.workspace=w.path;this.status('disconnected');
+      }finally{this.switching=false;}
+    }
+    await this.connect();worker.beforeDispatch();
+  }
+  async submitTask(projectId:string,taskId:string,input:{requestId:string;workspaceId?:string;expectedAcceptanceDigest?:string},worker?:WorkerDispatchContext):Promise<Run>{
+    this.qualityAvailable();assertWorkerOwnership(this.store,projectId,taskId,worker);
     if(this.store.projects().some(project=>project.id===projectId&&project.kind==='general')&&!Object.hasOwn(input,'workspaceId')){
       if(Object.keys(input).length!==1||!Object.hasOwn(input,'requestId'))throw new AppError('INVALID_FIELDS',400);
       this.planningSuggestions.ensureAvailable(projectId);
       // Dispatch must match the stored execution choice; never swap runtimes silently.
       if(this.aiPreferences.read(projectId).execution!=='claude-code')throw new AppError('RUNTIME_NOT_SUPPORTED',409);
-      return this.claudeTasks.submit(projectId,taskId,input.requestId);
+      return this.claudeTasks.submit(projectId,taskId,input.requestId,worker);
     }
     if(this.store.projects().some(project=>project.id===projectId&&project.kind==='code')&&this.aiPreferences.read(projectId).execution!=='codex')throw new AppError('RUNTIME_NOT_SUPPORTED',409);
     assertGitProject(this.store,projectId);assertGitProject(this.store,input.workspaceId);
@@ -510,10 +526,10 @@ export class Controller {
     const {prompt,...task}=new Studio(this.store).execution(projectId,taskId);
     const acceptance=this.taskVerificationPreview(projectId,taskId,workspace.id);
     if(acceptance?.digest!==input.expectedAcceptanceDigest)throw new AppError('ACCEPTANCE_PREVIEW_STALE',409);
-    return this.start({...input,prompt},task,acceptance??undefined);
+    return this.start({...input,prompt},task,acceptance??undefined,worker);
   }
   async submit(input:{requestId:string;prompt:string;workspaceId?:string|null}):Promise<Run>{return this.start(input);}
-  private async start(input:{requestId:string;prompt:string;workspaceId?:string|null},task?:Pick<Run,'taskId'|'planningVersionId'|'planningContentHash'|'requirementLabels'>,acceptance?:TaskVerificationPreview):Promise<Run>{
+  private async start(input:{requestId:string;prompt:string;workspaceId?:string|null},task?:Pick<Run,'taskId'|'planningVersionId'|'planningContentHash'|'requirementLabels'>,acceptance?:TaskVerificationPreview,worker?:WorkerDispatchContext):Promise<Run>{
     assertGitProject(this.store,input?.workspaceId);assertGitProject(this.store,this.workspaceId);
     if(typeof input?.requestId!=='string'||!/^[a-zA-Z0-9-]{8,80}$/.test(input.requestId)||typeof input.prompt!=='string'||!input.prompt.trim()||input.prompt.length>4000)throw new AppError('INVALID_PROMPT',400);
     if(containsCredential(input.prompt))throw new AppError('CREDENTIAL_LIKE_INPUT',400);
@@ -537,6 +553,7 @@ export class Controller {
     this.output.clear();this.deadline=setTimeout(()=>{void this.failTransport('RUN_TIMEOUT');},120000);
     try{
       this.store.append('run.runtime_source',run.id,{source:rpc.evidenceSource==='native'?'native':rpc.evidenceSource==='mock'?'mock':'unknown',interface:'codex.app_server'});
+      worker?.beforeDispatch();
       const result=await rpc.request('turn/start',{threadId:this.thread(),cwd:this.workspace,input:[{type:'text',text:input.prompt}],sandboxPolicy:this.sandbox(),approvalPolicy:this.approvalPolicy(),approvalsReviewer:'user'});
       if(typeof result.turn?.id!=='string')throw new Error('INVALID_TURN');
       this.telemetry.acknowledge(run.id,result.turn.id);
