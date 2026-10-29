@@ -250,10 +250,10 @@ export class Controller {
       ||(entry.name===tool.serverName?entry.runtimeStatus!=='ready':entry.runtimeStatus!=='disabled'||Object.keys(entry.tools).length>0))||remaining.size)throw new AppError('MCP_ISOLATION_REQUIRED',409);
     this.store.append('tool.launch.binding',run.id,{...tool.request,serverName:tool.serverName,threadId});
   }
-  private retireToolSession(runId:string){
+  private retireToolSession(runId:string,rpc:RpcPort|null=this.rpc){
     if(this.toolRun?.runId!==runId)return;
     this.toolRun=null;this.launchValidated=false;
-    const rpc=this.rpc;this.rpc=null;++this.generation;
+    this.rpc=null;++this.generation;
     this.toolClosing=Promise.resolve().then(async()=>{
       if(rpc)await rpc.close();
       if(this.store.unresolvedNativeConnections())this.soloLost=true;
@@ -1013,10 +1013,11 @@ export class Controller {
       return this.store.getRun(run.id)!;
     }catch(error){
       if(error instanceof AppError&&error.message==='LAUNCH_CONTEXT_CHANGED'){
-        clearTimeout(this.deadline);
+        this.clearDeadline();
         this.store.append('run.launch_refused',run.id,{code:'LAUNCH_CONTEXT_CHANGED'});
         this.store.updateRun(run.id,{execution:'failed'},'run.failed');
         this.telemetry.finish(run.id,false);this.modelTracker.finish(run.id,'failed');
+        this.retireToolSession(run.id);
         throw error;
       }
       const current=this.store.getRun(run.id)!;
@@ -1077,20 +1078,21 @@ export class Controller {
     return safeTextItems([...this.output.values()],final);
   }
   private clearDeadline(){if(this.deadline)clearTimeout(this.deadline);this.deadline=null;}
-  private loseActive(){
+  private loseActive(rpc:RpcPort|null=this.rpc){
     this.clearDeadline();const r=this.active();if(!r)return;
     this.soloLost=true;
     try{this.store.updateRun(r.id,{execution:'lost'},'run.lost');}
     catch{/* Keep the volatile denial; the durable nonterminal Run is quarantined on restart. */}
-    this.telemetry.finish(r.id,true);this.modelTracker.finish(r.id,'lost');
+    try{this.telemetry.finish(r.id,true);this.modelTracker.finish(r.id,'lost');}
+    finally{this.retireToolSession(r.id,rpc);}
   }
   private async failTransport(issue:string){
     const rpc=this.rpc;this.rpc=null;++this.generation;
-    try{this.loseActive();}catch{this.soloLost=true;}
+    try{this.loseActive(rpc);}catch{this.soloLost=true;}
     this.telemetry.disconnect();this.modelTracker.disconnect();
     try{this.status('error',issue);}catch{this.launchValidated=false;this.usage=unknownUsage();}
     // Closing the connection is best effort, never evidence permitting a new dispatch.
-    try{if(rpc)await rpc.close();}catch{/* The generation remains fenced and recovery stays required. */}
+    try{if(this.toolClosing)await this.toolClosing;else if(rpc)await rpc.close();}catch{/* The generation remains fenced and recovery stays required. */}
   }
-  async close(){await this.toolClosing;await this.qualityLoops.close();await this.claudeTasks.close();await this.planningSuggestions.close();await this.reviews.close();await this.workflows.close();await this.modelHub.close();await this.verification.close();this.loseActive();this.telemetry.disconnect();this.modelTracker.disconnect();const rpc=this.rpc;this.rpc=null;++this.generation;if(rpc)await rpc.close();this.provider='disconnected';this.subscriptionUsage.disconnect('codex');this.usagePending=null;this.launchValidated=false;this.clearExtensions();}
+  async close(){await this.toolClosing;await this.qualityLoops.close();await this.claudeTasks.close();await this.planningSuggestions.close();await this.reviews.close();await this.workflows.close();await this.modelHub.close();await this.verification.close();this.loseActive();await this.toolClosing;this.telemetry.disconnect();this.modelTracker.disconnect();const rpc=this.rpc;this.rpc=null;++this.generation;if(rpc)await rpc.close();this.provider='disconnected';this.subscriptionUsage.disconnect('codex');this.usagePending=null;this.launchValidated=false;this.clearExtensions();}
 }

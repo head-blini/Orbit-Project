@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {createHash,randomUUID} from 'node:crypto';
 import {readRecordedToolInvocations} from '../server/tool-evidence.ts';
 import {toolInvocationVerified} from '../server/tool-capability-ledger.ts';
+import {AppError} from '../server/errors.ts';
 for(const source of ['native','mock','unknown'] as const)test(`real controller launch profile with fake ${source} transport`,async()=>{
   const f=await toolFixture(source);try{
     const preview=f.controller.toolInvocations.previewApproval(f.selection);
@@ -93,3 +94,62 @@ test('next execution stays fenced until the tool session shutdown is observed',a
     await assert.rejects(f.controller.connect(),/SESSION_BUSY/);release();
   }finally{release();await f.close();}
 });
+
+function deferred(){
+  let resolve!:()=>void;
+  const promise=new Promise<void>(done=>{resolve=done;});
+  return {promise,resolve};
+}
+
+for(const outcome of ['completed','failed','interrupted','timeout','transport failure','interrupt failure','launch refused','lost','shutdown'] as const)
+  test(`tool ${outcome} clears its marker and fences execution until close completes`,async(t)=>{
+    const f=await toolFixture();
+    const closed=deferred();
+    const closing=deferred();
+    const started=deferred();
+    const close=f.rpc.close.bind(f.rpc),request=f.rpc.request.bind(f.rpc);
+    let terminalAction:Promise<unknown>|undefined;
+    try{
+      f.rpc.close=async()=>{closing.resolve();await closed.promise;await close();};
+      f.rpc.request=async(method,params)=>{
+        if(method==='config/read'&&outcome==='launch refused'){started.resolve();throw new AppError('LAUNCH_CONTEXT_CHANGED');}
+        if(method==='turn/start'){
+          started.resolve();
+          if(outcome==='transport failure')throw new Error('fixture transport failure');
+          return {turn:{id:'turn-fixture'}};
+        }
+        if(method==='turn/interrupt'&&outcome==='interrupt failure')throw new Error('fixture interrupt failure');
+        return request(method,params);
+      };
+      t.mock.timers.enable({apis:['setTimeout']});
+      const p=f.controller.toolInvocations.previewApproval(f.selection),a=f.controller.toolInvocations.approve({requestId:randomUUID(),previewId:p.previewId,expectedDigest:p.digest,confirmed:true});
+      const invocation=f.controller.toolInvocations.invoke({requestId:randomUUID(),previewId:a.previewId,expectedDigest:a.digest,confirmed:true});
+      await started.promise;
+      await new Promise<void>(resolve=>setImmediate(resolve));
+      const run=f.store.runs()[0];
+      if(outcome==='timeout')t.mock.timers.tick(120000);
+      else if(outcome==='interrupt failure')terminalAction=assert.rejects(f.controller.interrupt(run.id),/INTERRUPT_UNCERTAIN/);
+      else if(outcome==='lost')f.rpc.emit('closed');
+      else if(outcome==='shutdown')terminalAction=f.controller.close();
+      else if(outcome!=='transport failure'&&outcome!=='launch refused'){
+        if(outcome==='interrupted')await f.controller.interrupt(run.id);
+        f.rpc.emit('notification',{method:'turn/completed',params:{threadId:'thread-fixture',turn:{id:'turn-fixture',status:outcome}}});
+      }
+      // A native close event already observes transport closure; the other paths must await close().
+      if(outcome!=='lost')await closing.promise;
+      assert.equal(f.controller['toolRun'],null);
+      assert.equal(f.controller['launchValidated'],false);
+      assert.equal(f.controller['deadline'],null);
+      if(outcome!=='lost'){
+        await assert.rejects(f.controller.connect(),/SESSION_BUSY/);
+        await assert.rejects(f.controller.submit({requestId:randomUUID(),prompt:'Next run',workspaceId:f.workspace.id}),/SESSION_BUSY/);
+      }
+      const expected=outcome==='launch refused'?'failed':['completed','failed','interrupted'].includes(outcome)?outcome:'lost';
+      assert.equal(f.store.getRun(run.id)!.execution,expected);
+      if(outcome==='timeout')assert.ok(f.store.eventsAfter(0).some(e=>e.kind==='provider.status'&&e.data.issue==='RUN_TIMEOUT'));
+      closed.resolve();await terminalAction;await invocation;await f.controller['toolClosing'];
+      assert.equal(f.controller['toolClosing'],null);
+      if(expected==='lost')assert.throws(()=>f.controller.assertExecutionAvailable(),/SOLO_RECOVERY_REQUIRED/);
+      else assert.doesNotThrow(()=>f.controller.assertExecutionAvailable());
+    }finally{closed.resolve();t.mock.timers.reset();await terminalAction;await f.close();}
+  });
