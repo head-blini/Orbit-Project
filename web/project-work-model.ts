@@ -143,3 +143,32 @@ export function nextAction(progress:ProjectProgress|null,outputs:number):{text:s
   if(outputs)return {text:'결과물을 확인하세요',target:'results'};
   return {text:'추가 지시로 결과를 다듬으세요',target:'followup'};
 }
+
+/** Simple-mode one-line status. Never reports done unless the server completion verdict says so for the current baseline. */
+export function plainStatus(task:ProgressTask):{label:string;tone:'good'|'wait'|'bad'|'idle'}{
+  const v=completionView(task),q=taskQuality(task);
+  if(!task.planCurrent||task.stage==='revalidation_required'||v?.stale||q.phase==='stale')return {label:'기준이 바뀌어 다시 확인해야 함',tone:'wait'};
+  if(v?.done)return {label:'끝났고 확인됨',tone:'good'};
+  if(v)return {label:v.label.replace('완료 미인정','아직 완료로 인정되지 않음').replace('완료로 보지 않음','아직 완료 아님'),tone:'wait'};
+  if(task.stage==='verified')return {label:'검사는 통과 · 최종 완료 판정은 아직 없음',tone:'wait'};
+  return {label:({not_started:'아직 시작 안 함',quota_wait:'사용량 한도 대기',running:'AI가 작업 중',interrupt_requested:'중단 요청됨 · 종료 미확인',verifying:'결과 확인 중',
+    response_unverified:'AI 응답 받음 · 아직 확인 전',verification_failed:'확인 결과 문제 있음',interrupted:'중단됨',error:'오류로 멈춤',lost:'연결이 끊겨 결과를 알 수 없음'} as Record<string,string>)[task.stage]??'상태 미확인',
+    tone:['verification_failed','error','lost'].includes(task.stage)?'bad':task.stage==='running'||task.stage==='verifying'?'wait':'idle'};
+}
+
+/** A03/A11: tasks on an older baseline or with stale completion/quality/check evidence, and their re-verification state.
+ * Only server-recorded freshness is used; the cause of the change is not in ProjectProgress and is never guessed. */
+export type ReverifyState='needed'|'running';
+export interface ImpactItem {taskId:string;title:string;onOldBaseline:boolean;inProgress:boolean;reverify:ReverifyState;reasons:string[];oldRunIds:string[]}
+export function taskImpact(task:ProgressTask,currentPlanId:string|null):ImpactItem|null{
+  const v=completionView(task),q=taskQuality(task),reasons:string[]=[];
+  if(!task.planCurrent)reasons.push('작업이 이전 승인 기획 기준입니다');
+  if(task.verification==='stale'||task.stage==='revalidation_required')reasons.push('검사 결과가 현재 기준과 다릅니다');
+  if(v?.stale)reasons.push('서버 완료 판정의 근거가 오래되었습니다');
+  if(q.phase==='stale')reasons.push('품질 검증 결과가 이전 기준입니다');
+  if(!reasons.length)return null;
+  const inProgress=task.stage==='running'||task.stage==='interrupt_requested'||task.stage==='verifying';
+  // A run with no recorded planning version cannot be placed on either baseline; it is not listed as old.
+  const oldRunIds=currentPlanId?task.runs.filter(r=>r.planningVersionId&&r.planningVersionId!==currentPlanId).map(r=>r.id):[];
+  return {taskId:task.id,title:task.title,onOldBaseline:!task.planCurrent,inProgress,reverify:task.verification==='running'||task.stage==='verifying'||q.phase==='retest'?'running':'needed',reasons,oldRunIds};
+}
