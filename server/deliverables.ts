@@ -16,12 +16,15 @@ const textual=new Set(['text/markdown','text/plain','text/csv','application/json
 // Same spirit as the Diff filter: never list credentials, databases, keys or VCS internals.
 const sensitive=(name:string)=>name.startsWith('.')||/^(auth\.json|credentials(\..*)?)$/i.test(name)||/\.(sqlite(-wal|-shm)?|db(-wal|-shm)?|pem|key|p12|pfx|log)$/i.test(name);
 const MAX_FILES=500,MAX_DEPTH=3,MAX_HASH=32*1024*1024,MAX_PREVIEW=64_000;
+/** Largest file readDeliverable returns; bigger files are refused, never truncated. Equals MAX_HASH so the listed digest covers it. */
+export const MAX_DOWNLOAD=MAX_HASH;
 const mediaType=(path:string)=>media[extname(path).toLowerCase()]??'application/octet-stream';
 
-function read(path:string,limit:number){
+function read(path:string,limit:number,expect?:{dev:number;ino:number}){
   const fd=openSync(path,constants.O_RDONLY|(process.platform==='win32'?0:constants.O_NOFOLLOW));
   try{
     const stat=fstatSync(fd);if(!stat.isFile())throw new AppError('DELIVERABLE_NOT_FOUND',404);
+    if(expect&&(stat.dev!==expect.dev||stat.ino!==expect.ino))throw new AppError('DELIVERABLE_CHANGED',409);
     const size=Math.min(stat.size,limit),buffer=Buffer.alloc(size);let offset=0;
     while(offset<size){const n=readSync(fd,buffer,offset,size-offset,offset);if(!n)break;offset+=n;}
     return {buffer:buffer.subarray(0,offset),size:stat.size,mtime:stat.mtime};
@@ -88,21 +91,51 @@ export function listDeliverables(root:string,tasks:readonly {id:string;title:str
   return {items,skipped,truncated};
 }
 
-export function previewDeliverable(root:string,path:string):DeliverablePreview{
-  if(typeof path!=='string'||!path||path.length>240||/[\x00-\x1f]/.test(path)||isAbsolute(path)||path.includes('\\'))throw new AppError('INVALID_PATH',400);
+/** Path guard shared by preview and read: relative, no traversal, no hidden/sensitive part, no link at any level. */
+function checkedPath(root:string,path:string){
+  if(typeof path!=='string'||!path||path.length>240||/[\x00-\x1f\x7f]/.test(path)||isAbsolute(path)||path.includes('\\'))throw new AppError('INVALID_PATH',400);
   const clean=normalize(path);
   if(clean.startsWith('..')||clean.split(/[\\/]/).some(part=>sensitive(part)||part==='..'))throw new AppError('INVALID_PATH',400);
-  const full=join(root,clean);
   // Every component must be a real directory or file inside the folder; no link is followed.
-  let current=root;
-  for(const part of clean.split(/[\\/]/)){
+  let current=root;const parts=clean.split(/[\\/]/),stats=[];
+  for(const part of parts){
     current=join(current,part);
     const stat=lstatSync(current,{throwIfNoEntry:false});
     if(!stat||stat.isSymbolicLink())throw new AppError('DELIVERABLE_NOT_FOUND',404);
+    stats.push(stat);
   }
+  return {clean,full:join(root,clean),parts,stats};
+}
+
+export function previewDeliverable(root:string,path:string):DeliverablePreview{
+  const {clean,full}=checkedPath(root,path);
   const type=mediaType(clean);
   if(!textual.has(type)){if(!lstatSync(full).isFile())throw new AppError('DELIVERABLE_NOT_FOUND',404);return {kind:'unsupported',mediaType:type};}
   const file=read(full,MAX_PREVIEW*4);
   const raw=file.buffer.toString('utf8');
   return {kind:'text',path:clean.split(sep).join('/'),mediaType:type,text:safeText(raw.slice(0,MAX_PREVIEW)),truncated:file.size>file.buffer.length||raw.length>MAX_PREVIEW};
+}
+
+export type DeliverableBytes={path:string;bytes:Buffer;sha256:string;size:number;contentType:string};
+/**
+ * Whole bytes of one file the listing exposes (inputs and outputs alike), for download.
+ * `beforeOpen` is a test seam to simulate a swap between check and read.
+ */
+export function readDeliverable(root:string,path:string,beforeOpen?:()=>void):DeliverableBytes{
+  const {clean,full,parts,stats}=checkedPath(root,path),last=stats.at(-1)!;
+  // The listing walks at most MAX_DEPTH directories below the root.
+  if(parts.length>MAX_DEPTH+1||!last.isFile())throw new AppError('DELIVERABLE_NOT_FOUND',404);
+  if(last.size>MAX_DOWNLOAD)throw new AppError('DELIVERABLE_TOO_LARGE',413);
+  beforeOpen?.();
+  // O_NOFOLLOW covers the leaf; dev/ino ties the opened file to the checked one.
+  let file;
+  try{file=read(full,MAX_DOWNLOAD+1,last);}
+  catch(error){if(error instanceof AppError)throw error;throw new AppError((error as NodeJS.ErrnoException).code==='ENOENT'?'DELIVERABLE_NOT_FOUND':'DELIVERABLE_CHANGED',(error as NodeJS.ErrnoException).code==='ENOENT'?404:409);}
+  if(file.size>MAX_DOWNLOAD)throw new AppError('DELIVERABLE_TOO_LARGE',413);
+  // Same inode rewritten in place since the check, or short read: refuse rather than serve mixed bytes.
+  if(file.size!==last.size||file.buffer.length!==file.size)throw new AppError('DELIVERABLE_CHANGED',409);
+  // Re-walk after the read: a parent swapped for a link (or another directory) meanwhile is refused.
+  const again=checkedPath(root,clean).stats;
+  if(again.some((stat,index)=>stat.dev!==stats[index].dev||stat.ino!==stats[index].ino))throw new AppError('DELIVERABLE_CHANGED',409);
+  return {path:clean.split(sep).join('/'),bytes:file.buffer,sha256:createHash('sha256').update(file.buffer).digest('hex'),size:file.size,contentType:mediaType(clean)};
 }
