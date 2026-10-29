@@ -7,9 +7,7 @@ import {Store} from './store.ts';
 import {Studio} from './studio.ts';
 import {buildExecutionBrief} from './planning/execution.ts';
 import {AppError} from './errors.ts';
-import {runQualityLoop} from './quality-loop.ts';
-import {containsCredential} from './privacy.ts';
-import {inspectOutbound} from './guardrails/outbound.ts';
+import {qualityEvidenceBlocked,runQualityLoop} from './quality-loop.ts';
 
 const hash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const clone=<T>(value:T):T=>structuredClone(value);
@@ -113,7 +111,7 @@ export class QualityLoopService {
       record.steps.push(current);this.save(record);
       try{
         const out=await bounded(()=>work(context)),text=JSON.stringify(out);
-        if(text.length>512*1024||containsCredential(text)||inspectOutbound(text).length)throw new AppError('QUALITY_EVIDENCE_BLOCKED');
+        if(text.length>512*1024||qualityEvidenceBlocked(out))throw new AppError('QUALITY_EVIDENCE_BLOCKED');
         current.result=clone(out.result);current.evidence=clone(out.evidence);current.state='completed';current.finishedAt=new Date().toISOString();this.save(record);return clone(current);
       }catch(error){
         stepIssue=issue(error);current.issue=stepIssue;
@@ -173,7 +171,7 @@ export class QualityLoopService {
       let recovered:Awaited<ReturnType<NonNullable<QualityServicePorts['recover']>>>;
       try{if(controller.signal.aborted)throw new AppError('QUALITY_PROCESS_STOP_UNCONFIRMED');recovered=await Promise.race([this.ports.recover?.(clone(step),this.context(record,step.id))??Promise.resolve(null),stopped]);}finally{controller.signal.removeEventListener('abort',abort);}
       if(!recovered)throw new AppError('QUALITY_PROCESS_STOP_UNCONFIRMED');
-      const text=JSON.stringify(recovered);if(text.length>512*1024||containsCredential(text)||inspectOutbound(text).length)throw new AppError('QUALITY_EVIDENCE_BLOCKED');
+      const text=JSON.stringify(recovered);if(text.length>512*1024||qualityEvidenceBlocked(recovered))throw new AppError('QUALITY_EVIDENCE_BLOCKED');
       if('failureIssue' in recovered){if(recovered.processStopped!==true||!/^[A-Z][A-Z0-9_]{1,100}$/.test(recovered.failureIssue))throw new AppError('QUALITY_EVIDENCE_INVALID');step.state='failed';step.issue=recovered.failureIssue;}
       else{step.result=clone(recovered.result);step.evidence=clone(recovered.evidence);step.state='completed';step.issue=null;}
       step.finishedAt=new Date().toISOString();this.save(record);

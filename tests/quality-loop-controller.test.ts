@@ -93,7 +93,8 @@ test('code project runs approved local checks with frozen acceptance; unknown Co
     const acceptance=controller.taskVerificationPreview(project.id,task.id,workspace.id)!;
     const source=store.createRun(randomUUID(),'fixture','produce result',workspace.id,{taskId:task.id,planningVersionId:plan.id,planningContentHash:plan.contentHash,requirementLabels:task.requirementLabels},undefined,acceptance);
     store.updateRun(source.id,{execution:'completed'},'run.completed');
-    const reviewers=[{id:'claude',providerId:'anthropic',modelId:'model-b'}],limits={maxRepairs:0,maxCalls:1,timeoutMs:30000};
+    // The budget covers a real check subprocess plus ~250 synchronous git fingerprint spawns (~6-9s idle, >30s under CPU load).
+    const reviewers=[{id:'claude',providerId:'anthropic',modelId:'model-b'}],limits={maxRepairs:0,maxCalls:1,timeoutMs:120000};
     const start=()=>{const preview=controller.qualityLoops.preview(project.id,source.id,reviewers,limits);return controller.qualityLoops.start({projectId:project.id,sourceRunId:source.id,reviewers,limits,requestId:randomUUID(),expectedPreviewDigest:preview.previewDigest,confirmed:true});};
     assert.equal(start().result.issue,'QUALITY_PRODUCER_MODEL_UNKNOWN');assert.equal(reviews,0);assert.equal(controller.verification.view(workspace.id,source.id).checks.length,0);
     // Synthetic native metadata is fixture-only; production Codex attribution remains unknown.

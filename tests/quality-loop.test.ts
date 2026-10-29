@@ -16,3 +16,13 @@ test('reviewer mutation cannot change another reviewer approved criteria',async(
 test('unknown model identity cannot establish independent success',async()=>{const i=input();i.producer.modelKey='unknown';assert.equal((await runQualityLoop(i,ports())).status,'blocked');});
 test('known adapter stop reasons survive as bounded diagnostic codes',async()=>{for(const code of ['QUALITY_MODEL_MISMATCH','QUALITY_QUOTA_EXHAUSTED','QUALITY_PERMISSION_DENIED','QUALITY_EXECUTION_LOST']){const p=ports();p.review=async()=>{throw Error(code);};assert.equal((await runQualityLoop(input(),p)).issue,code);}});
 test('mandatory regression failures alone trigger repair then all checks rerun',async()=>{const p=ports();let checks=0,repairs=0;p.verify=async req=>{assert.deepEqual(req.baseline.criteria,['accurate','dated']);return checks++===0?[{reviewerId:'verification',criterion:null,status:'not_met',evidence:'regression check failed'}]:[];};const fix=p.repair;p.repair=async req=>{repairs++;assert.deepEqual(req.failures,[{reviewerId:'verification',criterion:null,status:'not_met',evidence:'regression check failed'}]);return fix(req);};const r=await runQualityLoop(input(),p);assert.equal(r.status,'passed');assert.equal(checks,2);assert.equal(repairs,1);});
+test('digit runs inside digest and UUID identifiers are not personal data, while evidence text stays inspected',async()=>{
+  // Observed artifact digest: "8351692182046" matches the national-id pattern.
+  const i=input();i.artifact.digest='3cb51b163060ad2e739df665332862c2b6a6130cd5c54cf8351692182046e5a2';
+  assert.equal((await runQualityLoop(i,ports())).status,'passed');
+  const p=ports(),original=p.review;p.review=async req=>{const r=await original(req);r.criteria[0].evidence='contact 010-1234-5678';return r;};
+  const blocked=await runQualityLoop(i,p);assert.equal(blocked.status,'failed');assert.equal(blocked.issue,'QUALITY_EVIDENCE_BLOCKED');
+  // Only schema identifier fields are exempt: the same digest-shaped value in free-text evidence is still inspected.
+  const q=ports(),plain=q.review;q.review=async req=>{const r=await plain(req);r.criteria[0].evidence=i.artifact.digest;return r;};
+  const hidden=await runQualityLoop(i,q);assert.equal(hidden.status,'failed');assert.equal(hidden.issue,'QUALITY_EVIDENCE_BLOCKED');
+});
