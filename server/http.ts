@@ -142,7 +142,7 @@ export function createHttpServer(controller:Controller,assets:string,options:{wo
         if(url.search)throw new AppError('INVALID_FIELDS',400);
         json(res,200,failureIntel.view(failureIndexRoute[1]));return;
       }
-      const harnessRoute=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/harness(?:\/(candidates\/generate|proposals|evaluations|approvals|promotions|rollbacks))?$/);
+      const harnessRoute=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/harness(?:\/(candidates\/generate|proposals|evaluations|approvals|promotions|rollbacks|suite-cases|suite-cases\/remove))?$/);
       if(req.method==='GET'&&harnessRoute&&!harnessRoute[2]){
         if(url.search)throw new AppError('INVALID_FIELDS',400);
         json(res,200,harness().view(harnessRoute[1]));return;
@@ -230,6 +230,8 @@ export function createHttpServer(controller:Controller,assets:string,options:{wo
             case 'evaluations':exact(data,['requestId','candidateVersionId','liveApproval']);json(res,200,await service.evaluate(projectId,data as unknown as Parameters<HarnessService['evaluate']>[1]));return;
             case 'approvals':exact(data,['requestId','evaluationId','candidateDigest','evaluationDigest','expectedSequence','confirmed']);json(res,200,service.approve(projectId,data as unknown as Parameters<HarnessService['approve']>[1]));return;
             case 'promotions':exact(data,['requestId','target','versionId','fromVersionId','expectedSequence','candidateDigest','evaluationDigest']);json(res,200,service.promote(projectId,data as unknown as Parameters<HarnessService['promote']>[1]));return;
+            case 'suite-cases':exact(data,['requestId','runId','taskId','target','protected','confirmed']);json(res,200,service.registerSuiteCase(projectId,data as unknown as Parameters<HarnessService['registerSuiteCase']>[1],id=>progress.read(id,{})));return;
+            case 'suite-cases/remove':exact(data,['requestId','caseId','confirmed']);json(res,200,service.removeSuiteCase(projectId,data as unknown as Parameters<HarnessService['removeSuiteCase']>[1]));return;
             case 'rollbacks':exact(data,['requestId','target','versionId','fromVersionId','expectedSequence','confirmed']);json(res,200,service.rollback(projectId,data as unknown as Parameters<HarnessService['rollback']>[1]));return;
           }
         }

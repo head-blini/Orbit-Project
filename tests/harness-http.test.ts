@@ -58,7 +58,7 @@ async function setup(runnerMode?:HarnessEvaluationRunner['mode']){
     const body={requestId:'proposal-'+projectId,target:'claude_task',line,evidence:{familyIds:[family.familyId],caseIds:[c.id],indexerVersion:'fe-2'},confirmed:true};
     return {body,caseId:c.id,familyId:family.familyId,response:await post(`/api/projects/${projectId}/harness/proposals`,body)};
   };
-  return {store,origin,post,get,view,close,propose,calls};
+  return {store,controller,origin,post,get,view,close,propose,calls};
 }
 const H=`/api/projects/${P}/harness`;
 const claude=(v:HarnessProjectView)=>v.targets.find(t=>t.target==='claude_task')!;
@@ -164,5 +164,35 @@ test('promotion only through a fresh recorded approval; explicit rollback to v0'
     c=claude(await t.view());assert.equal(c.activeRevision,0);assert.deepEqual(c.history.map(h=>h.kind),['promotion','rollback']);
     assert.equal(c.versions.find(x=>x.versionId===versionId)!.approvals[0].fresh,false);// old approval cannot be reused at a new sequence
     assert.equal(await errorOf(await t.post(H+'/promotions',{...grant,requestId:'a1-again',expectedSequence:2})),'HARNESS_APPROVAL_REQUIRED');
+  }finally{await t.close();}
+});
+
+test('suite cases: user registers a verified passed run over CSRF with exact fields; GET shows counts read-only; removal appends',async()=>{
+  const t=await setup();
+  try{
+    const r=t.store.createRun('req-suite','x','prompt',undefined,{taskId:'task-1',runtime:'claude-code',projectId:P,planningVersionId:'plan',planningContentHash:'h',requirementLabels:[]});
+    t.store.updateRun(r.id,{execution:'completed'},'run.completed');
+    const ok={status:'not_applicable' as const,evidenceIds:[],source:'local' as const,freshness:'current' as const,blockers:[]};
+    let verified=false;
+    // Test double of the server CQG reader; the route must read completion from it, never from the request.
+    (t.controller.progress as {read:unknown}).read=(projectId:string)=>({projectId,tasks:[{id:'task-1',latestRunId:r.id,completion:{binding:{projectId,taskId:'task-1',runId:r.id,planningVersionId:'plan',
+      planningContentHash:'h',acceptanceDigest:null,artifactId:null,artifactDigest:null,graphRevision:null,contractDigest:null,policyDigest:null,configDigest:null,artifactScope:'workspace',baseSha:null,inputSnapshotDigest:null},
+      policyDigest:'e'.repeat(64),gates:[{id:'lint',...ok,status:'passed'}],qualityPassed:verified,independentReview:ok,userApproval:ok,verifiedDone:verified,reasonCodes:[]}}]});
+    const body={requestId:'suite-1',runId:r.id,taskId:'task-1',target:'claude_task',protected:false,confirmed:true};
+    assert.equal((await t.post(H+'/suite-cases',body,{'x-csrf-token':'0'.repeat(64)})).status,403);
+    assert.equal((await t.post(H+'/suite-cases',{...body,verifiedDone:true})).status,400);
+    assert.equal((await t.post(H+'/suite-cases?x=1',body)).status,400);
+    const refused=await t.post(H+'/suite-cases',body);assert.equal(refused.status,409);assert.equal(await errorOf(refused),'HARNESS_SUITE_RUN_NOT_VERIFIED');
+    verified=true;
+    const created=await t.post(H+'/suite-cases',body);assert.equal(created.status,200);
+    const c=await created.json() as {caseId:string;runId:string};assert.equal(c.runId,r.id);
+    const changes=(t.store.db.prepare('SELECT total_changes() AS n').get() as {n:number}).n;
+    const v=await t.view();
+    assert.deepEqual(v.suite?.targets.map(x=>[x.target,x.normal,x.protected]),[['claude_task',1,0],['repair',0,0]]);
+    assert.equal((t.store.db.prepare('SELECT total_changes() AS n').get() as {n:number}).n,changes);
+    assert.equal(await errorOf(await t.post('/api/projects/project-2/harness/suite-cases/remove',{requestId:'rm-x',caseId:c.caseId,confirmed:true})),'HARNESS_SUITE_CASE_NOT_FOUND');
+    assert.equal((await t.post(H+'/suite-cases/remove',{requestId:'rm-1',caseId:c.caseId})).status,400);
+    assert.equal((await t.post(H+'/suite-cases/remove',{requestId:'rm-1',caseId:c.caseId,confirmed:true})).status,200);
+    assert.equal((await t.view()).suite?.cases.length,0);
   }finally{await t.close();}
 });

@@ -1,5 +1,5 @@
 import {useCallback,useEffect,useState} from 'react';
-import type {HarnessProjectView,HarnessTarget,HarnessTargetView,HarnessVersionView} from '../shared/harness.ts';
+import type {HarnessProjectView,HarnessSuiteView,HarnessTarget,HarnessTargetView,HarnessVersionView} from '../shared/harness.ts';
 
 const TARGET:Record<HarnessTarget,string>={claude_task:'Claude 작업 지침',codex_brief:'Codex 작업 지침',repair:'수정 작업 지침'};
 const when=(at:string|null)=>at?new Date(at).toLocaleString('ko-KR'):'시각 미상';
@@ -33,6 +33,8 @@ export interface HarnessActions {
   approve?:(t:HarnessTargetView,v:HarnessVersionView)=>void;
   promote?:(t:HarnessTargetView,v:HarnessVersionView)=>void;
   rollback?:(t:HarnessTargetView,v:HarnessVersionView)=>void;
+  registerSuite?:(input:{runId:string;taskId:string;target:HarnessTarget;protected:boolean})=>void;
+  removeSuite?:(caseId:string)=>void;
 }
 
 function Proposal({t,v,advanced,busy,runnerMode,actions}:{t:HarnessTargetView;v:HarnessVersionView;advanced:boolean;busy:boolean;runnerMode:HarnessProjectView['runnerMode'];actions:HarnessActions}){
@@ -81,6 +83,31 @@ function Target({t,advanced,busy,runnerMode,actions}:{t:HarnessTargetView;advanc
   </li>;
 }
 
+/** HE-SUITE: simple mode shows counts only; advanced mode lists manifests and offers explicit registration/removal. */
+function Suite({suite,advanced,busy,actions}:{suite:HarnessSuiteView;advanced:boolean;busy:boolean;actions:HarnessActions}){
+  const [runId,setRunId]=useState(''),[taskId,setTaskId]=useState(''),[target,setTarget]=useState<HarnessTarget>('claude_task'),[isProtected,setProtected]=useState(false);
+  if(suite.state==='error')return <div><h3>평가 기준 작업</h3><p>평가 기준 작업 기록을 읽을 수 없습니다{advanced&&<> (<code>{suite.error}</code>)</>}.</p></div>;
+  return <div>
+    <h3>평가 기준 작업</h3>
+    <p>제안을 평가할 때 다시 확인하는, 사용자가 등록한 통과 작업입니다.</p>
+    <ul>{suite.targets.map(t=><li key={t.target}>{TARGET[t.target]}: 정상 작업 {t.normal}개 · 보호 작업 {t.protected}개{(!t.normal||!t.protected)&&' — 둘 다 1개 이상 있어야 평가할 수 있습니다'}</li>)}</ul>
+    {advanced&&<>
+      {suite.cases.length?<ul>{suite.cases.map(c=><li key={c.caseId}>
+        {c.protected?'보호':'정상'} · {TARGET[c.target]} · 실행 <code>{c.runId}</code> · 작업 <code>{c.taskId}</code> · 사례 <code>{short(c.digest)}</code> · 검증 결속 <code>{short(c.completionBindingDigest)}</code> · 정책 <code>{short(c.policyDigest)}</code> · {when(c.registeredAt)}
+        {actions.removeSuite&&<> <button disabled={busy} onClick={()=>actions.removeSuite!(c.caseId)}>평가 기준에서 빼기</button></>}
+      </li>)}</ul>:<p>등록된 평가 기준 작업 없음</p>}
+      {actions.registerSuite&&<form onSubmit={e=>{e.preventDefault();if(runId.trim()&&taskId.trim())actions.registerSuite!({runId:runId.trim(),taskId:taskId.trim(),target,protected:isProtected});}}>
+        <label>실행 ID <input value={runId} onChange={e=>setRunId(e.target.value)}/></label>
+        {' '}<label>작업 ID <input value={taskId} onChange={e=>setTaskId(e.target.value)}/></label>
+        {' '}<label>대상 <select value={target} onChange={e=>setTarget(e.target.value as HarnessTarget)}>{suite.targets.map(t=><option key={t.target} value={t.target}>{TARGET[t.target]}</option>)}</select></label>
+        {' '}<label><input type="checkbox" checked={isProtected} onChange={e=>setProtected(e.target.checked)}/> 보호 작업</label>
+        {' '}<button disabled={busy||!runId.trim()||!taskId.trim()}>통과 작업 등록</button>
+        <small> 완료 검증을 현재 통과한 작업의 최신 실행만 등록됩니다. 내용은 저장하지 않고 요약값(digest)만 저장합니다.</small>
+      </form>}
+    </>}
+  </div>;
+}
+
 /** Presentational and static-renderable. */
 export function HarnessBody({view,advanced,busy=false,confirming=null,error='',actions={},onConfirm,onCancel}:{view:HarnessProjectView;advanced:boolean;busy?:boolean;confirming?:string|null;error?:string;
   actions?:HarnessActions;onConfirm?:()=>void;onCancel?:()=>void}){
@@ -90,6 +117,7 @@ export function HarnessBody({view,advanced,busy=false,confirming=null,error='',a
     {error&&<div className="banner error" role="alert">{error}</div>}
     {confirming&&<div role="group" className="banner">{confirming} <button disabled={busy} onClick={onConfirm}>확인</button> <button onClick={onCancel}>취소</button></div>}
     <ul>{view.targets.map(t=><Target key={t.target} t={t} advanced={advanced} busy={busy} runnerMode={view.runnerMode} actions={actions}/>)}</ul>
+    {view.suite&&<Suite suite={view.suite} advanced={advanced} busy={busy} actions={actions}/>}
     {advanced&&<>
       {actions.generate&&<button disabled={busy} onClick={actions.generate}>실패 기록으로 제안 만들기</button>}
       {actions.propose&&<form onSubmit={e=>{e.preventDefault();if(line.trim())actions.propose!(target,line.trim());}}>
@@ -126,6 +154,8 @@ export function HarnessPanel({projectId,online,advanced,post}:{projectId:string;
     evaluate:versionId=>void send('/evaluations',{requestId:rid(),candidateVersionId:versionId,liveApproval:null}),
     approve:(t,v)=>{const e=verifiedEval(v);if(e?.evaluationDigest)ask('검증된 평가 결과로 이 제안의 적용을 승인할까요?','/approvals',{requestId:rid(),evaluationId:e.evaluationId,candidateDigest:v.digest,evaluationDigest:e.evaluationDigest,expectedSequence:t.pointerSequence,confirmed:true});},
     promote:(t,v)=>{const a=freshApproval(v);if(a&&v.parentId&&t.pointerSequence!==null)ask('승인된 지침을 이 프로젝트의 다음 실행부터 적용할까요?','/promotions',{requestId:a.requestId,target:t.target,versionId:v.versionId,fromVersionId:v.parentId,expectedSequence:t.pointerSequence,candidateDigest:a.candidateDigest,evaluationDigest:a.evaluationDigest});},
+    registerSuite:input=>ask(`이 실행을 ${input.protected?'보호':'정상'} 평가 기준 작업으로 등록할까요?`,'/suite-cases',{requestId:rid(),...input,confirmed:true}),
+    removeSuite:caseId=>ask('이 작업을 평가 기준에서 뺄까요? 기록은 지워지지 않습니다.','/suite-cases/remove',{requestId:rid(),caseId,confirmed:true}),
     rollback:(t,v)=>{if(t.activeVersionId&&t.pointerSequence!==null)ask('이 지침으로 되돌릴까요? 기록은 지워지지 않습니다.','/rollbacks',{requestId:rid(),target:t.target,versionId:v.versionId,fromVersionId:t.activeVersionId,expectedSequence:t.pointerSequence,confirmed:true});},
   };
   if(!view)return error?<div className="banner error" role="alert">{error}</div>:null;
