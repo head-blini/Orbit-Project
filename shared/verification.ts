@@ -1,6 +1,9 @@
+import type {CodeGate,CompletionBinding} from './task-completion.ts';
 import type {TaskAcceptanceStatus} from './acceptance.ts';
 export interface VerificationCommandPreview {id:string;label:string;executable:string;args:string[];timeoutMs:number;configDigest:string;protectedFiles?:string[]}
+export interface VerificationGateMapping {id:string;categories?:CodeGate[]}
 export interface CheckRecord {
+  completionBinding?:CompletionBinding;
   evidenceSource?:'local'|'mock';
   taskId?:string;planningVersionId?:string;planningContentHash?:string;
   id:string;requestId:string;runId:string;projectId:string;workspaceId:string;commandId:string;configDigest:string;

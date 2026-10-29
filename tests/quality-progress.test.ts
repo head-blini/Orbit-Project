@@ -8,6 +8,7 @@ import {Store} from '../server/store.ts';
 import {Studio} from '../server/studio.ts';
 import {Projects} from '../server/projects.ts';
 import {ProjectProgressService} from '../server/project-progress.ts';
+import {generalCheckerDigest,QualityProgressCollector} from '../server/quality-progress.ts';
 import {qualityVerifyGeneral} from '../server/quality-loop-native.ts';
 import {listDeliverables} from '../server/deliverables.ts';
 import type {PlanningVersion,SavedTask} from '../shared/parallel.ts';
@@ -102,7 +103,14 @@ async function loop(f:ReturnType<typeof fixture>,options:{unknown?:boolean;sameM
  const service=new QualityLoopService(f.store,ports),reviewers=[{id:'reviewer',providerId:'fixture',modelId:options.sameModel?'writer':'reviewer'}],limits={maxRepairs:options.repair?1:0,maxCalls:6,timeoutMs:5000};
  const preview=service.preview(f.project.id,f.run.id,reviewers,limits);
  const record=service.start({projectId:f.project.id,sourceRunId:f.run.id,reviewers,limits,requestId:randomUUID(),confirmed:true,expectedPreviewDigest:preview.previewDigest});
- return service.settled(record.id);
+ const settled=await service.settled(record.id);
+ // Fake native review receipts capture the checker version, as the native bridge does.
+ f.store.db.exec('CREATE TABLE IF NOT EXISTS quality_native_receipts(id TEXT PRIMARY KEY,body TEXT NOT NULL)');
+ for(const step of settled.steps.filter(s=>s.kind==='review'&&s.state==='completed')){
+  const result=step.result as {artifactDigest:string};
+  f.store.db.prepare('INSERT INTO quality_native_receipts VALUES(?,?)').run(step.id,JSON.stringify({id:step.id,loopId:settled.id,sourceRunId:f.run.id,baselineDigest:f.plan.contentHash,artifactDigest:result.artifactDigest,checkerDigest:generalCheckerDigest()}));
+ }
+ return settled;
 }
 test('independent-review blocker and unknown actual model remain explicit',async()=>{
  for(const unknown of [false,true]){const f=fixture();try{
@@ -228,5 +236,17 @@ test('legacy artifact-check replay preserves stored bytes and still rejects inco
   assert.equal(f.store.db.prepare('SELECT body FROM quality_artifact_checks').get()!.body,legacy);
   f.store.db.prepare('UPDATE quality_artifact_checks SET body=?').run('{}');
   await assert.rejects(qualityVerifyGeneral(f.store,f.projects,f.context),/QUALITY_CHECK_REPLAY_MISMATCH/);
+ }finally{f.close();}
+});
+
+
+test('semantic evidence becomes stale after a checker change and unavailable without its receipt',async()=>{
+ const f=fixture();try{
+  await loop(f,{source:'native'});
+  const collector=new QualityProgressCollector(f.store,{deliverables:f.deliverables,checkerDigest:generalCheckerDigest(undefined,'changed-checker')});
+  const stale=collector.read(f.project.id,f.task,f.context.sourceRun,f.plan,true);
+  assert.equal(stale.semantic.status,'stale');assert.ok(stale.semantic.blockers.includes('QUALITY_CHECKER_CHANGED'));
+  f.store.db.exec('DELETE FROM quality_native_receipts');
+  assert.equal(f.read().semantic.status,'unknown');assert.ok(f.read().semantic.blockers.includes('QUALITY_CHECKER_BINDING_MISSING'));
  }finally{f.close();}
 });

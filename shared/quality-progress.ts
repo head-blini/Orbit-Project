@@ -15,6 +15,9 @@ export interface QualityProgressEvidence {
  id:string;kind:'artifact_check'|'verification_check'|'quality_loop'|'user_approval';
  evidenceSource:QualityEvidenceSource;freshness:QualityFreshness;recordedStatus:string;
  binding:QualityEvidenceBinding;blockers:string[];
+ checkerDigest?:string;
+ artifactScope?:'workspace'|'task_manifest'|'project_inventory';
+ numericSource?:{path:string;check:NumericSourceCheck}[];
  files?:{path:string;digest:string}[];
 }
 export interface QualityProgress {
@@ -23,3 +26,7 @@ export interface QualityProgress {
  repair:QualityDimension;revalidation:QualityDimension;userApproval:QualityDimension;
  evidence:QualityProgressEvidence[];
 }
+
+/** Numeric presence in supplied inputs only, not authority, calculation or semantic proof. */
+export interface NumericSourceResult {value:string;status:'verified'|'unverified'|'needs_review';inputIndexes:number[]}
+export interface NumericSourceCheck {inputPaths?:string[];status:'passed'|'needs_review'|'unverified';numbers:number;matched:number;unmatched:string[];results:NumericSourceResult[]}

@@ -1,3 +1,4 @@
+import {capturedCompletionBinding,workerEvidenceRecords} from './quality-progress.ts';
 import { createHash,randomUUID } from 'node:crypto';
 import type { CheckRecord,VerificationApproval,VerificationView,VerificationCommandPreview } from '../shared/verification.ts';
 import { terminal } from '../shared/types.ts';
@@ -83,6 +84,11 @@ export class VerificationService {
     if(command.configDigest!==input.expectedConfigDigest||this.fingerprint(workspace.id)!==input.expectedSourceDigest)throw new AppError('VERIFICATION_PREVIEW_STALE',409);
     const {configDigest,protectedFiles:_,...preview}=command,validated=validateVerificationCommand(preview);
     const check:CheckRecord={evidenceSource:'local',...(run?.taskId?{taskId:run.taskId}:{}),...(run?.planningVersionId?{planningVersionId:run.planningVersionId}:{}),...(run?.planningContentHash?{planningContentHash:run.planningContentHash}:{}),id:randomUUID(),requestId:input.requestId,runId:input.runId,projectId:workspace.projectId,workspaceId:workspace.id,commandId:command.id,configDigest,baseSha:workspace.baseSha,sourceDigest:input.expectedSourceDigest,finishedDigest:null,createdAt:new Date().toISOString(),completedAt:null,execution:'running',verdict:'not_run',exitCode:null,durationMs:null,output:'',recoveredAt:null,...(run?.acceptanceDigest?{acceptanceDigest:run.acceptanceDigest}:{})};
+    const {reservation}=workerEvidenceRecords(this.store,run!);
+    check.completionBinding=capturedCompletionBinding({projectId:check.projectId,taskId:check.taskId??null,runId:check.runId,planningVersionId:check.planningVersionId??null,
+      planningContentHash:check.planningContentHash??null,acceptanceDigest:check.acceptanceDigest??null,artifactId:check.workspaceId,artifactDigest:check.sourceDigest},
+      {artifactScope:'workspace',configDigest:check.configDigest,baseSha:check.baseSha,graphRevision:reservation?String(reservation.batch.graphRevision):null,
+       contractDigest:reservation?hash(reservation.batch.contractDigests):null});
     this.save(check,'verification.started');
     const abort=new AbortController();
     const promise=Promise.resolve().then(async()=>{

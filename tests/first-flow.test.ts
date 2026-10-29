@@ -44,9 +44,9 @@ test('deliverables separate inputs from outputs and compare table numbers with t
   const list=listDeliverables(root,[]);
   const input=list.items.find(item=>item.path==='inputs/vendor-a.csv')!,good=list.items.find(item=>item.path==='task-11111111.md')!,bad=list.items.find(item=>item.path==='task-22222222.md')!;
   assert.equal(input.role,'input');assert.equal(input.checks.evidence,undefined);
-  assert.equal(good.role,'output');assert.deepEqual(good.checks.evidence,{status:'passed',numbers:4,matched:4,unmatched:[]});
+  assert.equal(good.role,'output');assert.deepEqual(good.checks.evidence,{status:'passed',numbers:4,matched:4,unmatched:[],results:[{value:'1200000',status:'verified',inputIndexes:[0]},{value:'1150000',status:'verified',inputIndexes:[1]},{value:'350000',status:'verified',inputIndexes:[0]},{value:'380000',status:'verified',inputIndexes:[1]}],inputPaths:['inputs/vendor-a.csv','inputs/vendor-b.csv']});
   assert.equal(good.checks.meaning,'unverified');
-  assert.deepEqual(bad.checks.evidence,{status:'needs_review',numbers:2,matched:1,unmatched:['1250000']});
+  assert.deepEqual(bad.checks.evidence,{status:'needs_review',numbers:2,matched:1,unmatched:['1250000'],results:[{value:'1250000',status:'needs_review',inputIndexes:[]},{value:'1150000',status:'verified',inputIndexes:[1]}],inputPaths:['inputs/vendor-a.csv','inputs/vendor-b.csv']});
   assert.ok(!JSON.stringify(list).includes('buffer'));
 });
 
