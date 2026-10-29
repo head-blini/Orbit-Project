@@ -18,21 +18,41 @@ import {claudeTaskPrompt,executionForClaudeOutcome} from './runtimes/claude-task
 import {nativeModelId} from './runtimes/model-identity.ts';
 import {listMaterials} from './materials.ts';
 import {ProjectAiPreferencesService} from './project-ai-preferences.ts';
+import {HarnessStore} from './harness-store.ts';
+import {classifyHarnessCandidate,harnessDigest} from './harness-policy.ts';
+import {renderOverlay,type HarnessTarget,type HarnessVersion} from '../shared/harness.ts';
 
 type Runner=Pick<ClaudeCodeRun,'start'|'interrupt'>;
 type Quota=Extract<ClaudeEvent,{kind:'quota'}>;
 export interface ClaudeTaskServiceOptions {
   findExecutable?:()=>string;
   runnerFactory?:(options:{executable:string;cwd:string;mode:'write';env:NodeJS.ProcessEnv;beforeDispatch:()=>void})=>Runner;
+  /** HE-5a pointer reader; defaults to the durable HarnessStore. */
+  harness?:Pick<HarnessStore,'current'>;
 }
 type Active={runner:Runner;done:Promise<void>};
+
+/** HE-5a: the promoted pointer only, re-checked against AX06 at injection. Anything unreadable or unsafe refuses
+ * dispatch: HE-D1 names a silent v0 fallback only for the Codex length bound, so Claude fails closed. */
+function activeHarness(harness:Pick<HarnessStore,'current'>,projectId:string,target:HarnessTarget):{version:HarnessVersion;overlay:string}{
+  let version:HarnessVersion,overlay:string;
+  try{version=harness.current(projectId,target);overlay=renderOverlay(version);}
+  catch(error){throw new AppError(error instanceof AppError&&/^HARNESS_[A-Z_]+$/.test(error.message)?error.message:'HARNESS_INTEGRITY',409);}
+  if(version.target!==target||version.class!=='execution_guidance'||version.digest!==harnessDigest(version))throw new AppError('HARNESS_INTEGRITY',409);
+  if(version.revision>0){
+    const verdict=classifyHarnessCandidate({class:version.class,target,lines:version.lines,origin:'user',evidence:null});
+    if(verdict.status==='blocked')throw new AppError(verdict.reasons[0],409);
+    if(containsCredential(overlay)||outboundDenial(overlay))throw new AppError('HARNESS_UNSAFE_TEXT',409);
+  }
+  return {version,overlay};
+}
 
 /** One owner per saved task; native execution remains entirely in ClaudeCodeRun. */
 export class ClaudeTaskService {
   readonly subscriptionUsage:SubscriptionUsageStore;
   private store:Store;private projects?:Projects;private options:ClaudeTaskServiceOptions;
-  private active=new Map<string,Active>();private latestQuota:Quota|null=null;private closing=false;
-  constructor(store:Store,projects?:Projects,options:ClaudeTaskServiceOptions={},subscriptionUsage=new SubscriptionUsageStore(store)){this.subscriptionUsage=subscriptionUsage;this.store=store;this.projects=projects;this.options=options;}
+  private active=new Map<string,Active>();private latestQuota:Quota|null=null;private closing=false;private harness:Pick<HarnessStore,'current'>;
+  constructor(store:Store,projects?:Projects,options:ClaudeTaskServiceOptions={},subscriptionUsage=new SubscriptionUsageStore(store)){this.subscriptionUsage=subscriptionUsage;this.store=store;this.projects=projects;this.options=options;this.harness=options.harness??new HarnessStore(store);}
   quota():Quota|null{return this.latestQuota?structuredClone(this.latestQuota):null;}
   submit(projectId:string,taskId:string,requestId:string,worker?:WorkerDispatchContext):Run {
     return this.dispatch(projectId,taskId,requestId,undefined,worker);
@@ -75,9 +95,11 @@ export class ClaudeTaskService {
     const raw=brief.prompt+'\n'+task.title+(repair?'\n'+repair.prompt:'');
     const denial=containsCredential(raw)?'CREDENTIAL_LIKE_INPUT':outboundDenial(raw);
     if(denial){this.store.append('guardrail.denied',null,{providerId:'claude-code',code:denial});throw new AppError(denial,400);}
+    const harness=[activeHarness(this.harness,projectId,'claude_task'),...(repair?[activeHarness(this.harness,projectId,'repair')]:[])];
+    const harnessSame=()=>{try{return harness.every(({version})=>{const now=this.harness.current(projectId,version.target);return now.versionId===version.versionId&&now.digest===version.digest;});}catch{return false;}};
     const prompt=claudeTaskPrompt({title:task.title,goal:handoff.goal,baseline:handoff.baseline,
       acceptanceCriteria:handoff.requirements.flatMap(requirement=>requirement.acceptanceCriteria),
-      constraints:handoff.constraints,nonGoals:handoff.nonGoals,decisions:handoff.decisions,deliverable:`${worker?'output/':''}task-${taskId.slice(0,8)}.md`,materials:listMaterials(worker?.space.path??project.path).map(item=>item.path)})+(repair?'\n품질 검증에서 실패한 항목만 수정하세요. 기존 통과 항목과 승인 기준은 보존하세요.\n'+repair.prompt:'');
+      constraints:handoff.constraints,nonGoals:handoff.nonGoals,decisions:handoff.decisions,deliverable:`${worker?'output/':''}task-${taskId.slice(0,8)}.md`,materials:listMaterials(worker?.space.path??project.path).map(item=>item.path),harness:harness[0].version})+(repair?'\n품질 검증에서 실패한 항목만 수정하세요. 기존 통과 항목과 승인 기준은 보존하세요.\n'+(harness[1].overlay?harness[1].overlay+'\n':'')+repair.prompt:'');
     const executable=(this.options.findExecutable??findClaude)();
     // No await between ownership checks, durable intent and launch.
     worker?.beforeDispatch();
@@ -86,6 +108,7 @@ export class ClaudeTaskService {
     let runner:Runner;
     try{
       if(worker)this.store.append('run.worker_space',run.id,{reservationId:worker.fence.reservationId,path:worker.space.path});
+      for(const {version} of harness)this.store.append('harness.applied',run.id,{target:version.target,versionId:version.versionId,revision:version.revision,digest:version.digest});
       this.store.append('run.runtime_source',run.id,{source:this.options.runnerFactory?'mock':'native',interface:'claude.print'});
       if(repair)this.store.append('run.repair_source',run.id,{sourceRunId:repair.source.id,planningVersionId:brief.planningVersionId,planningContentHash:brief.planningContentHash});
       // Revalidate after synchronous Store observers, immediately before launch.
@@ -93,7 +116,7 @@ export class ClaudeTaskService {
       runner=(this.options.runnerFactory??(options=>new ClaudeCodeRun(options)))({executable,cwd:worker?.space.path??project.path,mode:'write',env:claudeEnv(),beforeDispatch:()=>{
         this.projects!.generalProject(projectId);
         worker?.beforeDispatch();
-        if(this.closing||new ProjectAiPreferencesService(this.store).read(projectId).execution!=='claude-code'||JSON.stringify(studio.execution(projectId,taskId))!==JSON.stringify(brief)||!acceptanceSame())throw new AppError('LAUNCH_CONTEXT_CHANGED',409);
+        if(this.closing||new ProjectAiPreferencesService(this.store).read(projectId).execution!=='claude-code'||JSON.stringify(studio.execution(projectId,taskId))!==JSON.stringify(brief)||!acceptanceSame()||!harnessSame())throw new AppError('LAUNCH_CONTEXT_CHANGED',409);
       }});
     }catch{
       return this.store.updateRun(run.id,{execution:'failed'},'run.failed',{reason:'RUNTIME_NOT_STARTED'});
