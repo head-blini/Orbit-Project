@@ -1,4 +1,4 @@
-import type {CodexUsage,QuotaBucket,QuotaWindow} from '../shared/usage.ts';
+import type {CodexUsage,QuotaBucket,QuotaWindow,SubscriptionUsageObservation,SubscriptionUsageFreshness,SubscriptionProviderStatus,SubscriptionQuotaBucket,SubscriptionQuotaWindow} from '../shared/usage.ts';
 import {containsCredential} from './privacy.ts';
 
 /** Unqueried/unavailable metrics are null, never fabricated zeroes or API prices. */
@@ -117,4 +117,84 @@ export async function collectCodexUsage(request:(method:string,params:unknown)=>
     Promise.resolve().then(()=>request('account/usage/read',{})),
   ]);
   return parseCodexUsage(rateLimits.status==='fulfilled'?rateLimits.value:undefined,usage.status==='fulfilled'?usage.value:undefined,new Date().toISOString());
+}
+
+/** Trusted local context, never raw provider metadata. References must be opaque,
+ * sanitized IDs. Account/pool evidence is established by the publishing caller. */
+export interface SubscriptionUsageContext {
+  providerId:string;runtimeId:string;connectionRef:string;
+  accountRef?:string|null;identityStatus?:'observed'|'unknown';
+  evidence:SubscriptionUsageObservation['source']['evidence'];evidenceRefs?:string[];
+  observedAt:string|null;lastAttemptAt:string|null;now:string;connected:boolean;
+  pool?:{poolRef:string|null;sharing:SubscriptionUsageObservation['sharing'];evidenceRefs:string[]};
+}
+
+/** Orbit display policy, not a provider guarantee. On restart the caller passes
+ * connected=false until a new observation is bound to the current connection.
+ * Missing reset is permitted; malformed timestamps and future observations are not. */
+export function subscriptionUsageFreshness(observedAt:string|null,now:string,resetsAt:string|null,connected:boolean):SubscriptionUsageFreshness {
+  const observed=timestamp(observedAt),current=timestamp(now);
+  if(!observed||!current||Date.parse(observed)>Date.parse(current))return 'unknown';
+  if(!connected)return 'stale';
+  if(resetsAt!==null&&timestamp(resetsAt)===null)return 'unknown';
+  return Date.parse(current)-Date.parse(observed)>=60_000||resetsAt!==null&&Date.parse(resetsAt)<=Date.parse(current)?'stale':'fresh';
+}
+function providerStatus(value:unknown):SubscriptionProviderStatus {
+  return value==='allowed'||value==='allowed_warning'||value==='rejected'?value:'unknown';
+}
+function subscriptionObservation(context:SubscriptionUsageContext,interfaceId:string,observedAt:string|null,buckets:SubscriptionQuotaBucket[]|null,status:SubscriptionProviderStatus,complete:boolean):SubscriptionUsageObservation {
+  const windows=buckets?.flatMap(bucket=>[bucket.primary,bucket.secondary].filter((w):w is SubscriptionQuotaWindow=>w!==null))??[];
+  const known=status!=='unknown'||windows.some(w=>w.remainingPercent!==null||w.providerStatus!=='unknown');
+  const accountRef=context.identityStatus==='observed'&&context.accountRef?context.accountRef:null;
+  const pool=context.pool,hasPool=!!pool?.poolRef&&pool.sharing!=='unknown'&&pool.evidenceRefs.length>0;
+  const reasons:SubscriptionUsageObservation['unknownReasons']=[];
+  if(!windows.some(w=>w.remainingPercent!==null))reasons.push('QUOTA_UNAVAILABLE');
+  if(!complete&&windows.length)reasons.push('WINDOW_INCOMPLETE');
+  if(status==='unknown')reasons.push('PROVIDER_STATUS_UNKNOWN');
+  if(!accountRef)reasons.push('IDENTITY_UNKNOWN');
+  if(!hasPool)reasons.push('POOL_UNKNOWN');
+  if(context.evidence==='unknown')reasons.push('EVIDENCE_UNKNOWN');
+  const observed=timestamp(observedAt);
+  if(!observed)reasons.push('OBSERVED_AT_INVALID');
+  const resets=windows.map(w=>w.resetsAt).filter((value):value is string=>value!==null).sort();
+  return {
+    providerId:context.providerId,runtimeId:context.runtimeId,connectionRef:context.connectionRef,
+    accountRef,identityStatus:accountRef?'observed':'unknown',
+    source:{interfaceId,evidence:context.evidence,evidenceRefs:[...context.evidenceRefs??[]]},
+    observedAt:observed,providerObservedAt:null,lastAttemptAt:timestamp(context.lastAttemptAt),
+    dataStatus:known?complete&&observed?'available':'partial':'unknown',
+    freshness:subscriptionUsageFreshness(observed,context.now,resets[0]??null,context.connected),
+    providerStatus:status,unknownReasons:reasons,buckets,
+    poolRef:hasPool?pool!.poolRef:null,sharing:hasPool?pool!.sharing:'unknown',poolEvidenceRefs:hasPool?[...pool!.evidenceRefs]:[],
+  };
+}
+
+/** Consumes the existing parser result. Activity alone is never quota evidence.
+ * Its partial flag is retained because the parser may have discarded bad buckets. */
+export function normalizeCodexSubscriptionUsage(usage:CodexUsage,context:SubscriptionUsageContext):SubscriptionUsageObservation {
+  const convert=(value:QuotaWindow|null):SubscriptionQuotaWindow|null=>value?{
+    usedPercent:value.usedPercent,remainingPercent:value.remainingPercent,
+    windowDurationMins:value.windowDurationMins,resetsAt:timestamp(value.resetsAt),remainingSource:'computed',providerStatus:'unknown',
+  }:null;
+  const buckets=usage.buckets?.length?usage.buckets.map(bucket=>({id:bucket.id,primary:convert(bucket.primary),secondary:convert(bucket.secondary)})):null;
+  return subscriptionObservation(context,'codex-app-server.account/rateLimits/read',buckets?usage.checkedAt:null,buckets,'unknown',usage.status==='available'&&buckets!==null);
+}
+
+/** Consumes the sanitized rate_limit_info projection ({status, windows}) emitted
+ * by parseClaudeLine. Each named window remains separate; no percentage totals. */
+export function normalizeClaudeSubscriptionUsage(input:unknown,context:SubscriptionUsageContext):SubscriptionUsageObservation {
+  const data=record(input),status=providerStatus(own(data,'status')),rows=array(own(data,'windows'),32);
+  const buckets:SubscriptionQuotaBucket[]=[],seen=new Set<string>();let complete=!!rows?.length;
+  for(const row of rows??[]){
+    const item=record(row),id=own(item,'id');
+    if(!safeId(id)||seen.has(id)){complete=false;continue;}seen.add(id);
+    const raw=own(item,'utilization'),utilization=typeof raw==='number'&&Number.isFinite(raw)&&raw>=0&&raw<=1?raw:null;
+    const resetsAt=timestamp(own(item,'resetsAt')),windowStatus=providerStatus(own(item,'status'));
+    if(utilization===null||resetsAt===null||windowStatus==='unknown')complete=false;
+    buckets.push({id,primary:{usedPercent:utilization===null?null:utilization*100,
+      remainingPercent:utilization===null?null:(1-utilization)*100,remainingSource:utilization===null?'unknown':'computed',
+      windowDurationMins:null,resetsAt,providerStatus:windowStatus},secondary:null});
+  }
+  return subscriptionObservation(context,'claude-code.stream-json.rate_limit_event.rate_limit_info',
+    data?context.observedAt:null,buckets.length?buckets:null,status,complete);
 }
