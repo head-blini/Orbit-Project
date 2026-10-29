@@ -13,6 +13,14 @@ HE는 FE-1~3(read-only failure port)에 의존한다.
 6. 정상 case는 사용자가 수동으로 등록한다(통과 Run의 digest manifest).
 7. `checks` 제안은 HE 화면에 기록만 한다. 기존 검증 설정 경로로 넘기는 것은 범위 밖이다.
 
+## HE-1 반영 사항 (2026-10-29)
+- `HarnessVersion.revision`이 추가되었다. v0의 값은 `revision 0`, `lines []`, `parentId null`이다.
+- `HARNESS_INVALID`가 추가되었다. 형식이 잘못된 후보를 거부한다.
+- 상한은 5줄, 줄당 160자, 렌더 결과 1000자다.
+- digest는 내용으로만 정한다.
+- 줄을 나눠 쓴 의도는 탐지하지 못한다. 이 한계는 HE-4 평가와 사용자 승인으로 막는다.
+- Codex brief와 overlay를 합친 길이가 4000자를 넘으면 overlay 없이 **v0으로 실행**한다. 사유는 `harness.applied`에 기록한다. 이 경우에도 검증 약화는 없다.
+
 ## 1. 진화 가능 산출물과 보호 산출물
 
 ### 진화 가능 (v1 class `execution_guidance`, 덧붙이기 전용)
