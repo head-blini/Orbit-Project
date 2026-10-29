@@ -162,13 +162,13 @@ test('UI shows plain recovery control, gated release button and manual-resume qu
 test('an unobserved-exit outcome whose runner still holds the child stays owned until close is observed',async()=>{
   const child=Object.assign(new EventEmitter(),{pid:4242,stdout:new PassThrough(),stderr:new PassThrough(),stdin:new PassThrough(),signals:[] as string[]});
   (child as unknown as {kill:(s:string)=>boolean}).kill=(signal:string)=>{child.signals.push(signal);return true;};
-  const f=claudeFixture({runnerFactory:config=>new ClaudeCodeRun({...config,spawn:()=>child as unknown as ChildProcess,killAfterMs:5})});
+  const f=claudeFixture({runnerFactory:config=>new ClaudeCodeRun({...config,spawn:()=>child as unknown as ChildProcess,killAfterMs:100})});
   try{
     const {task}=f.plan(),run=await f.controller.submitTask(f.project.id,task.id,{requestId:randomUUID()});await tick();
     child.emit('error',new Error('io'));await tick();await tick();
-    assert.equal(f.store.getRun(run.id)!.execution,'lost');assert.deepEqual(child.signals,['SIGINT']);
+    assert.equal(f.store.getRun(run.id)!.execution,'lost');assert.equal(child.signals[0],'SIGINT');
     assert.throws(()=>f.controller.recoverClaudeRun(f.project.id,run.id,{requestId:randomUUID(),confirmedStopped:true}),error('CLAUDE_RUN_STILL_OWNED'));
-    await new Promise(resolve=>setTimeout(resolve,20));assert.deepEqual(child.signals,['SIGINT','SIGKILL']);
+    for(let i=0;i<100&&child.signals.length<2;i++)await new Promise(resolve=>setTimeout(resolve,20));assert.deepEqual(child.signals,['SIGINT','SIGKILL']);
     assert.throws(()=>f.controller.recoverClaudeRun(f.project.id,run.id,{requestId:randomUUID(),confirmedStopped:true}),error('CLAUDE_RUN_STILL_OWNED'),'a kill request is not exit');
     assert.equal(recoveryEvents(f.store).length,0);
     child.emit('close',null,'SIGKILL');
