@@ -2,7 +2,7 @@ import {CapabilityRouting,type CapabilityRoutePost} from './capability-routing.t
 import type {CodexModelAttribution} from '../shared/codex-model-attribution.ts';
 import type {QualityLoopRecord} from '../shared/quality-loop-record.ts';
 import {getUiMode,subscribeUiMode} from './ui-mode.ts';
-import {qualityOrigin} from './project-work-model.ts';
+import {qualityOrigin,completionView,verifiedTaskCount} from './project-work-model.ts';
 import {useEffect,useRef,useState} from 'react';
 import type {ConnectionFreshness,ProgressTask,ProjectProgress,TaskStage,ProgressVerification} from '../shared/project-progress.ts';
 import type {HandoffPackage} from '../shared/handoff.ts';
@@ -50,6 +50,7 @@ function TaskRow({task,actions,advanced,projectId,routePost,routeDisabled}:{task
     <summary>
       <span className="progress-task-title">{task.title}</span>
       <span className={'progress-stage tone-'+stageTone[task.stage]}>{stageLabels[task.stage]}</span>
+      {completionView(task)&&<span className={'progress-stage tone-'+(completionView(task)!.done?'good':'wait')}>{completionView(task)!.label}</span>}
       {task.qualityLoops?.[0]&&<span className="progress-stage">{qualityLabel(task.qualityLoops[0])}</span>}
       <span className="progress-meta">담당 {runtime(task.assignee)} · 마지막 관측 {task.lastObservedAt?time(task.lastObservedAt):'없음'}</span>
     </summary>
@@ -61,6 +62,7 @@ function TaskRow({task,actions,advanced,projectId,routePost,routeDisabled}:{task
       {task.requirementLabels.length>0&&<div><dt>요구사항</dt><dd>{task.requirementLabels.join(', ')}</dd></div>}
     </dl>
     {nextActions[task.stage]&&<p className="progress-next">{nextActions[task.stage]}</p>}
+    <CompletionStatus task={task} advanced={advanced}/>
     {task.qualityLoops?.map(loop=><QualityLoopStatus key={loop.id} loop={loop} advanced={advanced}/>)}
     <CapabilityRouting key={`${projectId}/${task.id}`} projectId={projectId} taskId={task.id} records={task.capabilityRoutes} executions={task.capabilityExecutions} canPlan={!!routePost} advanced={advanced} post={routePost} disabled={routeDisabled}/>
     {actions&&<TaskButtons task={task} actions={actions}/>}
@@ -77,6 +79,7 @@ export function ProjectProgressView({progress,freshness,lastEventAt,actions,comp
   const {totals,criteria}=progress;
   const [mode,setMode]=useState(getUiMode);
   useEffect(()=>subscribeUiMode(()=>setMode(getUiMode())),[]);
+  const verified=verifiedTaskCount(progress);
   return <div className="project-progress">
     {!compact&&<section className="surface progress-summary" aria-label="프로젝트 진행 요약">
       <div className="section-heading"><div>
@@ -84,8 +87,8 @@ export function ProjectProgressView({progress,freshness,lastEventAt,actions,comp
         <p>{progress.plan?`${progress.plan.goal} · 승인 버전 r${progress.plan.revision} · ${progress.plan.contentHash.slice(0,12)}`:'기획을 승인하면 작업과 완료 조건이 이곳에 연결됩니다.'}</p>
       </div><span className={'badge progress-fresh fresh-'+freshness} role="status">{freshnessLabels[freshness]}{lastEventAt?` · ${time(lastEventAt)}`:''}</span></div>
       <div className="progress-counters">
-        <div><strong>{totals.verifiedTasks}/{totals.tasks}</strong><span>작업 {totals.tasks}개 중 {totals.verifiedTasks}개 검증 통과 (작업 수 기준)</span>
-          <progress max={Math.max(totals.tasks,1)} value={totals.verifiedTasks} aria-label="작업 수 기준 검증 통과"/></div>
+        <div><strong>{verified}/{totals.tasks}</strong><span>작업 {totals.tasks}개 중 {verified}개 검증 통과 (작업 수 기준)</span>
+          <progress max={Math.max(totals.tasks,1)} value={verified} aria-label="작업 수 기준 검증 통과"/></div>
         <div><strong>{criteria.verified}/{criteria.total}</strong><span>완료 조건 {criteria.total}개 중 {criteria.verified}개 확인 (실행 기준과 일치한 검사만)</span>
           <progress max={Math.max(criteria.total,1)} value={criteria.verified} aria-label="완료 조건 기준 확인"/></div>
         <div><strong>{time(progress.lastObservedAt)}</strong><span>마지막 관측 활동</span></div>
@@ -174,6 +177,18 @@ export function ProjectProgressPanel({projectId,projectKind,online,lastSeq,lastE
 }
 
 export function qualityLabel(loop:QualityLoopRecord){const state=loop.result.status,issue=loop.result.issue??'';return loop.recoveryRequired?'실행 확인 필요':/QUOTA|RATE_LIMIT/.test(issue)?'사용량 한도 대기':/PERMISSION|APPROVAL_DENIED/.test(issue)?'권한 확인 필요':/MODEL.*UNKNOWN|MODEL.*UNSUPPORTED|MODEL_MISMATCH/.test(issue)?'모델 확인 필요':state==='reviewing'?(loop.result.repairs?'재검증 중':'품질 검증 중'):state==='repairing'?'수정 중':state==='passed'?({native:'AI 검토 일치',mock:'모의 AI 검토 일치 · 실제 검증 아님',unknown:'AI 검토 일치 · 모델 미확인'} as const)[qualityOrigin(loop)]:state==='limit_reached'?'품질 검증 한도 도달':state==='failed'?'품질 검증 실패':loop.result.issue==='INDEPENDENT_MODEL_REQUIRED'?'독립 검토 모델 필요':state==='blocked'?'품질 검증 차단':'품질 검증 대기';}
+/** Server completion verdict: simple mode one line, advanced mode per-gate table. Renders nothing for older servers. */
+export function CompletionStatus({task,advanced}:{task:ProgressTask;advanced:boolean}){
+  const v=completionView(task),c=task.completion;
+  if(!v||!c)return null;
+  return <section aria-label="서버 완료 판정" className="progress-quality">
+    <p role="status"><strong>{v.label}</strong> · {v.gates} · {v.review} · {v.approval} · {v.release}</p>
+    {advanced&&<table className="progress-runs"><caption>완료 gate · 사유 {c.reasonCodes.join(', ')||'없음'}</caption>
+      <thead><tr><th>gate</th><th>상태</th><th>근거 출처</th><th>최신성</th><th>근거 ID</th></tr></thead>
+      <tbody>{c.gates.map(g=><tr key={g.id}><td>{g.id}</td><td>{g.status}</td><td>{g.source}</td><td>{g.freshness}</td><td>{g.evidenceIds.map(id=>id.slice(0,8)).join(', ')||'없음'}</td></tr>)}</tbody>
+    </table>}
+  </section>;
+}
 export function QualityLoopStatus({loop,advanced}:{loop:QualityLoopRecord;advanced:boolean}){
   const label=qualityLabel(loop);
   const issues=loop.result.rounds.at(-1)?.failures??[];

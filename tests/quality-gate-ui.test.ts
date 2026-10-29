@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import type {ProjectProgress,ProgressTask,TaskStage} from '../shared/project-progress.ts';
 import type {QualityLoopRecord,QualityModelEvidence,QualityStep} from '../shared/quality-loop-record.ts';
 import type {QualityLoopResult} from '../shared/quality-loop.ts';
-import {projectSteps,nextAction,qualitySteps,taskQuality} from '../web/project-work-model.ts';
+import {projectSteps,nextAction,qualitySteps,taskQuality,completionView,verifiedTaskCount} from '../web/project-work-model.ts';
+import type {TaskCompletion,CompletionGate} from '../shared/task-completion.ts';
 import type {QualityDimension,QualityProgress,QualityStatus} from '../shared/quality-progress.ts';
 
 // QG-UI-01: the 교차 검증 / 수정·재검증 steps come only from recorded Quality Loops (mock fixtures, no model calls).
@@ -116,4 +117,47 @@ test('server quality dimensions confirm but never upgrade the UI verdict',()=>{
   assert.equal(taskQuality(task([loop({},{producer:native('claude-x','mock')})],{quality:server()})).phase,'unverified','a server pass never lifts a mock record');
   assert.equal(taskQuality(task([],{quality:server()})).phase,'none','server dimensions alone are not a quality record');
   assert.equal(taskQuality(task([loop({status:'reviewing'})],{quality:server({semantic:dim('stale')})})).phase,'review','active loops stay visible');
+});
+
+// CQG-5: the server tasks[].completion verdict is the only authority for "완료".
+const gate=(over:Partial<CompletionGate>={}):CompletionGate=>({id:'unit',status:'passed',evidenceIds:['e1'],source:'native',freshness:'current',blockers:[],...over});
+const decision=(status:'passed'|'not_run'='not_run')=>({status,evidenceIds:[],source:'native' as const,freshness:'current' as const,blockers:[]});
+const completion=(over:Partial<TaskCompletion>={}):TaskCompletion=>({binding:{} as TaskCompletion['binding'],policyDigest:'p',gates:[gate()],qualityPassed:true,
+  independentReview:decision('passed'),userApproval:decision(),verifiedDone:true,reasonCodes:[],...over});
+
+test('verifiedDone true is the only done: board count and label follow the server',()=>{
+  const done=task([loop({})],{completion:completion()}),notDone=task([loop({})],{completion:completion({verifiedDone:false})});
+  assert.equal(completionView(done)!.label,'완료(검증됨)');
+  assert.equal(taskQuality(done).phase,'passed');assert.equal(steps(progress(done)).cross.state,'done');
+  assert.equal(verifiedTaskCount({...progress(done,notDone),totals:{tasks:2,verifiedTasks:2,basis:'tasks'}}),1,'server completion overrides totals');
+});
+
+test('qualityPassed with release policy wait is labelled, not released, not done',()=>{
+  const t=task([loop({})],{completion:completion({verifiedDone:false,reasonCodes:['CQG_DEPENDENCY_RELEASE_WAIT']})});
+  const v=completionView(t)!;
+  assert.equal(v.done,false);assert.notEqual(v.label,'완료(검증됨)');assert.match(v.gates,/통과/);assert.match(v.release,/의존 작업 해제 대기: 정책 wait/);
+  assert.notEqual(steps(progress(t)).cross.state,'done','local pass cannot override server false');
+  assert.match(completionView(task([],{completion:completion()}))!.release,/해제됨/);
+});
+
+test('mock, unknown and stale gates are visibly downgraded',()=>{
+  const view=(g:Partial<CompletionGate>)=>completionView(task([loop({})],{completion:completion({verifiedDone:false,qualityPassed:false,gates:[gate(g)]})}))!;
+  assert.match(view({source:'mock'}).label,/모의/);
+  assert.match(view({source:'unknown'}).label,/모델 미확인/);
+  const stale=view({freshness:'stale'});assert.match(stale.label,/재검증 필요/);
+  const t=task([loop({})],{completion:completion({verifiedDone:false,qualityPassed:false,gates:[gate({freshness:'stale'})]})});
+  assert.equal(taskQuality(t).phase,'stale');assert.match(nextAction(progress(t),1).text,/다시 실행/);
+  const m=task([loop({})],{completion:completion({verifiedDone:false,qualityPassed:false,gates:[gate({source:'mock'})]})});
+  assert.notEqual(steps(progress(m)).cross.state,'done');
+});
+
+test('absent completion keeps old behaviour and never shows 완료(검증됨)',()=>{
+  const t=task([loop({})]);
+  assert.equal(completionView(t),null);assert.equal(steps(progress(t)).cross.state,'done');
+  assert.equal(verifiedTaskCount({...progress(t),totals:{tasks:1,verifiedTasks:1,basis:'tasks'}}),1);
+});
+
+test('review and approval are reported separately from quality gates',()=>{
+  const v=completionView(task([],{completion:completion({verifiedDone:false,independentReview:decision('passed'),userApproval:decision('not_run')})}))!;
+  assert.match(v.review,/독립 검토 통과/);assert.match(v.approval,/사용자 승인 미실행/);
 });

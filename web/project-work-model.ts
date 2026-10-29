@@ -34,6 +34,13 @@ const blockReason=(loop:QualityLoopRecord)=>loop.recoveryRequired?'실행 종료
 
 /** Pure: classifies one task's newest Quality Loop record, then lets the server's QG-01 dimensions (when present) only downgrade it. */
 export function taskQuality(task:ProgressTask):TaskQuality{
+  const q=localServerQuality(task),c=task.completion;
+  // The server completion verdict is authority: a local pass never survives verifiedDone=false.
+  if(!c||c.verifiedDone||q.phase!=='passed')return q;
+  const v=completionView(task)!;
+  return {...q,phase:v.stale?'stale':'unverified',reason:`서버 완료 판정 미충족: ${v.label} · ${v.release}`};
+}
+function localServerQuality(task:ProgressTask):TaskQuality{
   const local=loopQuality(task),server=task.quality;
   if(!server||!local.loop||!['passed','failed','unverified'].includes(local.phase))return local;
   const blockers=(...dims:QualityDimension[])=>[...new Set(dims.flatMap(d=>d.blockers))].join(', ')||'근거 없음';
@@ -56,6 +63,23 @@ function loopQuality(task:ProgressTask):TaskQuality{
   if(!independentlyReviewed(loop))return {...base,phase:'unverified',origin,reason:'독립 검토 완료 근거가 부족합니다'};
   if(loop.verification.status!=='passed')return {...base,phase:'unverified',origin,reason:`필수 검사 ${loop.verification.status==='failed'?'실패':'미확인'}`};
   return {...base,phase:'passed',origin,reason:repairs?`수정 ${repairs}회 후 재검증 통과`:'수정 없이 통과'};
+}
+/** Server completion verdict split into quality gates / independent review / user approval / release policy. Null when an older server sent none. */
+export interface CompletionView {done:boolean;stale:boolean;label:string;gates:string;review:string;approval:string;release:string;reasons:string[]}
+const decisionLabel=(d:{status:string;source:string;freshness:string})=>`${d.status==='passed'||d.status==='completed'?'통과':d.status==='not_applicable'?'해당 없음':d.status==='not_run'?'미실행':d.status==='failed'?'실패':d.status==='stale'?'기준 변경':'미확인'}${d.source==='mock'?' · 모의':d.source==='unknown'&&d.status!=='not_applicable'?' · 모델 미확인':''}${d.freshness==='stale'||d.status==='stale'?' · 기준 변경 · 재검증 필요':''}`;
+export function completionView(task:ProgressTask):CompletionView|null{
+  const c=task.completion;if(!c)return null;
+  const all=[...c.gates,c.independentReview,c.userApproval];
+  const stale=all.some(g=>g.freshness==='stale'||g.status==='stale'),mock=all.some(g=>g.source==='mock'),unknown=c.gates.some(g=>g.source==='unknown'&&g.status!=='not_applicable');
+  const wait=c.reasonCodes.includes('CQG_DEPENDENCY_RELEASE_WAIT');
+  const label=c.verifiedDone?'완료(검증됨)':stale?'기준 변경 · 재검증 필요':mock?'모의 · 완료로 보지 않음':unknown?'모델 미확인 · 완료로 보지 않음':c.qualityPassed?'품질 통과 · 종속 작업 해제 전':'완료 미인정';
+  return {done:c.verifiedDone,stale,label,
+    gates:c.qualityPassed?'품질 gate 통과':'품질 gate 미통과',review:`독립 검토 ${decisionLabel(c.independentReview)}`,approval:`사용자 승인 ${decisionLabel(c.userApproval)}`,
+    release:c.verifiedDone?'종속 작업 해제됨':wait?'의존 작업 해제 대기: 정책 wait':'종속 작업 해제 전',reasons:c.reasonCodes};
+}
+/** Verified-task count: server completion when any task carries it, otherwise the server totals. */
+export function verifiedTaskCount(progress:ProjectProgress):number{
+  return progress.tasks.some(t=>t.completion)?progress.tasks.filter(t=>t.completion?.verifiedDone).length:progress.totals.verifiedTasks;
 }
 const evidenceLine=(q:TaskQuality)=>q.loop?`${q.title}: ${phaseLabel[q.phase]} · ${qualityOriginLabel[q.origin]} · ${q.reason} · 기록 ${q.loop.id.slice(0,8)} · 실행 ${q.loop.sourceRunId.slice(0,8)} · 회차 ${q.loop.result.rounds.length} · 필수 검사 ${q.loop.verification.status}${q.loop.result.issue?' · '+q.loop.result.issue:''}${q.server?` · 서버 독립 검토 ${q.server.independentReview.status} · 의미 기준 ${q.server.semantic.status} · 재검증 ${q.server.revalidation.status}`:' · 서버 품질 근거 없음'}`:`${q.title}: ${phaseLabel.none}`;
 
