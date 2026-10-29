@@ -1,6 +1,6 @@
 import {createHash} from 'node:crypto';
 import {CODE_GATES, GENERAL_GATES} from '../shared/task-completion.ts';
-import type {CodeGate, CompletionBinding, CompletionDecision, CompletionEvidence, CompletionGate, CompletionPolicy, TaskCompletion} from '../shared/task-completion.ts';
+import type {CandidateCompletion, CandidateCompletionEvidence, IntegrationCandidateSubject, CodeGate, CompletionBinding, CompletionDecision, CompletionEvidence, CompletionGate, CompletionPolicy, TaskCompletion} from '../shared/task-completion.ts';
 import type {QualityModelEvidence} from '../shared/quality-loop-record.ts';
 import type {QualityFreshness} from '../shared/quality-progress.ts';
 
@@ -30,6 +30,10 @@ function worst(values:QualityFreshness[]):QualityFreshness {
 }
 /** Pure projection: no IO, execution, clock, persistence, recovery or approval creation. */
 export function evaluateTaskCompletion(evidence:CompletionEvidence, policy:CompletionPolicy, binding:CompletionBinding):TaskCompletion {
+  return evaluateCompletion(evidence,policy,binding);
+}
+/** The task entry point never accepts a candidate subject or relaxes AI provenance. */
+function evaluateCompletion(evidence:CandidateCompletionEvidence, policy:CompletionPolicy, binding:CompletionBinding, candidate?:{subject:IntegrationCandidateSubject;source:TaskCompletion|null}):TaskCompletion {
   const q=evidence.quality, policyDigest=completionPolicyDigest(policy);
   const keys: (keyof CompletionBinding)[]=[...baseKeys,policy.projectKind==='code'?'baseSha':'inputSnapshotDigest'];
   function compare(value:Partial<CompletionBinding>|undefined, selectedKeys=keys):CompletionDecision {
@@ -63,10 +67,26 @@ export function evaluateTaskCompletion(evidence:CompletionEvidence, policy:Compl
     ||new Set(policy.notApplicable.map(n=>n.gate)).size!==policy.notApplicable.length
     ||!['wait','quality_passed','quality_passed_and_user_approval'].includes(policy.dependencyRelease))reasons.push('CQG_POLICY_INVALID');
   const producer=evidence.producer;
-  reasons.push(...compare(producer?.binding).blockers,...modelIssue(producer?.model));
-  if(producer?.model.runId!==binding.runId)reasons.push('CQG_PRODUCER_RUN_MISMATCH');
-  if(q.execution.status!=='completed'||q.execution.evidenceSource!=='native')reasons.push('CQG_EXECUTION_NOT_OBSERVED_COMPLETE');
-  reasons.push(...q.execution.blockers);
+  if(candidate){
+    const {subject,source}=candidate;
+    if(subject.subject!=='integration_candidate'||subject.producer!=='orbit_merge'
+      ||subject.integrationId!==binding.artifactId||subject.candidateDigest!==binding.artifactDigest
+      ||(policy.projectKind==='code'&&subject.targetDigest!==binding.baseSha))reasons.push('CQG_CANDIDATE_SUBJECT_MISMATCH');
+    if(!source?.verifiedDone){reasons.push('CQG_SOURCE_NOT_VERIFIED_DONE',...(source?.reasonCodes??[]));}
+    const expected=subject.sourceBinding;
+    for(const key of keys){
+      if(!present(expected[key])||!present(source?.binding[key])||expected[key]!==source?.binding[key])reasons.push(`CQG_SOURCE_BINDING_MISMATCH:${key}`);
+    }
+    for(const key of ['projectId','taskId','runId','planningVersionId','planningContentHash','acceptanceDigest','graphRevision','contractDigest','policyDigest'] as const){
+      if(expected[key]!==binding[key])reasons.push(`CQG_SOURCE_BINDING_MISMATCH:${key}`);
+    }
+    if(source?.policyDigest!==policyDigest)reasons.push('CQG_SOURCE_POLICY_MISMATCH');
+  }else{
+    reasons.push(...compare(producer?.binding).blockers,...modelIssue(producer?.model));
+    if(producer?.model.runId!==binding.runId)reasons.push('CQG_PRODUCER_RUN_MISMATCH');
+    if(q.execution.status!=='completed'||q.execution.evidenceSource!=='native')reasons.push('CQG_EXECUTION_NOT_OBSERVED_COMPLETE');
+    reasons.push(...q.execution.blockers);
+  }
 
   const loopId=q.independentReview.evidenceIds.at(-1)??q.semantic.evidenceIds.at(-1);
   const loopMatches=evidence.loops.filter(l=>l.id===loopId), loop=loopMatches.length===1?loopMatches[0]:undefined;
@@ -128,17 +148,17 @@ export function evaluateTaskCompletion(evidence:CompletionEvidence, policy:Compl
     const na=policy.notApplicable.find(n=>n.gate===id);
     if(na){const approved=present(na.reason)&&present(na.approvedBy)&&present(na.approvedAt)&&Number.isFinite(Date.parse(na.approvedAt));
       return {id,...decision(approved?[]:['CQG_NA_APPROVAL_REQUIRED']),status:approved?'not_applicable':'blocked',source:'local',freshness:'current'};}
-    if(id==='semantic_review'){
+    if(id==='semantic_review'&&!candidate){
       const blockers=[...independentReview.blockers,...q.semantic.blockers];
       if(!semanticPassed||q.semantic.status!=='passed'||!q.semantic.evidenceIds.includes(loopId!))blockers.push('CQG_SEMANTIC_REVIEW_REQUIRED');
       return {id,...independentReview,status:independentReview.freshness==='stale'?'stale':independentReview.status==='recorded'?'recorded':blockers.length?'blocked':'passed',blockers:sorted(blockers)};
     }
-    if(id==='artifact_format'||id==='numeric_source'){
+    if(id==='artifact_format'||id==='numeric_source'||id==='semantic_review'){
       const results=evidence.gateResults.filter(r=>r.gate===id);
       const latestId=[...q.evidence].reverse().find(e=>results.some(r=>r.evidenceId===e.id))?.id;
       const selected=results.filter(r=>r.evidenceId===latestId);
       const result=selected.length===1?selected[0]:undefined;
-      if(!result)return {id,...decision(['CQG_GATE_EVIDENCE_MISSING'])};
+      if(!result)return {id,...decision([id==='semantic_review'?'CQG_SEMANTIC_REVIEW_REQUIRED':'CQG_GATE_EVIDENCE_MISSING'])};
       const state=assess(result.evidenceId,'artifact_check');
       if(result.status!=='passed')state.blockers.push('CQG_GATE_NOT_PASSED');
       if(state.source!=='local')state.blockers.push('CQG_LOCAL_CHECK_REQUIRED');
@@ -164,8 +184,8 @@ export function evaluateTaskCompletion(evidence:CompletionEvidence, policy:Compl
     return {id,status:freshness==='stale'?'stale':source==='mock'||source==='unknown'?'recorded':blockers.length?'blocked':'passed',evidenceIds:sorted(states.flatMap(s=>s.evidenceIds)),source,freshness,blockers};
   });
   reasons.push(...gates.flatMap(g=>g.blockers));
-  if(policy.projectKind==='general'||policy.requireIndependentReview||loopId)reasons.push(...independentReview.blockers);
-  if(loop?.steps.some(s=>s.kind==='repair')||loop?.result.repairs||q.repair.status!=='not_run'){
+  if(!candidate&&(policy.projectKind==='general'||policy.requireIndependentReview||loopId))reasons.push(...independentReview.blockers);
+  if(!candidate&&(loop?.steps.some(s=>s.kind==='repair')||loop?.result.repairs||q.repair.status!=='not_run')){
     reasons.push(...independentReview.blockers);
     const localIds=gates.filter(g=>g.id!=='semantic_review'&&g.status!=='not_applicable').flatMap(g=>g.evidenceIds);
     if(!repairIds.length||localIds.some(id=>!repairIds.includes(id)))reasons.push('CQG_REVERIFICATION_REQUIRED');
@@ -186,4 +206,11 @@ export function evaluateTaskCompletion(evidence:CompletionEvidence, policy:Compl
   if(policy.dependencyRelease==='quality_passed_and_user_approval')reasons.push(...userApproval.blockers);
   const verifiedDone=qualityPassed&&(policy.dependencyRelease==='quality_passed'||policy.dependencyRelease==='quality_passed_and_user_approval'&&userApproval.status==='passed');
   return {binding:{...binding},policyDigest,gates,qualityPassed,independentReview,userApproval,verifiedDone,reasonCodes:sorted(reasons)};
+}
+
+/** Pure candidate projection. Source completion must be freshly read by the server
+ * through CQG-1; only local candidate checks can satisfy candidate gates. */
+export function evaluateCandidateCompletion(evidence:CandidateCompletionEvidence,policy:CompletionPolicy,binding:CompletionBinding,subject:IntegrationCandidateSubject,source:TaskCompletion|null):CandidateCompletion {
+  const result=evaluateCompletion(evidence,policy,binding,{subject,source});
+  return {...result,subject:'integration_candidate',producer:'orbit_merge',independentReview:source?.independentReview??decision(['CQG_SOURCE_NOT_VERIFIED_DONE'])};
 }

@@ -1,5 +1,5 @@
 import {ProjectProgressService,type CompletionReaders} from './project-progress.ts';
-import type {IntegrationCompletionReader} from './integration-queue.ts';
+import type {CandidateCompletionContext,IntegrationItem,IntegrationCompletionReader} from './integration-queue.ts';
 import {lstatSync,readdirSync} from 'node:fs';
 import {fingerprintWorkspace} from './workspace-fingerprint.ts';
 import type {CapabilityExecutionService} from './capability-execution.ts';
@@ -8,7 +8,7 @@ import {ParallelWorkerService} from './parallel-workers.ts';
 import {WorkerSpaces,generalAttemptPath,resolveWorkerPath,type WorkerSpace} from './worker-spaces.ts';
 import {IntegrationQueue,readCandidateCompletion} from './integration-queue.ts';
 import {TaskGraphService} from './task-graph.ts';
-import {WORKER_LIMITS,type ApprovedExecutionBatch,type WorkerResourceClaim} from '../shared/parallel-workers.ts';
+import {WORKER_LIMITS,type ApprovedExecutionBatch,type WorkerResourceClaim,type WorkerReservation} from '../shared/parallel-workers.ts';
 import {WorkerScheduler,approvedWorkerBase,assertWorkerOwnership,type WorkerDispatchContext} from './worker-scheduler.ts';
 import { createHash,randomUUID } from 'node:crypto';
 import {NativeLaunchNotStarted} from './native-launch-error.ts';
@@ -129,7 +129,7 @@ export class Controller {
   private ownQualityStep<T>(work:()=>T):T{const before=this.qualityScope;this.qualityScope=true;try{return work();}finally{this.qualityScope=before;}}
   assertExecutionAvailable(){this.qualityAvailable();if(this.soloRecoveryRequired())throw new AppError('SOLO_RECOVERY_REQUIRED',409);}
   constructor(store:Store,workspace:string,factory:(workspace:string,write:boolean)=>RpcPort,projects?:Projects,verificationConfig:VerificationConfiguration[]=[],modelHubConfig:readonly ModelHubConfiguration[]=[],claudeOptions:ClaudeTaskServiceOptions={},claudePlanningOptions:ClaudePlanningOptions={},qualityOptions:Pick<QualityNativeOptions,'findExecutable'|'claudeFactory'|'codexReview'>={},registryOptions:ControllerRegistryOptions={}){
-    this.candidateCompletion=registryOptions.candidateCompletion??(item=>readCandidateCompletion(store,item));this.completionPolicy=registryOptions.completion?.policy;
+    this.candidateCompletion=registryOptions.candidateCompletion??(item=>this.readIntegrationCandidate(item));this.completionPolicy=registryOptions.completion?.policy;
     this.store=store;this.workspace=workspace;this.factory=factory;this.projects=projects;
     this.subscriptionUsage=new SubscriptionUsageStore(store);
     this.claudeTasks=new ClaudeTaskService(store,projects,claudeOptions,this.subscriptionUsage);
@@ -166,6 +166,30 @@ export class Controller {
     store.db.exec('CREATE TABLE IF NOT EXISTS quality_controller_receipts(id TEXT PRIMARY KEY,body TEXT NOT NULL)');
     this.qualityLoops=new QualityLoopService(store,this.qualityPorts);
   }
+  private readIntegrationSource(item:Readonly<IntegrationItem>){
+    const row=this.store.db.prepare('SELECT body FROM worker_reservations WHERE id=?').get(item.fence.reservationId);
+    if(!row)return null;
+    const reservation=JSON.parse(String(row.body)) as WorkerReservation;
+    const run=this.store.findRequest(reservation.attempt.dispatchRequestId)?.run;
+    if(!run||run.taskId!==reservation.attempt.taskId||run.projectId!==item.projectId
+      ||(run.workspaceId??null)!==item.space.workspaceId)return null;
+    const task=this.progress.read(item.projectId,{}).tasks.find(t=>t.id===reservation.attempt.taskId&&t.latestRunId===run.id);
+    return task?.completion??null;
+  }
+  private readIntegrationCandidate(item:Readonly<IntegrationItem>){
+    // Deterministic code merges have local command evidence, never an AI producer.
+    if(item.space.kind!=='code')return readCandidateCompletion(this.store,item);
+    const source=this.readIntegrationSource(item);
+    if(!source||!item.candidateDigest||!item.target||!item.space.workspaceId)return null;
+    const binding={...source.binding,artifactId:item.id,artifactDigest:item.candidateDigest,
+      baseSha:item.target.head,configDigest:item.configDigest,policyDigest:item.completionPolicyDigest??null};
+    const dimension={status:'not_run' as const,evidenceIds:[],blockers:[],nextAction:null};
+    const context:CandidateCompletionContext={subject:{integrationId:item.id,candidateDigest:item.candidateDigest,targetDigest:item.target.head},binding,
+      producer:undefined,quality:{execution:{...dimension,status:'completed',evidenceSource:'local'},format:dimension,codeVerification:dimension,
+        semantic:dimension,independentReview:dimension,repair:dimension,revalidation:dimension,userApproval:dimension,evidence:[]},
+      commands:this.verification.view(item.space.workspaceId,source.binding.runId).commands,bindings:{},loops:[],gateResults:[]};
+    return readCandidateCompletion(this.store,item,context);
+  }
   initializeWorkers(execution:CapabilityExecutionService,configuration:WorkerConfiguration={},completion?:{policy:NonNullable<CompletionReaders['policy']>;candidate:IntegrationCompletionReader}){
     if(this.workerScheduler)return;
     if(!this.projects)return;
@@ -179,7 +203,7 @@ export class Controller {
       const graph=new TaskGraphService(this.store).view(projectId,held.batch.planningVersionId,{verifiedDoneIds:[],blocked:[]},held.batch.graphRevision);
       if(graph.stale||new TaskGraphService(this.store).read(projectId,held.batch.planningVersionId).revision!==held.batch.graphRevision)throw new AppError('INTEGRATION_BASELINE_CHANGED',409);
       return {approvedBaseline:held.batch.planningHash,defaultBranch:config?.defaultBranch??'',requiredChecks:config?.requiredChecks??[],completionPolicy:this.completionPolicy?.(projectId)};
-    },item=>this.candidateCompletion(item));
+    },item=>this.candidateCompletion(item),item=>this.readIntegrationSource(item));
     this.store.db.exec('CREATE TABLE IF NOT EXISTS worker_integration_refusals(reservation_id TEXT PRIMARY KEY,project_id TEXT NOT NULL,reason TEXT NOT NULL);');
     for(const row of this.store.db.prepare('SELECT reservation_id FROM worker_integration_refusals').all()){
       const reservation=workers.read(String(row.reservation_id));

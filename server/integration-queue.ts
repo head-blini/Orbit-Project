@@ -10,8 +10,8 @@ import type {VerificationService} from './verification-service.ts';
 import type {MergeService} from './merge-service.ts';
 import {assertWorkspaceManifest,readWorkspaceSnapshot,type WorkspaceFileSnapshot} from './workspace-fingerprint.ts';
 import * as git from './merge-git.ts';
-import {completionPolicyDigest,evaluateTaskCompletion} from './task-completion.ts';
-import type {CompletionBinding,CompletionEvidence,CompletionPolicy,TaskCompletion} from '../shared/task-completion.ts';
+import {completionPolicyDigest,evaluateCandidateCompletion} from './task-completion.ts';
+import type {CandidateCompletion,CandidateCompletionEvidence,CompletionBinding,CompletionEvidence,CompletionPolicy,TaskCompletion} from '../shared/task-completion.ts';
 import type {VerificationResult} from './verification.ts';
 
 const zero='0'.repeat(40);
@@ -31,14 +31,12 @@ export interface IntegrationPolicy {
  * Missing candidate provenance means no auto-apply. Readers never run checks or invoke providers. */
 export interface IntegrationCompletionEvidence {
   subject:{integrationId:string;candidateDigest:string;targetDigest:string|null};
-  binding:CompletionBinding;evidence:CompletionEvidence;
+  binding:CompletionBinding;evidence:CandidateCompletionEvidence;
 }
 export type IntegrationCompletionReader=(item:Readonly<IntegrationItem>)=>IntegrationCompletionEvidence|null;
-/** Optional provenance captured by a trusted candidate producer, alongside its
- * integration check. The current verifier emits command-only rows: those cannot
- * establish AI provenance and stay refused until a candidate producer records it.
- * No worker record or current policy is used to fill these fields on reads.
- */
+/** Trusted candidate metadata. Code command rows may use a local context from
+ * the server reader; native source completion is read separately at apply time.
+ * General semantic checks still need explicit candidate-bound local evidence. */
 export interface CandidateCompletionContext {
   subject:IntegrationCompletionEvidence['subject'];
   binding:CompletionBinding;
@@ -47,20 +45,20 @@ export interface CandidateCompletionContext {
   commands:CompletionEvidence['commands'];
   bindings:CompletionEvidence['bindings'];
   loops:CompletionEvidence['loops'];
-  gateResults:CompletionEvidence['gateResults'];
+  gateResults:CandidateCompletionEvidence['gateResults'];
 }
-export function readCandidateCompletion(store:Store,item:Readonly<IntegrationItem>):IntegrationCompletionEvidence|null {
+export function readCandidateCompletion(store:Store,item:Readonly<IntegrationItem>,localContext?:CandidateCompletionContext):IntegrationCompletionEvidence|null {
   if(!store.db.prepare("SELECT 1 FROM sqlite_master WHERE name='integration_checks'").get())return null;
   try{
     const rows=store.db.prepare('SELECT id,body FROM integration_checks ORDER BY rowid').all().map(row=>({...JSON.parse(String(row.body)),id:String(row.id)}));
     const matches=rows.filter(row=>row.integrationId===item.id&&row.sourceDigest===item.candidateDigest&&row.configDigest===item.configDigest&&row.approvedBaseline===item.approvedBaseline);
     const contexts=matches.flatMap(row=>row.completionContext?[row.completionContext as CandidateCompletionContext]:[]);
-    const context=contexts.at(-1);
+    const context=contexts.at(-1)??localContext;
     if(!context||contexts.some(c=>hash(c)!==hash(context)))return null;
     const {binding,subject}=context;
     if(subject.integrationId!==item.id||subject.candidateDigest!==item.candidateDigest||subject.targetDigest!==(item.target?.head??item.generalTargetDigest)
       ||binding.artifactId!==item.id||binding.artifactDigest!==item.candidateDigest||binding.configDigest!==item.configDigest||binding.policyDigest!==item.completionPolicyDigest)return null;
-    const evidence:CompletionEvidence={...structuredClone(context),checks:[],approvals:[]};
+    const evidence:CandidateCompletionEvidence={...structuredClone(context),checks:[],approvals:[]};
     // Check truth comes only from candidate command results, never the context.
     evidence.quality.evidence=evidence.quality.evidence.filter(e=>e.kind!=='verification_check');
     for(const row of matches){
@@ -83,7 +81,7 @@ export interface IntegrationItem {
   target:git.MergeTarget|null;candidate:git.MergeCandidate|null;candidatePath:string|null;candidateDigest:string|null;
   status:'queued'|'building'|'verifying'|'applying'|'applied'|'refused'|'blocked';reason:string|null;
   attempts:number;released:boolean;generalTargetDigest:string|null;applyStarted:boolean;
-  completionPolicyDigest?:string|null;completion?:TaskCompletion;
+  completionPolicyDigest?:string|null;completion?:CandidateCompletion;
 }
 function scan(root:string):git.MergeSnapshot {
   canonical(root);const files:{path:string;mode:string}[]=[];let count=0;
@@ -109,9 +107,10 @@ export class IntegrationQueue {
   private store:Store;private projects:Projects;private workers:ParallelWorkerService;private spaces:WorkerSpaces;
   private verification:VerificationService;private merge:MergeService;private policy:(projectId:string)=>IntegrationPolicy;
   private readCompletion:IntegrationCompletionReader;
-  constructor(store:Store,projects:Projects,workers:ParallelWorkerService,spaces:WorkerSpaces,verification:VerificationService,merge:MergeService,policy:(projectId:string)=>IntegrationPolicy,readCompletion:IntegrationCompletionReader=item=>readCandidateCompletion(store,item)){
+  private readSourceCompletion:(item:Readonly<IntegrationItem>)=>TaskCompletion|null;
+  constructor(store:Store,projects:Projects,workers:ParallelWorkerService,spaces:WorkerSpaces,verification:VerificationService,merge:MergeService,policy:(projectId:string)=>IntegrationPolicy,readCompletion:IntegrationCompletionReader=item=>readCandidateCompletion(store,item),readSourceCompletion:(item:Readonly<IntegrationItem>)=>TaskCompletion|null=()=>null){
     this.store=store;this.projects=projects;this.workers=workers;this.spaces=spaces;this.verification=verification;this.merge=merge;this.policy=policy;
-    this.readCompletion=readCompletion;
+    this.readCompletion=readCompletion;this.readSourceCompletion=readSourceCompletion;
     store.db.exec('CREATE TABLE IF NOT EXISTS integration_queue(id TEXT PRIMARY KEY,request_id TEXT NOT NULL UNIQUE,input_digest TEXT NOT NULL,slot INTEGER UNIQUE CHECK(slot=1),body TEXT NOT NULL);');
   }
   get(id:string):IntegrationItem {const row=this.store.db.prepare('SELECT body FROM integration_queue WHERE id=?').get(id);if(!row)throw new Error('INTEGRATION_NOT_FOUND');return JSON.parse(String(row.body));}
@@ -189,8 +188,13 @@ export class IntegrationQueue {
       }));
       if(hash(evidence.commands.map(c=>({id:c.id,digest:c.configDigest})))!==item.configDigest)throw new Error('INTEGRATION_COMPLETION_CONFIG_MISMATCH');
     }
-    item.completion=evaluateTaskCompletion(evidence,policy,binding);
-    if(!item.completion.qualityPassed)throw new Error('INTEGRATION_COMPLETION_REFUSED:'+item.completion.reasonCodes.join(','));
+    const source=this.readSourceCompletion(structuredClone(item));
+    const sourceBinding:CompletionBinding={...binding,artifactId:item.space.workspaceId??item.space.attemptId,
+      artifactDigest:item.space.kind==='code'?item.manifest.sourceDigest:hash(item.manifest),baseSha:item.baseSha,
+      configDigest:item.space.kind==='code'?binding.configDigest:source?.binding.configDigest??null};
+    item.completion=evaluateCandidateCompletion(evidence,policy,binding,{subject:'integration_candidate',producer:'orbit_merge',
+      ...subject,sourceBinding},source);
+    if(!item.completion.verifiedDone)throw new Error('INTEGRATION_COMPLETION_REFUSED:'+item.completion.reasonCodes.join(','));
   }
   async drain():Promise<void> {
     for(;;){

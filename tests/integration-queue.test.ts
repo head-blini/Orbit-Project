@@ -12,16 +12,18 @@ import {repositoryIdentity} from '../server/repository-resource.ts';
 import {trustedGit} from '../server/git-process.ts';
 import {VerificationService} from '../server/verification-service.ts';
 import {MergeService} from '../server/merge-service.ts';
+import {Controller} from '../server/controller.ts';
+import type {VerificationView} from '../shared/verification.ts';
 import {IntegrationQueue,readCandidateCompletion,type IntegrationItem,type IntegrationCompletionEvidence} from '../server/integration-queue.ts';
 import {CODE_GATES,GENERAL_GATES,type CompletionPolicy,type CompletionEvidence} from '../shared/task-completion.ts';
-import {completionPolicyDigest} from '../server/task-completion.ts';
+import {completionPolicyDigest,evaluateTaskCompletion} from '../server/task-completion.ts';
 import {readVerificationConfiguration,verificationCommandPreviews,verificationGateCommandMap} from '../server/verification-configuration.ts';
 import type {QualityDimension} from '../shared/quality-progress.ts';
 
 const digest=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const dimension=(status:QualityDimension['status']='not_run',evidenceIds:string[]=[]):QualityDimension=>({status,evidenceIds,blockers:[],nextAction:null});
 // Native model/review observations are fixtures, never live provider evidence.
-function candidateEvidence(item:IntegrationItem,store:Store,policy:CompletionPolicy,commands:CompletionEvidence['commands']):IntegrationCompletionEvidence {
+function candidateEvidence(item:IntegrationItem,store:Store,policy:CompletionPolicy,commands:CompletionEvidence['commands'],source=false):IntegrationCompletionEvidence {
  const reservation=new ParallelWorkerService(store).read(item.fence.reservationId);
  const binding={projectId:item.projectId,taskId:reservation.attempt.taskId,runId:'run-producer',planningVersionId:reservation.batch.planningVersionId,
   planningContentHash:item.approvedBaseline,acceptanceDigest:'acceptance',artifactId:item.id,artifactDigest:item.candidateDigest,
@@ -51,6 +53,15 @@ function candidateEvidence(item:IntegrationItem,store:Store,policy:CompletionPol
    result:{status:'passed',issue:null,calls:1,repairs:0,artifact,rounds:[{number:1,artifact,reviews:[{reviewerId:'reviewer',result:review}],failures:[]}]},
    steps:[{id:'review-step',index:1,kind:'review',state:'completed',requestDigest:'request',startedAt:'start',finishedAt:'finish',issue:null,evidence:model('reviewer'),result:review}],verification:{status:'passed',checkIds:[],issue:null}});
  }
+ if(!source){
+  evidence.producer=undefined;evidence.quality.execution.evidenceSource='local';
+  evidence.loops=[];evidence.quality.semantic=dimension();evidence.quality.independentReview=dimension();
+  evidence.quality.evidence=evidence.quality.evidence.filter(e=>e.kind!=='quality_loop');
+  if(item.space.kind==='general'){
+   const id=item.id+'semantic';add(id,'artifact_check');
+   (evidence as IntegrationCompletionEvidence['evidence']).gateResults.push({gate:'semantic_review',evidenceId:id,status:'passed'});
+  }
+ }
  return {subject:{integrationId:item.id,candidateDigest:item.candidateDigest!,targetDigest:item.target?.head??item.generalTargetDigest},binding,evidence};
 }
 
@@ -75,8 +86,13 @@ function fixture(kind:'code'|'general'='code',args=['-e','process.exit(0)']){
   const merge=new MergeService(store,projects,verification,()=>false);
   const completionPolicy:CompletionPolicy={projectKind:kind,requiredGates:[...(kind==='code'?CODE_GATES:GENERAL_GATES)],gateCommandMap:verificationGateCommandMap(configuration,project.path),notApplicable:[],requireIndependentReview:kind==='general',dependencyRelease:'quality_passed'};
   const policy={approvedBaseline:'a'.repeat(64),defaultBranch:'trunk',requiredChecks:['full'],completionPolicy};
-  const completion={read:(item:IntegrationItem):IntegrationCompletionEvidence|null=>candidateEvidence(item,store,policy.completionPolicy,verificationCommandPreviews(configuration,project.path))};
-  const makeQueue=()=>new IntegrationQueue(store,projects,workers,spaces,verification,merge,()=>policy,item=>completion.read(item));
+  const completion={source:(item:IntegrationItem)=>{
+    const captured=candidateEvidence(item,store,policy.completionPolicy,verificationCommandPreviews(configuration,project.path),true);
+    const result=evaluateTaskCompletion(captured.evidence as CompletionEvidence,policy.completionPolicy,captured.binding);
+    result.binding={...result.binding,artifactId:item.space.workspaceId??item.space.attemptId,artifactDigest:kind==='code'?item.manifest.sourceDigest:digest(item.manifest),baseSha:item.baseSha};
+    return result;
+  },read:(item:IntegrationItem):IntegrationCompletionEvidence|null=>candidateEvidence(item,store,policy.completionPolicy,verificationCommandPreviews(configuration,project.path))};
+  const makeQueue=()=>new IntegrationQueue(store,projects,workers,spaces,verification,merge,()=>policy,item=>completion.read(item),item=>completion.source(item));
   const queue=makeQueue();
   const worker=(file:string,content:string)=>{
     const attempt=randomUUID(),path=kind==='code'?file:join(generalAttemptPath(project.path,attempt),'output');
@@ -86,7 +102,7 @@ function fixture(kind:'code'|'general'='code',args=['-e','process.exit(0)']){
     workers.transition(r,'dispatched');workers.confirmTerminal(r,{kind:'terminal_confirmed',dispatchRequestId:r.attempt.dispatchRequestId,evidenceId:'terminated'});
     return {r,space,enqueue:(targetBranch='dev')=>queue.enqueue({requestId:randomUUID(),fence:r,targetBranch:kind==='code'?targetBranch:null})};
   };
-  return {root,repo,git,store,project,workers,spaces,verification,merge,policy,completion,queue,makeQueue,worker,base};
+  return {root,repo,git,store,project,workers,spaces,verification,merge,policy,completion,queue,makeQueue,worker,base,configuration};
 }
 test('two workers integrate sequentially from their own base onto latest HEAD',async()=>{
  const f=fixture();try{const a=f.worker('a.txt','A\n'),b=f.worker('b.txt','B\n');const x=a.enqueue(),y=b.enqueue();await f.queue.drain();
@@ -108,7 +124,7 @@ test('server-wide durable slot excludes another queue while verification is pend
   const original=f.verification.verifyIntegration.bind(f.verification);let enter!:()=>void,release!:()=>void;
   const entered=new Promise<void>(r=>enter=r),barrier=new Promise<void>(r=>release=r);let calls=0,active=0,max=0;
   f.verification.verifyIntegration=async input=>{calls++;active++;max=Math.max(max,active);if(calls===1){enter();await barrier;}try{return await original(input);}finally{active--;}};
-  const first=f.queue.drain();await entered;
+  const first=f.queue.drain();await Promise.race([entered,first.then(()=>{throw new Error('Queue ended before verification barrier: '+f.queue.get(x.id).reason);})]);
   const second=f.makeQueue();assert.equal(second.active,true);await second.drain();assert.equal(calls,1);assert.equal(second.get(y.id).status,'queued');
   assert.throws(()=>second.reconcile(x.id,true),/STOP_CONFIRMATION/);
   assert.throws(()=>f.merge.ensureAvailable(),/INTEGRATION_BUSY/);
@@ -220,6 +236,7 @@ for(const defect of ['worker','missing','unmapped','mock','unknown','semantic','
  test(`candidate completion refuses ${defect} evidence before apply`,async()=>{
   const f=fixture(defect==='semantic'?'general':'code');try{
    if(defect==='unmapped')delete f.policy.completionPolicy.gateCommandMap.e2e;
+   if(defect==='producer'){const source=f.completion.source;f.completion.source=item=>({...source(item),verifiedDone:false,reasonCodes:['CQG_MODEL_OBSERVATION_REQUIRED']});}
    const read=f.completion.read;
    f.completion.read=item=>{
     const value=read(item)!;
@@ -231,9 +248,9 @@ for(const defect of ['worker','missing','unmapped','mock','unknown','semantic','
     }
     if(defect==='missing')value.evidence.checks=[];
     if(defect==='mock'||defect==='unknown')for(const e of value.evidence.quality.evidence)e.evidenceSource=defect;
-    if(defect==='semantic'){value.evidence.loops=[];value.evidence.quality.semantic=dimension();value.evidence.quality.independentReview=dimension();}
+    if(defect==='semantic'){value.evidence.gateResults=value.evidence.gateResults.filter(g=>g.gate!=='semantic_review');value.evidence.loops=[];value.evidence.quality.semantic=dimension();value.evidence.quality.independentReview=dimension();}
     if(defect==='subject')value.subject.targetDigest='old-head';
-    if(defect==='producer')value.evidence.producer!.model.source='unknown';
+
     if(defect==='policy')f.policy.completionPolicy.requireIndependentReview=true;
     return value;
    };
@@ -318,7 +335,7 @@ for(const defect of ['none','semantic missing'] as const)test(`persisted general
   f.verification.verifyIntegration=async input=>{
    const result=await verify(input),captured=fixtureReader(f.queue.get(input.id))!;
    const {quality,producer,commands,bindings,loops,gateResults}=captured.evidence;
-   const context={subject:captured.subject,binding:captured.binding,quality,producer,commands,bindings,loops: defect==='semantic missing'?[]:loops,gateResults};
+   const context={subject:captured.subject,binding:captured.binding,quality,producer,commands,bindings,loops,gateResults:defect==='semantic missing'?gateResults.filter(g=>g.gate!=='semantic_review'):gateResults};
    for(const row of f.store.db.prepare('SELECT id,body FROM integration_checks').all()){
     f.store.db.prepare('UPDATE integration_checks SET body=? WHERE id=?').run(JSON.stringify({...JSON.parse(String(row.body)),completionContext:context}),String(row.id));
    }
@@ -329,3 +346,49 @@ for(const defect of ['none','semantic missing'] as const)test(`persisted general
   assert.equal(f.queue.get(q.id).status,defect==='none'?'applied':'refused');
  }finally{f.store.close();}
 });
+
+for(const defect of ['not verified','base mismatch','manifest mismatch','source missing','candidate stale','candidate native'] as const){
+ test(`candidate contract refuses ${defect} without target changes`,async()=>{
+  const f=fixture();try{
+   const source=f.completion.source,read=f.completion.read;
+   if(defect==='not verified')f.completion.source=item=>({...source(item),verifiedDone:false,reasonCodes:['CQG_SOURCE_TEST_NOT_DONE']});
+   if(defect==='base mismatch'||defect==='manifest mismatch')f.completion.source=item=>{
+    const value=source(item);value.binding[defect==='base mismatch'?'baseSha':'artifactDigest']='other';return value;
+   };
+   if(defect==='candidate stale'||defect==='candidate native')f.completion.read=item=>{
+    const value=read(item)!;
+    if(defect==='candidate stale')Object.values(value.evidence.bindings)[0].artifactDigest='old';
+    else value.evidence.quality.evidence[0].evidenceSource='native';return value;
+   };
+   const queue=defect==='source missing'?new IntegrationQueue(f.store,new Projects(f.store,join(f.root,'managed'),[f.repo]),f.workers,f.spaces,f.verification,f.merge,()=>f.policy,item=>f.completion.read(item)):f.queue;
+   const worker=f.worker('a.txt','A'),q=queue.enqueue({requestId:randomUUID(),fence:worker.r,targetBranch:'dev'});
+   await queue.drain();assert.equal(queue.get(q.id).status,'refused');assert.equal(f.git('rev-parse','HEAD'),f.base);
+   const reason=defect==='source missing'||defect==='not verified'?'CQG_SOURCE_NOT_VERIFIED_DONE':defect.includes('mismatch')?'CQG_SOURCE_BINDING_MISMATCH':defect==='candidate native'?'CQG_LOCAL_CHECK_REQUIRED':'CQG_BINDING_CHANGED';
+   assert.match(queue.get(q.id).reason!,new RegExp(reason));
+  }finally{f.store.close();}
+ });
+}
+test('source completion is re-read at the final apply gate',async()=>{
+ const f=fixture();try{
+  const source=f.completion.source;let reads=0;
+  f.completion.source=item=>{const value=source(item);if(++reads>1)value.verifiedDone=false;return value;};
+  const q=f.worker('a.txt','A').enqueue();await f.queue.drain();
+  assert.notEqual(f.queue.get(q.id).status,'applied');assert.ok(reads>=2);assert.equal(f.git('rev-parse','HEAD'),f.base);
+ }finally{f.store.close();}
+});
+
+test('Controller default candidate reader applies local command rows without synthetic AI provenance',async()=>{
+  const f=fixture(),projects=new Projects(f.store,join(f.root,'managed'),[f.repo]);
+  const controller=new Controller(f.store,f.root,()=>{throw Error('PROVIDER_FORBIDDEN');},projects,f.configuration);
+  try{
+   Reflect.set(controller,'readIntegrationSource',(item:IntegrationItem)=>f.completion.source(item));
+   controller.verification.view=()=>({commands:verificationCommandPreviews(f.configuration,f.repo)} as VerificationView);
+   const queue=new IntegrationQueue(f.store,projects,f.workers,f.spaces,f.verification,f.merge,()=>f.policy,
+    item=>Reflect.get(controller,'candidateCompletion')(item),item=>f.completion.source(item));
+   const worker=f.worker('a.txt','A'),q=queue.enqueue({requestId:randomUUID(),fence:worker.r,targetBranch:'dev'});
+   await queue.drain();const result=queue.get(q.id);
+   assert.equal(result.status,'applied',result.reason??'');assert.equal(result.completion?.producer,'orbit_merge');
+   assert.ok(result.completion?.gates.every(g=>g.source==='local'&&g.status==='passed'));
+   for(const row of f.store.db.prepare('SELECT body FROM integration_checks').all())assert.equal(JSON.parse(String(row.body)).completionContext,undefined);
+  }finally{await controller.close();f.store.close();}
+ });

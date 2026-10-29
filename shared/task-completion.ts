@@ -49,3 +49,17 @@ export interface CompletionEvidence {
   /** Existing VerificationView.checkSetDigest, not a newly computed CQG check set. */
   checkSetDigest?:string|null;
 }
+
+/** Deterministic merge subject. sourceBinding is the worker base and change
+ * manifest binding expected by the queue, not evidence copied onto the candidate. */
+export interface IntegrationCandidateSubject {
+  subject:'integration_candidate';producer:'orbit_merge';
+  integrationId:string;candidateDigest:string;targetDigest:string|null;
+  sourceBinding:CompletionBinding;
+}
+export interface CandidateCompletion extends TaskCompletion {
+  subject:'integration_candidate';producer:'orbit_merge';
+}
+export type CandidateCompletionEvidence = Omit<CompletionEvidence,'gateResults'> & {
+  gateResults:{gate:'artifact_format'|'numeric_source'|'semantic_review';evidenceId:string;status:QualityStatus}[];
+};
