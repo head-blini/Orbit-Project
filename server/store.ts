@@ -43,7 +43,7 @@ export class Store extends EventEmitter {
         try{this.saveCodexModelAttribution(r.id,{...previous,status:r.execution,observationIncomplete:true});}catch{/* Persisted execution is authoritative; metadata stays incomplete in the overlay. */}
       }
       if(terminal(r.execution)&&r.execution!=='lost')continue;
-      if(!terminal(r.execution))this.updateRun(r.id,{execution:'lost'},'run.lost',r.runtime==='claude-code'?{reason:'SERVER_RESTART'}:undefined);
+      if(!terminal(r.execution))this.updateRun(r.id,r.runtime==='claude-code'?{execution:'lost'}:{execution:'lost',response:'SERVER_RESTART'},'run.lost',r.runtime==='claude-code'?{reason:'SERVER_RESTART'}:undefined);
       const attribution=this.getCodexModelAttribution(r.id);
       if(attribution&&(attribution.status!=='lost'||!attribution.observationIncomplete)){
         try{this.saveCodexModelAttribution(r.id,{...attribution,status:'lost',observationIncomplete:true});}catch{/* Keep the incomplete overlay; never replay execution. */}
@@ -125,8 +125,8 @@ export class Store extends EventEmitter {
     this.db.exec('BEGIN IMMEDIATE');let event:AppEvent;
     try {
       this.db.prepare('UPDATE runs SET body=? WHERE id=?').run(JSON.stringify(next),id);updateSoloOperation(this.db,old,next,kind);
-      // A failed run's streamed provider text is replaced in place by its reason code; seq, kind and count stay for replay cursors.
-      if(next.execution==='failed'&&patch.response!==undefined)this.db.prepare("UPDATE events SET data=json_set(data,'$.run.response',?) WHERE run_id=? AND json_type(data,'$.run.response')='text' AND json_extract(data,'$.run.response') NOT IN ('',?)").run(next.response,id,next.response);
+      // A failed or lost run's streamed provider text is replaced in place by its reason code; seq, kind and count stay for replay cursors.
+      if((next.execution==='failed'||next.execution==='lost')&&patch.response!==undefined)this.db.prepare("UPDATE events SET data=json_set(data,'$.run.response',?) WHERE run_id=? AND json_type(data,'$.run.response')='text' AND json_extract(data,'$.run.response') NOT IN ('',?)").run(next.response,id,next.response);
       event=this.insert(kind,id,eventData??runEventData(next));this.db.exec('COMMIT');}
     catch(e){this.db.exec('ROLLBACK');throw e;}
     this.emit('event',event);return next;
