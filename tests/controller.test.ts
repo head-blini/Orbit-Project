@@ -278,3 +278,26 @@ for(const status of ['failed','unexpected'])test(`Codex ${status} completion per
     assert.ok(!JSON.stringify(c.snapshot()).includes('fake-token-ABC123456789'));
   }finally{await c.close();store.close();}
 });
+test('a failed Codex run redacts its streamed message events in place; completed runs and other rows keep their text',async()=>{
+  const {c,rpc,store}=setup();try{
+    await c.connect();
+    const ok=await c.submit({requestId:'redact-completed-1',prompt:'A'});
+    rpc.emit('notification',{method:'item/agentMessage/delta',params:{threadId:'thread-fixture',turnId:'turn-fixture',itemId:'m1',delta:'KEEP-MARKER '}});
+    rpc.emit('notification',{method:'turn/completed',params:{threadId:'thread-fixture',turn:{id:'turn-fixture',status:'completed'}}});
+    const bad=await c.submit({requestId:'redact-failed-01',prompt:'B'});
+    const marker='LEAK-MARKER-7f3a';
+    rpc.emit('notification',{method:'item/agentMessage/delta',params:{threadId:'thread-fixture',turnId:'turn-fixture',itemId:'m2',delta:marker+' partial '}});
+    rpc.emit('notification',{method:'item/completed',params:{threadId:'thread-fixture',turnId:'turn-fixture',item:{id:'m2',type:'agentMessage',text:marker+' full'}}});
+    const before=store.eventsAfter(0).map(e=>[e.seq,e.kind,e.runId]);
+    assert.ok(store.eventsAfter(0).some(e=>e.runId===bad.id&&e.kind==='message.updated'&&JSON.stringify(e.data).includes(marker)),'live streaming stays visible while running');
+    rpc.emit('notification',{method:'turn/completed',params:{threadId:'thread-fixture',turn:{id:'turn-fixture',status:'failed'}}});
+    const after=store.eventsAfter(0);
+    assert.deepEqual(after.slice(0,before.length).map(e=>[e.seq,e.kind,e.runId]),before);assert.ok(after.slice(before.length).every(e=>e.kind!=='message.updated'));
+    assert.ok(!JSON.stringify(after).includes(marker));assert.ok(!JSON.stringify(store.getRun(bad.id)).includes(marker));
+    const failedMessages=after.filter(e=>e.runId===bad.id&&e.kind==='message.updated');
+    assert.equal(failedMessages.length,2);for(const e of failedMessages)assert.equal((e.data.run as {response:string}).response,'RUNTIME_ERROR');
+    assert.equal((after.find(e=>e.runId===bad.id&&e.kind==='run.created')!.data.run as {response:string}).response,'');
+    assert.ok(after.some(e=>e.runId===ok.id&&e.kind==='message.updated'&&(e.data.run as {response:string}).response.includes('KEEP-MARKER')));
+    assert.equal(store.getRun(ok.id)!.response,'KEEP-MARKER ');
+  }finally{await c.close();store.close();}
+});
