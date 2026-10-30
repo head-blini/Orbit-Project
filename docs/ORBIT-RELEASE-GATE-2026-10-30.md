@@ -57,7 +57,7 @@
 | LIVE-B 코드 프로젝트 | `78d2b91`, `8255815` | live-verified(부분, §1 B) | §1 참조 |
 | BRIEF-SIZE-GATE | `6841667` | mock-tested(`tests/brief-size-gate.test.ts`). 승인 시점 `EXECUTION_BRIEF_TOO_LARGE`, `/progress` 작업 차단 사유 표시·`execute_task` 제외, 기획 프롬프트에 상한 안내 | live 재현 없음. LIVE-B 발견 1 잔여·발견 2를 닫는 변경이나 실호출로 확인하지 않음 |
 | FLAKE-P8-RESTART | `1267fdb` | mock-tested. 원인: native probe 캐시 60초 TTL 만료로 `RUNTIME_VERSION_UNKNOWN` 거절 → 거절 시 온전한 미dispatch space가 `lost_unknown`(`WORKER_RESTART_RECOVERY_REQUIRED`)으로 격리. 이제 격리는 fence·space 신원·claim으로만 결정, 거절은 `not_dispatched` 증거로 해제. P8 fixture는 고정 clock | TTL 만료는 단위 테스트로 유지 |
-| FE-5-REDACT | — | **진행 중, 완료 아님.** 사용자 결정 2026-10-30: 실패한 Codex run의 `message.updated` 이벤트 본문을 사유 코드로 가림. 스트리밍은 그대로, 변경 이후 생성 run만, 기존 DB 정리 없음 | 구현·검증 기록 없음. 그때까지 실패 run의 스트리밍 원문이 DB에 남을 수 있다 |
+| FE-5-REDACT | `7d767aa` (batch 24) | **구현·mock 검증.** 사용자 결정 2026-10-30: Codex run이 `failed`로 끝나면 같은 트랜잭션에서 그 run 이벤트의 `data.run.response`(`message.updated`·`interrupt.requested`·`run.accepted`)를 사유 코드로 바꾼다. 스트리밍은 실행 중 그대로, seq·kind·개수 불변, 기존 DB 정리 없음. `tests/controller.test.ts` | `lost`(타임아웃·전송 끊김 포함)와 `interrupted`는 부분 원문이 남는다(별도 결정 필요). live 재현 없음 |
 
 ## 4. 문서 불일치 점검 결과
 
@@ -80,4 +80,4 @@
 - 승인 필요(실호출): 현재 HEAD 재실행(A01·A04·A05·A09·A12·A13·A16·AX07), A07 Codex↔Claude 인계, A08 다른 모델 Reviewer, A10 라이브 중 HTTP 재시작, AX01~AX03 LIVE-PAR, A14 실제 quota, A15 TOOLS-T8, Registry 실제 연결 진단, vendor 실호출.
 - 승인된 기본값 확정(2026-10-30 #3): RECOVERY-UX (1)(2)(5), F02-REG (1)~(7), GENERAL-ACCEPT-B 차단 유지, Graphify는 자체 TS-AST 유지, Skills/MCP/Plugins 차단 유지. 개선은 후속 범위이고 기능 완료가 아니다.
 - 외부 한계: Codex 실제 모델 관측 불가 → `QUALITY_PRODUCER_MODEL_UNKNOWN`.
-- 진행 중: FE-5-REDACT. 미해결 후속: LIVE-B 발견 4(리뷰 지적을 수정 작업으로 넘기는 흐름 결정), 발견 6(사용자 결과 승인 미실행), REG-ISOLATED-PLANNING, Harness live runner.
+- 완료: FE-5-REDACT(`7d767aa`, mock). 미해결 후속: FE-5-REDACT의 `lost` 범위 결정, LIVE-B 발견 4(리뷰 지적을 수정 작업으로 넘기는 흐름 결정), 발견 6(사용자 결과 승인 미실행), REG-ISOLATED-PLANNING, Harness live runner.

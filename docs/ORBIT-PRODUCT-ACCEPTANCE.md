@@ -46,7 +46,7 @@
 | REUSE-DISCOVERY·VENDOR | mock + 탐색만 live | `e431413`·`d553e37`·`3700c8e`. 탐색 1회 live(LIVE-B, 미채택), vendor는 live 없음 |
 | BRIEF-SIZE-GATE | mock | `6841667`, `tests/brief-size-gate.test.ts`. 승인 시점 `EXECUTION_BRIEF_TOO_LARGE`, `/progress` 차단 사유. live 재현 없음 |
 | FE-5 / CQG-6B-CTL | mock | `8f92059`. 정규화 실패 사유 `RUNTIME_ERROR`, `WORKER_INPUTS_CHANGED` 오거절 수정. live 없음 |
-| FE-5-REDACT | **진행 중(not done)** | 실패 Codex run의 `message.updated` 본문 가림(사용자 결정 2026-10-30). 구현·검증 기록 없음 |
+| FE-5-REDACT | **mock 검증(`7d767aa`)** | 실패 Codex run의 이벤트 응답 본문을 같은 트랜잭션에서 사유 코드로 가림(사용자 결정 2026-10-30). `lost`·`interrupted`는 미적용, live 재현 없음 |
 
 ## 남은 작업 (PRODUCT)
 
@@ -74,4 +74,4 @@ Graphify(여전히 사용자 결정 대기): 제품 안에는 자체 TS-AST 소�
 - A14 실제 quota 관측
 - AX01~AX03 두 Worker 동시 라이브 실행
 - A06(deferred)·A15(TOOLS-T8)는 실연결 경로 승인이 먼저 필요하다
-- 2026-10-30 결정: CQG-6B-CTL·FE-5 구현 승인(`8f92059` 반영, FE-5-REDACT 진행 중), GENERAL-ACCEPT-B·RECOVERY-UX·F02-REG·Graphify·도구 정책은 현재 보수적 기본값으로 확정(개선은 후속). 남은 열린 항목(REG-ISOLATED-PLANNING, Harness live runner 등)은 [STATUS](ORBIT-STATUS.md)와 [릴리스 게이트 매핑](ORBIT-RELEASE-GATE-2026-10-30.md) 참조
+- 2026-10-30 결정: CQG-6B-CTL·FE-5 구현 승인(`8f92059` 반영, FE-5-REDACT `7d767aa` 반영), GENERAL-ACCEPT-B·RECOVERY-UX·F02-REG·Graphify·도구 정책은 현재 보수적 기본값으로 확정(개선은 후속). 남은 열린 항목(REG-ISOLATED-PLANNING, Harness live runner 등)은 [STATUS](ORBIT-STATUS.md)와 [릴리스 게이트 매핑](ORBIT-RELEASE-GATE-2026-10-30.md) 참조
