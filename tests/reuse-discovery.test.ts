@@ -9,6 +9,9 @@ import {Projects} from '../server/projects.ts';
 import {claudeArgs} from '../server/runtimes/claude-code.ts';
 import {claudeTaskPrompt} from '../server/runtimes/claude-task.ts';
 import {PlanningAgentService} from '../server/planning-agent-service.ts';
+import {Studio} from '../server/studio.ts';
+import type {PlanningVersion,SavedTask} from '../shared/parallel.ts';
+import {MAX_EXECUTION_PROMPT_CHARS} from '../server/planning/execution.ts';
 import {kstIso,parseReuseResponse,reuseDecisions,runReuseDiscovery} from '../server/reuse-discovery.ts';
 import {FakeClaudeRun,outcome,planningInput,tick} from './claude-task-fixture.ts';
 
@@ -27,6 +30,9 @@ test('research mode exposes only web tools in plan mode, and runs from an empty 
   assert.equal(args[args.indexOf('--tools')+1],'WebSearch,WebFetch');assert.equal(args[args.indexOf('--permission-mode')+1],'plan');
   assert.doesNotMatch(args[args.indexOf('--tools')+1],/Read|Grep|Glob|Edit|Write|Bash/);
   assert.equal(claudeArgs({mode:'write'})[claudeArgs({mode:'write'}).indexOf('--tools')+1],'Read,Grep,Glob,Edit,Write');
+  // --permission-prompts none auto-denies prompting tools, so research pre-allows exactly its web tools; read/write never get --allowedTools.
+  assert.equal(args[args.indexOf('--allowedTools')+1],'WebSearch,WebFetch');assert.ok(args.includes('--permission-prompts'));
+  for(const mode of ['read','write'] as const)assert.ok(!claudeArgs({mode}).includes('--allowedTools'),mode);
   const f=fixture(),pending=runReuseDiscovery({query,timeoutMs:1000},f.options);
   await until(()=>f.configs.length);const config=f.configs[0];
   assert.equal(config.mode,'research');assert.match(config.cwd,/orbit-reuse-/);assert.ok(!config.cwd.startsWith(process.cwd()));
@@ -79,6 +85,30 @@ test('reuse decisions show every candidate, and failure or no fit stays visible'
   assert.match(reuseDecisions({...base,status:'searched',candidates:[]})[0].decision,/적합 후보 없음 — 직접 구현/);
   const failed=reuseDecisions({...base,status:'timed_out',issue:'REUSE_TIMEOUT',candidates:[]});
   assert.equal(failed.length,1);assert.equal(failed[0].topic,'재사용 탐색');assert.match(failed[0].decision,/timed_out REUSE_TIMEOUT/);
+});
+
+test('reuse decisions are compact: rejects keep name+version, rationale ≤120, failure ≤200, and a max plan still fits the Codex brief',()=>{
+  const long=(n:number,c='a')=>c.repeat(n),checkedAt=kstIso(now());
+  const max=(name:string,decision:'adopt'|'reject')=>({name,source:'https://example.com/'+long(280,'p'),version:long(40,'9'),license:long(40,'L'),decision,reason:long(300,'r')});
+  const decisions=reuseDecisions({status:'searched',checkedAt,issue:null,candidates:[max(long(80,'a'),'adopt'),max(long(80,'b'),'reject'),max(long(80,'c'),'reject')]});
+  assert.ok(decisions[0].decision.includes('https://example.com/'));assert.equal(decisions[1].decision,`재사용 미채택: ${long(80,'b')} ${long(40,'9')}`);
+  for(const d of decisions)assert.ok(d.rationale.length<=120);
+  for(const status of ['timed_out','lost','unavailable'] as const){const [d]=reuseDecisions({status,checkedAt,issue:'REUSE_PROCESS_STOP_UNCONFIRMED',candidates:[]});assert.ok(d.decision.length+d.rationale.length<=200,status);}
+  const dir=mkdtempSync(join(tmpdir(),'orbit-reuse-brief-')),store=new Store(join(dir,'state.sqlite'));
+  try{
+    const projects=new Projects(store,join(dir,'workspaces'),[],join(dir,'projects')),{project}=projects.createProject({requestId:randomUUID(),name:'Brief',kind:'general'}),studio=new Studio(store);
+    const requirement=(id:string)=>({id,description:`${id}: 여행 결제 수수료를 카드사별로 비교하고 사용자가 이해하기 쉬운 표로 정리한다`,acceptance_criteria:['카드사 5곳 이상의 수수료가 표에 포함된다','각 수치에 출처 링크가 붙어 있다']});
+    const text=JSON.stringify({schema_version:'1.0',title:'여행 결제 수수료 비교 보고서',goal:'해외 결제 시 카드사별 수수료와 환율 우대를 비교해 추천안을 만든다',
+      requirements:['R1','R2','R3'].map(requirement),constraints:['공개 자료만 사용한다','개인정보를 수집하지 않는다','결과는 한국어 Markdown 한 파일로 작성한다','수치에는 기준일을 함께 적는다'],
+      decisions,open_questions:[]});
+    const draft=studio.mutate(project.id,'plans',undefined,undefined,{requestId:randomUUID(),input:{format:'json',source:'manual',text}}) as PlanningVersion;
+    const plan=studio.mutate(project.id,'plans',draft.id,'approve',{expectedRevision:1}) as PlanningVersion;
+    const [task]=studio.mutate(project.id,'plans',plan.id,'task-drafts',{}) as SavedTask[];
+    const brief=studio.execution(project.id,task.id);assert.ok(brief.prompt.length<=MAX_EXECUTION_PROMPT_CHARS,String(brief.prompt.length));
+    // The Claude task prompt keeps the full adopt decision, including its source URL.
+    const prompt=claudeTaskPrompt({title:'t',goal:'g',baseline:{planningVersionId:'v',revision:1,contentHash:'c'.repeat(64)},acceptanceCriteria:['x'],constraints:[],nonGoals:[],decisions,deliverable:'out.md'});
+    assert.ok(prompt.includes(decisions[0].decision));
+  }finally{store.close();rmSync(dir,{recursive:true,force:true});}
 });
 
 test('Claude task prompt asks to report used reuse decisions only when the plan has them',()=>{

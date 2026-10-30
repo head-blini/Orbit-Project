@@ -40,6 +40,8 @@ export function claudeArgs(options:{mode:ClaudeMode;textOnly?:boolean;resume?:st
   const args=['-p','--output-format','stream-json','--verbose','--input-format','text',
     '--restricted','--strict-mcp-config','--mcp-config','{"mcpServers":{}}','--permission-prompts','none',
     '--disable-slash-commands','--no-chrome','--tools',options.textOnly?'':tools[options.mode],'--permission-mode',options.mode==='write'?'acceptEdits':'plan'];
+  // --permission-prompts none auto-denies prompting tools; research must pre-allow its only (web) tools.
+  if(options.mode==='research')args.push('--allowedTools',tools.research);
   if(options.resume!==undefined){if(!uuid.test(options.resume))throw new AppError('INVALID_SESSION',400);args.push('--resume',options.resume);}
   if(options.model!==undefined){if(!/^[A-Za-z0-9][\w.:\[\]-]{0,99}$/.test(options.model))throw new AppError('INVALID_MODEL',400);args.push('--model',options.model);}
   return args;

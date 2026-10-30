@@ -31,6 +31,8 @@ import {ProjectProgressService} from './project-progress.ts';
 import {FailureIntelligenceService} from './failure-intelligence-service.ts';
 import {HarnessService} from './harness-service.ts';
 import {AppPreviewHost} from './app-preview.ts';
+import {approvedReuseDecisions,readReuseEvidence,vendorReuse} from './reuse-vendor.ts';
+import type {PlanningVersion} from '../shared/parallel.ts';
 import {assertGitProject} from './projects.ts';
 import {quotaSignal,type ProgressSignals} from '../shared/project-progress.ts';
 import {quotaFromClaudeWindows} from './runtimes/claude-task.ts';
@@ -82,6 +84,9 @@ export function createHttpServer(controller:Controller,assets:string,options:{wo
   if(options.workers)bindWorkers();
   const sessions=new Map<string,{csrf:string;expires:number}>();
   const appPreview=new AppPreviewHost(id=>controller.appPreviewSnapshot(id));
+  // Same guards as the app preview: code project, the selected validated writable workspace; the decision comes only from Studio.
+  const reuseWorkspace=(id:string)=>{controller.appPreviewSnapshot(id);return controller.store.workspaces().find(workspace=>workspace.id===id)!;};
+  const approvedReuse=(projectId:string)=>approvedReuseDecisions(studio.read(projectId,'plans') as PlanningVersion[],lineage=>controller.store.db.prepare('SELECT version_id FROM planning_heads WHERE lineage_id=?').get(lineage)?.version_id as string|undefined);
   let previewReady:Promise<void>=Promise.resolve();
   const server=createServer((req,res)=>{void handle(req,res).catch(e=>{
     if(res.headersSent){res.end();return;}
@@ -195,6 +200,7 @@ export function createHttpServer(controller:Controller,assets:string,options:{wo
       const taskGraphRoute=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/task-graphs\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})(?:\/(revisions|history|state))?$/);
       const goalRoute=url.pathname.match(/^\/api\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/goals(?:\/([a-f0-9-]{36})\/(state|history))?$/);
       const appPreviewRoute=url.pathname.match(/^\/api\/workspaces\/([a-f0-9-]{36})\/app-preview$/);
+      const reuseVendorRoute=url.pathname.match(/^\/api\/workspaces\/([a-f0-9-]{36})\/reuse-vendor$/);
       const verificationSetupRoute=url.pathname.match(/^\/api\/workspaces\/([a-f0-9-]{36})\/verification-setup$/);
       const aiPreferencesRoute=url.pathname.match(/^\/api\/projects\/([a-f0-9-]{36})\/ai-preferences$/);
       if(req.method==='GET'&&aiPreferencesRoute){
@@ -261,6 +267,12 @@ export function createHttpServer(controller:Controller,assets:string,options:{wo
         if(verificationSetupRoute){
           if(url.search)throw new AppError('INVALID_FIELDS',400);exact(data,['requestId','profileId','expectedPreviewDigest','confirmed']);
           json(res,200,controller.configureVerification(verificationSetupRoute[1],data as unknown as Parameters<Controller['configureVerification']>[1]));return;
+        }
+        if(reuseVendorRoute){
+          if(url.search)throw new AppError('INVALID_FIELDS',400);exact(data,['planningVersionId','topic']);
+          if(typeof data.planningVersionId!=='string'||typeof data.topic!=='string')throw new AppError('INVALID_FIELDS',400);
+          const id=reuseVendorRoute[1],guard=()=>{reuseWorkspace(id);controller.assertAppPreviewAvailable();};guard();const workspace=reuseWorkspace(id);
+          json(res,200,await vendorReuse({workspacePath:workspace.path,approved:approvedReuse(workspace.projectId),planningVersionId:data.planningVersionId,topic:data.topic,beforeWrite:guard}));return;
         }
         if(appPreviewRoute){
           if(url.search)throw new AppError('INVALID_FIELDS',400);exact(data,['entryPath','expectedSourceDigest']);controller.assertAppPreviewAvailable();
@@ -682,6 +694,7 @@ export function createHttpServer(controller:Controller,assets:string,options:{wo
       if(req.method==='GET'&&studioRoute&&(!studioRoute[3]||(studioRoute[2]==='artifacts'&&studioRoute[4]==='history'))){
         json(res,200,studio.read(studioRoute[1],studioRoute[2],studioRoute[3]));return;
       }
+      if(req.method==='GET'&&reuseVendorRoute){if(url.search)throw new AppError('INVALID_FIELDS',400);const workspace=reuseWorkspace(reuseVendorRoute[1]);json(res,200,{evidence:readReuseEvidence(workspace.path),decisions:approvedReuse(workspace.projectId)});return;}
       if(req.method==='GET'&&appPreviewRoute){if(url.search)throw new AppError('INVALID_FIELDS',400);json(res,200,appPreview.catalog(appPreviewRoute[1]));return;}
       const resultRoute=url.pathname.match(/^\/api\/workspaces\/([a-f0-9-]{36})\/result$/);
       if(req.method==='GET'&&resultRoute){const keys=[...url.searchParams.keys()],runId=url.searchParams.get('runId');if(keys.some(key=>key!=='runId')||keys.length>1||(keys.length===1&&(!runId||!(/^[a-f0-9-]{36}$/).test(runId))))throw new AppError('INVALID_FIELDS',400);json(res,200,controller.developmentResult(resultRoute[1],runId));return;}

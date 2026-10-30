@@ -3,6 +3,7 @@ import type {Run,Snapshot} from '../shared/types.ts';
 import type {DevelopmentResultView,DevelopmentSelection} from '../shared/development-results.ts';
 import {executionLabels} from './navigation.ts';
 import {AppPreviewPanel} from './app-preview.tsx';
+import {ReuseVendorPanel} from './reuse-vendor.tsx';
 
 export function selectedDevelopmentRun(state:Snapshot|null,selection:DevelopmentSelection|null){
   const runs=state?.runs.filter(run=>run.workspaceId===state.selectedWorkspaceId)??[];
@@ -41,5 +42,5 @@ export function DevelopmentResultPanel({projectId,workspaceId,runs,selectedRun,o
     <label>확인할 실행<select aria-label="확인할 실행" value={runId??''} onChange={event=>onSelectRun(event.target.value)}><option value="">실행 선택 없음 · 현재 파일만 보기</option>{runs.filter(run=>run.workspaceId===workspaceId).map(run=><option key={run.id} value={run.id}>{new Date(run.createdAt).toLocaleString('ko-KR')} · {executionLabels[run.execution]} · {run.id.slice(0,8)}</option>)}</select></label>
     {error&&<p role="alert">{error}</p>}{view?<DevelopmentResultSummary view={view}/>:<p role="status">{online?'선택 실행의 근거를 확인하고 있습니다.':'서버 연결 후 실행 결과를 확인할 수 있습니다.'}</p>}
     <p className="subtle">아래 리뷰·명령 검증·변경 반영은 선택한 종료 실행에 연결됩니다. 과거 실행을 선택해도 파일은 과거 버전으로 되돌아가지 않습니다.</p>
-  </section><AppPreviewPanel workspaceId={workspaceId} online={online} locked={locked} refreshKey={refreshKey} post={post} evidence={locked?null:view}/></>;
+  </section><ReuseVendorPanel workspaceId={workspaceId} online={online} locked={locked} refreshKey={refreshKey} post={post}/><AppPreviewPanel workspaceId={workspaceId} online={online} locked={locked} refreshKey={refreshKey} post={post} evidence={locked?null:view}/></>;
 }
