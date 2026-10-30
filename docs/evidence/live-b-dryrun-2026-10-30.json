@@ -1,0 +1,1582 @@
+{
+  "kind": "live_b_e2e",
+  "mode": "dry_run",
+  "startedAt": "2026-10-30T02:06:13.717Z",
+  "directory": "/private/tmp/orbit-live-b-dJUYae",
+  "budget": {
+    "claude": {
+      "total": 6,
+      "planning": 1,
+      "research": 1,
+      "fix": 1,
+      "review": 1
+    },
+    "codex": {
+      "total": 3,
+      "execution": 1,
+      "fix": 1,
+      "review": 1
+    }
+  },
+  "calls": {
+    "claude": {
+      "planning": 1,
+      "research": 1
+    },
+    "codex": {
+      "execution": 1,
+      "review": 1
+    }
+  },
+  "cumulativeBefore": {
+    "claude": {},
+    "codex": {},
+    "runs": 0
+  },
+  "claudeProcesses": [
+    {
+      "purpose": "planning",
+      "startedAt": "2026-10-30T02:06:16.273Z",
+      "model": null,
+      "auth": null,
+      "status": "completed",
+      "exit": "observed",
+      "durationMs": 0
+    },
+    {
+      "purpose": "research",
+      "startedAt": "2026-10-30T02:06:16.283Z",
+      "model": null,
+      "auth": null,
+      "status": "completed",
+      "exit": "observed",
+      "durationMs": 0
+    }
+  ],
+  "codexProcesses": [
+    {
+      "purpose": "execution",
+      "write": true,
+      "at": "2026-10-30T02:06:17.218Z"
+    },
+    {
+      "purpose": "review",
+      "write": false,
+      "at": "2026-10-30T02:06:27.252Z"
+    }
+  ],
+  "blocks": [
+    {
+      "step": "claude_cross_review",
+      "code": "QUALITY_PRODUCER_MODEL_UNKNOWN",
+      "expected": true
+    },
+    {
+      "step": "codex_review_after_vendor",
+      "code": "REVIEW_OUTBOUND_DENIED",
+      "cause": "vendor/REUSE-EVIDENCE.json jsDelivr URL name@version flagged as email"
+    },
+    {
+      "step": "claude_cross_review_after_vendor",
+      "code": "PERSONAL_DATA_BLOCKED",
+      "cause": "vendor/REUSE-EVIDENCE.json jsDelivr URL name@version flagged as email"
+    }
+  ],
+  "steps": {
+    "project": {
+      "projectId": "21baa29a-bf9a-4268-97df-bc6735997f63",
+      "workspaceId": "1a45749a-01fb-4a45-8e08-157474041551",
+      "baseSha": "9e41de6cb8797aa1e9fa3c645b1beed360b0a3c1",
+      "preferences": {
+        "planning": "claude-code",
+        "execution": "codex",
+        "revision": 1,
+        "updatedAt": "2026-10-30T02:06:14.576Z"
+      },
+      "status": "passed",
+      "durationMs": 677
+    },
+    "verification_setup": {
+      "receipt": {
+        "requestId": "bb239176-794d-4da9-896c-bec8c86ff055",
+        "projectId": "21baa29a-bf9a-4268-97df-bc6735997f63",
+        "workspaceId": "1a45749a-01fb-4a45-8e08-157474041551",
+        "revision": 1,
+        "profileId": "node-test-v1",
+        "createdAt": "2026-10-30T02:06:15.734Z"
+      },
+      "tests": [
+        "date-format.test.mjs"
+      ],
+      "command": {
+        "executable": "node",
+        "args": [
+          "--test",
+          "--",
+          "date-format.test.mjs"
+        ]
+      },
+      "status": "passed",
+      "durationMs": 1156
+    },
+    "planning": {
+      "runtime": "claude-code",
+      "scope": "미리 본 요청을 별도의 읽기 전용 Claude Code 세션에 전송합니다. Native CLI는 읽기 전용이어도 파일을 읽을 수 있으며 컨텍스트 로딩·세션 보존·제공자 전송은 Model Hub 게이트웨이 통제 범위 밖입니다. 1개 요청·60초 제한 뒤 종료 관찰 시간이 추가될 수 있습니다. 구독 사용량·실제 과금 상한은 보장하지 않습니다. 검증된 제안도 별도 저장 전에는 기획 초안이 아니며 승인·Task·Run을 만들지 않습니다. 제안이 검증되면 재사용 탐색을 위해 제안의 제목·목표·요구사항만 별도 Claude Code 웹 검색 세션(WebSearch·WebFetch, 파일 도구 없음, 빈 임시 폴더)에 1회 더 전송합니다(90초 제한, 공개 웹 사이트에 검색어가 전달됩니다). 결과는 결정 항목으로 표시되며 실패해도 제안은 유지됩니다.",
+      "previewDigest": "8409cb05177ed3b198c3f7c0387f697ea49f58345765c39e49f8bd63f0adc24a",
+      "request": "브라우저에서 바로 여는 작은 정적 날짜 표시 위젯을 만들어 주세요. index.html에서 날짜를 고르면 YYYY-MM-DD 형식으로 보여 주고, 형식화 로직은 src/date-format.mjs에서 formatDate(date) 함수(YYYY-MM-DD 문자열 반환)로 export하며 저장소의 기존 테스트 date-format.test.mjs를 통과해야 합니다. 날짜 처리에 알맞은 작은 공개 npm 라이브러리가 있으면 재사용을 검토해 주세요. 요구사항은 하나로 묶고 열린 질문 없이 기획해 주세요.",
+      "suggestionId": "3e34ccd6-7bcf-41ea-8c47-3905eed59140",
+      "execution": "completed",
+      "issue": null,
+      "processStopped": true,
+      "durationMs": 1053,
+      "outputDigest": "5733c103e977cbcbce3d2bfe117ad69e22faf7623257202feaea6ed69987c0eb",
+      "requirements": 2,
+      "openQuestions": [
+        "요일도 표시할까요?"
+      ],
+      "decisions": [
+        {
+          "topic": "재사용: dayjs",
+          "rationale": "작고 널리 쓰이는 날짜 형식화 라이브러리",
+          "decision": "재사용 채택: dayjs 1.11.13 (MIT) · https://www.npmjs.com/package/dayjs · 확인 2026-10-30T11:06:16+09:00"
+        }
+      ],
+      "reuseDiscovery": [
+        {
+          "suggestionId": "3e34ccd6-7bcf-41ea-8c47-3905eed59140",
+          "projectId": "21baa29a-bf9a-4268-97df-bc6735997f63",
+          "status": "searched",
+          "issue": null,
+          "checkedAt": "2026-10-30T11:06:16+09:00",
+          "candidateCount": 1,
+          "sources": [
+            "https://www.npmjs.com/package/dayjs"
+          ],
+          "merged": true
+        }
+      ],
+      "status": "passed"
+    },
+    "plan_approval": {
+      "userRevision": {
+        "mergedRequirements": 2,
+        "answeredQuestions": 1
+      },
+      "planningVersionId": "84ce0735-17af-47e3-9afd-31809e1ed67d",
+      "revision": 2,
+      "contentHash": "a5a0c8085118ebe7e6be62c611874ff0006be2cd4f00707a6e496a289c237fc2",
+      "title": "날짜 표시 위젯",
+      "requirements": [
+        {
+          "label": "R1",
+          "description": "src/date-format.mjs에 formatDate(date) export\nindex.html 날짜 선택 UI",
+          "acceptanceCriteria": [
+            "date-format.test.mjs 통과",
+            "선택 날짜를 YYYY-MM-DD로 표시"
+          ]
+        }
+      ],
+      "decisions": [
+        {
+          "topic": "재사용: dayjs",
+          "decision": "재사용 채택: dayjs 1.11.13 (MIT) · https://www.npmjs.com/package/dayjs · 확인 2026-10-30T11:06:16+09:00",
+          "rationale": "작고 널리 쓰이는 날짜 형식화 라이브러리"
+        },
+        {
+          "topic": "요일도 표시할까요?",
+          "decision": "사용자 결정: 기획안의 기본 제안대로 진행",
+          "rationale": "LIVE-B 데모 사용자가 열린 질문에 기본안으로 답함"
+        }
+      ],
+      "taskIds": [
+        "eaad01ad-d9b4-4961-846c-89f342cc9b64"
+      ],
+      "status": "passed",
+      "durationMs": 9
+    },
+    "execution": {
+      "runId": "438da15e-317d-48ea-91d3-ef2456a22094",
+      "execution": "completed",
+      "issue": null,
+      "acceptanceDigest": "48125f56de30c8932e9b9a5b1143fb3949a103b14e7e20efabf4f86c01b4322d",
+      "modelIdentity": {
+        "runId": "438da15e-317d-48ea-91d3-ef2456a22094",
+        "attribution": {
+          "selectedModelId": null,
+          "requestedModelId": null,
+          "serverModelId": null,
+          "serverProviderId": null,
+          "serverSource": "thread/start",
+          "actualModelId": "unknown",
+          "actualModelEvidence": "unavailable",
+          "threadId": "f5d00fcf-cc48-4a10-84db-68f2452cc6be",
+          "nativeSessionId": null,
+          "turnId": "63feb576-9092-4516-9f1e-105a9c535721",
+          "status": "completed",
+          "modelChanged": false,
+          "observationIncomplete": true,
+          "resumed": false,
+          "observations": [
+            {
+              "source": "thread/start",
+              "semantics": "configuration",
+              "modelId": null,
+              "providerId": null,
+              "turnId": null,
+              "observedAt": 1793325977219
+            },
+            {
+              "source": "turn/start",
+              "semantics": "request",
+              "modelId": null,
+              "providerId": null,
+              "turnId": null,
+              "observedAt": 1793325977612
+            },
+            {
+              "source": "turn/completed",
+              "semantics": "lifecycle",
+              "modelId": null,
+              "providerId": null,
+              "turnId": "63feb576-9092-4516-9f1e-105a9c535721",
+              "observedAt": 1793325977635
+            }
+          ]
+        }
+      },
+      "files": [
+        {
+          "path": "README.md",
+          "bytes": 64,
+          "sha256": "5f78e962b7ed5843940bc0f9df0ecf6bfef7276cbc999ebc39ee4c8e1f0863fa"
+        },
+        {
+          "path": "date-format.test.mjs",
+          "bytes": 383,
+          "sha256": "fda9558e597a8d46dbaf5580d4ff9b74472f26c5797321c17567128198a31302"
+        },
+        {
+          "path": "index.html",
+          "bytes": 130,
+          "sha256": "59f196561dbff0304a3b47fc211975f3e55d9deb1d5f70c207cd654c72a77785"
+        },
+        {
+          "path": "src/date-format.mjs",
+          "bytes": 142,
+          "sha256": "433e96560f97b0f17ea89a375dc85ddd1992ad0e27aa91ec28151f820c361b8e"
+        }
+      ],
+      "gitStatus": "?? index.html\n?? src/",
+      "status": "passed",
+      "durationMs": 1367
+    },
+    "verification": {
+      "checkId": "c9c7e7e1-01ab-4e99-959c-11f536519c95",
+      "verdict": "passed",
+      "exitCode": 0,
+      "durationMs": 5467,
+      "output": "✔ formatDate returns YYYY-MM-DD for local dates (0.869708ms)\nℹ tests 1\nℹ suites 0\nℹ pass 1\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 49.452417\n",
+      "canApprove": true,
+      "acceptance": {
+        "state": "current",
+        "baseline": {
+          "projectId": "21baa29a-bf9a-4268-97df-bc6735997f63",
+          "workspaceId": "1a45749a-01fb-4a45-8e08-157474041551",
+          "taskId": "eaad01ad-d9b4-4961-846c-89f342cc9b64",
+          "planningVersionId": "84ce0735-17af-47e3-9afd-31809e1ed67d",
+          "planHash": "a5a0c8085118ebe7e6be62c611874ff0006be2cd4f00707a6e496a289c237fc2",
+          "baseSha": "9e41de6cb8797aa1e9fa3c645b1beed360b0a3c1",
+          "criteria": [
+            {
+              "label": "R1",
+              "description": "src/date-format.mjs에 formatDate(date) export\nindex.html 날짜 선택 UI",
+              "acceptanceCriteria": [
+                "date-format.test.mjs 통과",
+                "선택 날짜를 YYYY-MM-DD로 표시"
+              ]
+            }
+          ],
+          "commands": [
+            {
+              "id": "orbit-node-tests",
+              "label": "Node 테스트",
+              "configDigest": "70532e99abf1b5b5689f73820bddb37ce31d1618952076c8d42668aa1817cdb3",
+              "protectedFiles": [
+                "date-format.test.mjs"
+              ]
+            }
+          ],
+          "files": [
+            {
+              "path": "date-format.test.mjs",
+              "mode": "100644",
+              "sha256": "fda9558e597a8d46dbaf5580d4ff9b74472f26c5797321c17567128198a31302"
+            }
+          ],
+          "scope": "승인된 Task 인수조건·호스트 명령 설정·선택한 Git-visible 테스트/runner/manifest 파일의 바이트와 모드를 고정합니다. 선택하지 않은 파일, ignored 의존성, 외부 도구·런타임 바이너리, 실행 중 변경 후 원복을 모두 증명하지 않습니다. 동일성은 인수조건 충족·격리·목표 달성의 증명이 아닙니다.",
+          "digest": "48125f56de30c8932e9b9a5b1143fb3949a103b14e7e20efabf4f86c01b4322d"
+        },
+        "issue": null
+      },
+      "status": "passed"
+    },
+    "development_result": {
+      "view": {
+        "projectId": "21baa29a-bf9a-4268-97df-bc6735997f63",
+        "workspaceId": "1a45749a-01fb-4a45-8e08-157474041551",
+        "observedAt": "2026-10-30T02:06:24.681Z",
+        "sourceDigest": "f326bd2d53d1c994f9e7e1cecc2ef9657daa2aa7d63af25bff19943cb93ffd98",
+        "sourceIssue": null,
+        "run": {
+          "id": "438da15e-317d-48ea-91d3-ef2456a22094",
+          "execution": "completed",
+          "createdAt": "2026-10-30T02:06:17.612Z",
+          "updatedAt": "2026-10-30T02:06:17.635Z"
+        },
+        "task": {
+          "id": "eaad01ad-d9b4-4961-846c-89f342cc9b64",
+          "title": "R1: src/date-format.mjs에 formatDate(date) export",
+          "requirementLabels": [
+            "R1"
+          ]
+        },
+        "planning": {
+          "id": "84ce0735-17af-47e3-9afd-31809e1ed67d",
+          "title": "날짜 표시 위젯",
+          "revision": 2,
+          "contentHash": "a5a0c8085118ebe7e6be62c611874ff0006be2cd4f00707a6e496a289c237fc2",
+          "state": "approved",
+          "current": true
+        },
+        "linkIssue": null,
+        "verification": {
+          "available": true,
+          "canApprove": true,
+          "approvalCurrent": false,
+          "quarantined": false,
+          "scope": "Git 추적 파일과 무시되지 않은 파일의 실행 전후 일치만 검사합니다. ignored 의존성·외부 도구·중간 변경 후 원복은 증명하지 않습니다. 명령은 Codex sandbox 밖의 로컬 OS 권한으로 실행됩니다.",
+          "commands": [
+            {
+              "id": "orbit-node-tests",
+              "label": "Node 테스트",
+              "configDigest": "70532e99abf1b5b5689f73820bddb37ce31d1618952076c8d42668aa1817cdb3"
+            }
+          ],
+          "checks": [
+            {
+              "id": "c9c7e7e1-01ab-4e99-959c-11f536519c95",
+              "runId": "438da15e-317d-48ea-91d3-ef2456a22094",
+              "projectId": "21baa29a-bf9a-4268-97df-bc6735997f63",
+              "workspaceId": "1a45749a-01fb-4a45-8e08-157474041551",
+              "commandId": "orbit-node-tests",
+              "configDigest": "70532e99abf1b5b5689f73820bddb37ce31d1618952076c8d42668aa1817cdb3",
+              "baseSha": "9e41de6cb8797aa1e9fa3c645b1beed360b0a3c1",
+              "sourceDigest": "f326bd2d53d1c994f9e7e1cecc2ef9657daa2aa7d63af25bff19943cb93ffd98",
+              "finishedDigest": "f326bd2d53d1c994f9e7e1cecc2ef9657daa2aa7d63af25bff19943cb93ffd98",
+              "createdAt": "2026-10-30T02:06:20.777Z",
+              "completedAt": "2026-10-30T02:06:22.351Z",
+              "execution": "completed",
+              "verdict": "passed",
+              "exitCode": 0,
+              "durationMs": 1573,
+              "recoveredAt": null,
+              "acceptanceDigest": "48125f56de30c8932e9b9a5b1143fb3949a103b14e7e20efabf4f86c01b4322d"
+            }
+          ]
+        }
+      },
+      "status": "passed",
+      "durationMs": 1030
+    },
+    "app_preview": {
+      "entries": [
+        "index.html"
+      ],
+      "sourceDigest": "f326bd2d53d1c994f9e7e1cecc2ef9657daa2aa7d63af25bff19943cb93ffd98",
+      "entryPath": "index.html",
+      "fileCount": 3,
+      "httpStatus": 200,
+      "servedSha256": "59f196561dbff0304a3b47fc211975f3e55d9deb1d5f70c207cd654c72a77785",
+      "matchesWorkspaceFile": true,
+      "csp": "default-src 'none'; sandbox allow-scripts; script-src 'unsafe-inline' http://127.0.0.1:52857/6323501389087d0c833eae646a111c497b7cb12ae179a1d9be393c39ab2fe733/; style-src 'unsafe-inline' http://127.0.0.1:52857/6323501389087d0c833eae646a111c497b7cb12ae179a1d9be393c39ab2fe733/; img-src data: http://127.0.0.1:52857/6323501389087d0c833eae646a111c497b7cb12ae179a1d9be393c39ab2fe733/; font-src data: http://127.0.0.1:52857/6323501389087d0c833eae646a111c497b7cb12ae179a1d9be393c39ab2fe733/; connect-src 'none'; worker-src 'none'; object-src 'none'; frame-src 'none'; media-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors http://127.0.0.1:52856",
+      "status": "passed",
+      "durationMs": 443
+    },
+    "codex_review": {
+      "files": [
+        {
+          "path": "index.html",
+          "status": "untracked",
+          "bytes": 257
+        },
+        {
+          "path": "src/date-format.mjs",
+          "status": "untracked",
+          "bytes": 296
+        }
+      ],
+      "patchBytes": 553,
+      "reviewId": "c53fec3a-9f74-4512-8811-c9265f8e870a",
+      "execution": "completed",
+      "issue": null,
+      "durationMs": 3360,
+      "processStopped": true,
+      "response": "Dry-run review: no findings.",
+      "status": "passed"
+    },
+    "claude_cross_review": {
+      "producer": {
+        "providerId": "openai",
+        "modelId": null,
+        "sessionId": null,
+        "runId": "438da15e-317d-48ea-91d3-ef2456a22094",
+        "executionId": "63feb576-9092-4516-9f1e-105a9c535721",
+        "source": "unknown",
+        "codex": {
+          "selectedModelId": null,
+          "requestedModelId": null,
+          "serverModelId": null,
+          "serverProviderId": null,
+          "serverSource": "thread/start",
+          "actualModelId": "unknown",
+          "actualModelEvidence": "unavailable",
+          "threadId": "f5d00fcf-cc48-4a10-84db-68f2452cc6be",
+          "nativeSessionId": null,
+          "turnId": "63feb576-9092-4516-9f1e-105a9c535721",
+          "status": "completed",
+          "modelChanged": false,
+          "observationIncomplete": true,
+          "resumed": false,
+          "observations": [
+            {
+              "source": "thread/start",
+              "semantics": "configuration",
+              "modelId": null,
+              "providerId": null,
+              "turnId": null,
+              "observedAt": 1793325977219
+            },
+            {
+              "source": "turn/start",
+              "semantics": "request",
+              "modelId": null,
+              "providerId": null,
+              "turnId": null,
+              "observedAt": 1793325977612
+            },
+            {
+              "source": "turn/completed",
+              "semantics": "lifecycle",
+              "modelId": null,
+              "providerId": null,
+              "turnId": "63feb576-9092-4516-9f1e-105a9c535721",
+              "observedAt": 1793325977635
+            }
+          ]
+        },
+        "evidenceSource": "mock"
+      },
+      "status": "passed",
+      "issue": "QUALITY_PRODUCER_MODEL_UNKNOWN",
+      "calls": 0,
+      "steps": 0,
+      "durationMs": 771
+    },
+    "reuse_vendor": {
+      "approvedDecisions": [
+        {
+          "planningVersionId": "84ce0735-17af-47e3-9afd-31809e1ed67d",
+          "topic": "재사용: dayjs",
+          "decision": "재사용 채택: dayjs 1.11.13 (MIT) · https://www.npmjs.com/package/dayjs · 확인 2026-10-30T11:06:16+09:00"
+        }
+      ],
+      "result": {
+        "status": "vendored",
+        "entry": {
+          "name": "dayjs",
+          "version": "1.11.13",
+          "license": {
+            "decision": "MIT",
+            "package": "MIT"
+          },
+          "sourceDecision": "재사용: dayjs",
+          "sourceUrl": "https://www.npmjs.com/package/dayjs",
+          "files": [
+            {
+              "path": "vendor/dayjs-1.11.13/dayjs.min.js",
+              "url": "https://cdn.jsdelivr.net/npm/dayjs@1.11.13/dayjs.min.js",
+              "sha256": "0e9f733c561bbba27f59aafaa7e842ff79d112cac9dcc2981c83c760ab6095af",
+              "bytes": 23
+            },
+            {
+              "path": "vendor/dayjs-1.11.13/LICENSE",
+              "url": "https://cdn.jsdelivr.net/npm/dayjs@1.11.13/LICENSE",
+              "sha256": "af8cd6ccb986b0bea6dd5a64dc1b8140fd690df3d0c908ff161b62ba15ff6957",
+              "bytes": 14
+            }
+          ],
+          "licenseFile": "vendor/dayjs-1.11.13/LICENSE",
+          "checkedAt": "2026-10-30T11:06:30+09:00",
+          "planningVersionId": "84ce0735-17af-47e3-9afd-31809e1ed67d"
+        }
+      },
+      "evidence": {
+        "entries": [
+          {
+            "name": "dayjs",
+            "version": "1.11.13",
+            "license": {
+              "decision": "MIT",
+              "package": "MIT"
+            },
+            "sourceDecision": "재사용: dayjs",
+            "sourceUrl": "https://www.npmjs.com/package/dayjs",
+            "files": [
+              {
+                "path": "vendor/dayjs-1.11.13/dayjs.min.js",
+                "url": "https://cdn.jsdelivr.net/npm/dayjs@1.11.13/dayjs.min.js",
+                "sha256": "0e9f733c561bbba27f59aafaa7e842ff79d112cac9dcc2981c83c760ab6095af",
+                "bytes": 23
+              },
+              {
+                "path": "vendor/dayjs-1.11.13/LICENSE",
+                "url": "https://cdn.jsdelivr.net/npm/dayjs@1.11.13/LICENSE",
+                "sha256": "af8cd6ccb986b0bea6dd5a64dc1b8140fd690df3d0c908ff161b62ba15ff6957",
+                "bytes": 14
+              }
+            ],
+            "licenseFile": "vendor/dayjs-1.11.13/LICENSE",
+            "checkedAt": "2026-10-30T11:06:30+09:00",
+            "planningVersionId": "84ce0735-17af-47e3-9afd-31809e1ed67d"
+          }
+        ]
+      },
+      "status": "passed",
+      "durationMs": 1101
+    },
+    "post_vendor_probe": {
+      "reviewPreview": "REVIEW_OUTBOUND_DENIED",
+      "qualityPreview": "PERSONAL_DATA_BLOCKED",
+      "verificationCanApproveAfterVendor": false,
+      "files": [
+        {
+          "path": "vendor/REUSE-EVIDENCE.json",
+          "bytes": 974,
+          "sha256": "b4d50fe0bd97aca26e1e2fde10c7bf90f60d0bf47b75ce5c821aaf0d7ab78c8e"
+        },
+        {
+          "path": "vendor/dayjs-1.11.13/LICENSE",
+          "bytes": 14,
+          "sha256": "af8cd6ccb986b0bea6dd5a64dc1b8140fd690df3d0c908ff161b62ba15ff6957"
+        },
+        {
+          "path": "vendor/dayjs-1.11.13/dayjs.min.js",
+          "bytes": 23,
+          "sha256": "0e9f733c561bbba27f59aafaa7e842ff79d112cac9dcc2981c83c760ab6095af"
+        }
+      ],
+      "status": "passed",
+      "durationMs": 1982
+    },
+    "progress": {
+      "snapshot": {
+        "projectId": "21baa29a-bf9a-4268-97df-bc6735997f63",
+        "plan": {
+          "id": "84ce0735-17af-47e3-9afd-31809e1ed67d",
+          "revision": 2,
+          "state": "approved",
+          "contentHash": "a5a0c8085118ebe7e6be62c611874ff0006be2cd4f00707a6e496a289c237fc2",
+          "title": "날짜 표시 위젯",
+          "goal": "날짜를 YYYY-MM-DD로 보여 주는 정적 위젯"
+        },
+        "totals": {
+          "tasks": 1,
+          "verifiedTasks": 1,
+          "basis": "tasks"
+        },
+        "criteria": {
+          "total": 2,
+          "verified": 2,
+          "basis": "acceptance_criteria"
+        },
+        "blockers": [],
+        "tasks": [
+          {
+            "id": "eaad01ad-d9b4-4961-846c-89f342cc9b64",
+            "title": "R1: src/date-format.mjs에 formatDate(date) export",
+            "requirementLabels": [
+              "R1"
+            ],
+            "stage": "verified",
+            "assignee": "codex",
+            "planCurrent": true,
+            "latestRunId": "438da15e-317d-48ea-91d3-ef2456a22094",
+            "startedAt": "2026-10-30T02:06:17.612Z",
+            "lastObservedAt": "2026-10-30T02:06:29.270Z",
+            "verification": "passed",
+            "criteria": {
+              "total": 2,
+              "verified": 2
+            },
+            "runs": [
+              {
+                "id": "438da15e-317d-48ea-91d3-ef2456a22094",
+                "assignee": "codex",
+                "execution": "completed",
+                "startedAt": "2026-10-30T02:06:17.612Z",
+                "lastObservedAt": "2026-10-30T02:06:29.270Z",
+                "verification": "passed",
+                "checks": 1,
+                "planningVersionId": "84ce0735-17af-47e3-9afd-31809e1ed67d",
+                "lastActivity": null,
+                "modelAttribution": {
+                  "selectedModelId": null,
+                  "requestedModelId": null,
+                  "serverModelId": null,
+                  "serverProviderId": null,
+                  "serverSource": "thread/start",
+                  "actualModelId": "unknown",
+                  "actualModelEvidence": "unavailable",
+                  "threadId": "f5d00fcf-cc48-4a10-84db-68f2452cc6be",
+                  "nativeSessionId": null,
+                  "turnId": "63feb576-9092-4516-9f1e-105a9c535721",
+                  "status": "completed",
+                  "modelChanged": false,
+                  "observationIncomplete": true,
+                  "resumed": false,
+                  "observations": [
+                    {
+                      "source": "thread/start",
+                      "semantics": "configuration",
+                      "modelId": null,
+                      "providerId": null,
+                      "turnId": null,
+                      "observedAt": 1793325977219
+                    },
+                    {
+                      "source": "turn/start",
+                      "semantics": "request",
+                      "modelId": null,
+                      "providerId": null,
+                      "turnId": null,
+                      "observedAt": 1793325977612
+                    },
+                    {
+                      "source": "turn/completed",
+                      "semantics": "lifecycle",
+                      "modelId": null,
+                      "providerId": null,
+                      "turnId": "63feb576-9092-4516-9f1e-105a9c535721",
+                      "observedAt": 1793325977635
+                    }
+                  ]
+                },
+                "quality": {
+                  "execution": {
+                    "status": "completed",
+                    "evidenceIds": [],
+                    "blockers": [
+                      "EXECUTION_MOCK"
+                    ],
+                    "nextAction": null,
+                    "evidenceSource": "mock"
+                  },
+                  "format": {
+                    "status": "not_run",
+                    "evidenceIds": [],
+                    "blockers": [
+                      "QUALITY_EVIDENCE_MISSING"
+                    ],
+                    "nextAction": "verify_artifacts"
+                  },
+                  "codeVerification": {
+                    "status": "stale",
+                    "evidenceIds": [
+                      "c9c7e7e1-01ab-4e99-959c-11f536519c95"
+                    ],
+                    "blockers": [
+                      "QUALITY_ARTIFACT_CHANGED"
+                    ],
+                    "nextAction": "verify_code"
+                  },
+                  "semantic": {
+                    "status": "stale",
+                    "evidenceIds": [
+                      "d90c0b9c-2632-43ed-b222-8b330e7625e3"
+                    ],
+                    "blockers": [
+                      "QUALITY_ARTIFACT_CHANGED",
+                      "QUALITY_PRODUCER_MODEL_UNKNOWN",
+                      "QUALITY_PRODUCER_MODEL_UNKNOWN"
+                    ],
+                    "nextAction": "run_quality_review"
+                  },
+                  "independentReview": {
+                    "status": "stale",
+                    "evidenceIds": [
+                      "d90c0b9c-2632-43ed-b222-8b330e7625e3"
+                    ],
+                    "blockers": [
+                      "QUALITY_ARTIFACT_CHANGED",
+                      "QUALITY_PRODUCER_MODEL_UNKNOWN",
+                      "QUALITY_PRODUCER_MODEL_UNKNOWN"
+                    ],
+                    "nextAction": "run_independent_review"
+                  },
+                  "repair": {
+                    "status": "not_run",
+                    "evidenceIds": [],
+                    "blockers": [],
+                    "nextAction": null
+                  },
+                  "revalidation": {
+                    "status": "not_run",
+                    "evidenceIds": [],
+                    "blockers": [],
+                    "nextAction": null
+                  },
+                  "userApproval": {
+                    "status": "not_run",
+                    "evidenceIds": [],
+                    "blockers": [
+                      "QUALITY_APPROVAL_MISSING"
+                    ],
+                    "nextAction": "request_user_approval"
+                  },
+                  "evidence": [
+                    {
+                      "id": "c9c7e7e1-01ab-4e99-959c-11f536519c95",
+                      "kind": "verification_check",
+                      "evidenceSource": "local",
+                      "freshness": "stale",
+                      "recordedStatus": "passed",
+                      "blockers": [
+                        "QUALITY_ARTIFACT_CHANGED"
+                      ],
+                      "binding": {
+                        "projectId": "21baa29a-bf9a-4268-97df-bc6735997f63",
+                        "taskId": "eaad01ad-d9b4-4961-846c-89f342cc9b64",
+                        "runId": "438da15e-317d-48ea-91d3-ef2456a22094",
+                        "planningVersionId": "84ce0735-17af-47e3-9afd-31809e1ed67d",
+                        "planningContentHash": "a5a0c8085118ebe7e6be62c611874ff0006be2cd4f00707a6e496a289c237fc2",
+                        "acceptanceDigest": "48125f56de30c8932e9b9a5b1143fb3949a103b14e7e20efabf4f86c01b4322d",
+                        "artifactId": "1a45749a-01fb-4a45-8e08-157474041551",
+                        "artifactDigest": "f326bd2d53d1c994f9e7e1cecc2ef9657daa2aa7d63af25bff19943cb93ffd98"
+                      }
+                    },
+                    {
+                      "id": "d90c0b9c-2632-43ed-b222-8b330e7625e3",
+                      "kind": "quality_loop",
+                      "evidenceSource": "mock",
+                      "freshness": "stale",
+                      "recordedStatus": "blocked",
+                      "blockers": [
+                        "QUALITY_ARTIFACT_CHANGED",
+                        "QUALITY_PRODUCER_MODEL_UNKNOWN",
+                        "QUALITY_PRODUCER_MODEL_UNKNOWN"
+                      ],
+                      "artifactScope": "workspace",
+                      "binding": {
+                        "projectId": "21baa29a-bf9a-4268-97df-bc6735997f63",
+                        "taskId": "eaad01ad-d9b4-4961-846c-89f342cc9b64",
+                        "runId": "438da15e-317d-48ea-91d3-ef2456a22094",
+                        "planningVersionId": "84ce0735-17af-47e3-9afd-31809e1ed67d",
+                        "planningContentHash": "a5a0c8085118ebe7e6be62c611874ff0006be2cd4f00707a6e496a289c237fc2",
+                        "acceptanceDigest": "48125f56de30c8932e9b9a5b1143fb3949a103b14e7e20efabf4f86c01b4322d",
+                        "artifactId": "1a45749a-01fb-4a45-8e08-157474041551",
+                        "artifactDigest": "f326bd2d53d1c994f9e7e1cecc2ef9657daa2aa7d63af25bff19943cb93ffd98"
+                      }
+                    }
+                  ]
+                }
+              }
+            ],
+            "runsTotal": 1,
+            "qualityLoops": [
+              {
+                "projectId": "21baa29a-bf9a-4268-97df-bc6735997f63",
+                "sourceRunId": "438da15e-317d-48ea-91d3-ef2456a22094",
+                "taskId": "eaad01ad-d9b4-4961-846c-89f342cc9b64",
+                "baseline": {
+                  "id": "84ce0735-17af-47e3-9afd-31809e1ed67d",
+                  "digest": "a5a0c8085118ebe7e6be62c611874ff0006be2cd4f00707a6e496a289c237fc2",
+                  "criteria": [
+                    "date-format.test.mjs 통과",
+                    "선택 날짜를 YYYY-MM-DD로 표시"
+                  ]
+                },
+                "version": {
+                  "id": "84ce0735-17af-47e3-9afd-31809e1ed67d",
+                  "projectId": "21baa29a-bf9a-4268-97df-bc6735997f63",
+                  "revision": 2,
+                  "contentHash": "a5a0c8085118ebe7e6be62c611874ff0006be2cd4f00707a6e496a289c237fc2",
+                  "state": "approved",
+                  "draft": {
+                    "schemaVersion": "1.0",
+                    "title": "날짜 표시 위젯",
+                    "goal": "날짜를 YYYY-MM-DD로 보여 주는 정적 위젯",
+                    "requirements": [
+                      {
+                        "label": "R1",
+                        "description": "src/date-format.mjs에 formatDate(date) export\nindex.html 날짜 선택 UI",
+                        "acceptanceCriteria": [
+                          "date-format.test.mjs 통과",
+                          "선택 날짜를 YYYY-MM-DD로 표시"
+                        ]
+                      }
+                    ],
+                    "constraints": [
+                      "네트워크 없이 동작"
+                    ],
+                    "openQuestions": [],
+                    "source": "manual",
+                    "decisions": [
+                      {
+                        "topic": "재사용: dayjs",
+                        "decision": "재사용 채택: dayjs 1.11.13 (MIT) · https://www.npmjs.com/package/dayjs · 확인 2026-10-30T11:06:16+09:00",
+                        "rationale": "작고 널리 쓰이는 날짜 형식화 라이브러리"
+                      },
+                      {
+                        "topic": "요일도 표시할까요?",
+                        "decision": "사용자 결정: 기획안의 기본 제안대로 진행",
+                        "rationale": "LIVE-B 데모 사용자가 열린 질문에 기본안으로 답함"
+                      }
+                    ],
+                    "depth": "simple",
+                    "depthReason": "작은 정적 페이지"
+                  },
+                  "lineageId": "16bc8547-e6b2-4cad-9073-30500393be0c",
+                  "createdAt": "2026-10-30T02:06:16.800Z",
+                  "approvedAt": "2026-10-30T02:06:16.802Z",
+                  "approvedBy": "local-user"
+                },
+                "task": {
+                  "title": "R1: src/date-format.mjs에 formatDate(date) export",
+                  "description": "src/date-format.mjs에 formatDate(date) export\nindex.html 날짜 선택 UI",
+                  "acceptanceCriteria": [
+                    "date-format.test.mjs 통과",
+                    "선택 날짜를 YYYY-MM-DD로 표시"
+                  ],
+                  "planningVersionId": "84ce0735-17af-47e3-9afd-31809e1ed67d",
+                  "requirementLabels": [
+                    "R1"
+                  ],
+                  "id": "eaad01ad-d9b4-4961-846c-89f342cc9b64",
+                  "projectId": "21baa29a-bf9a-4268-97df-bc6735997f63",
+                  "state": "draft",
+                  "verification": "not_run",
+                  "createdAt": "2026-10-30T02:06:16.803Z"
+                },
+                "artifact": {
+                  "id": "1a45749a-01fb-4a45-8e08-157474041551",
+                  "digest": "f326bd2d53d1c994f9e7e1cecc2ef9657daa2aa7d63af25bff19943cb93ffd98"
+                },
+                "producer": {
+                  "providerId": "openai",
+                  "modelId": null,
+                  "sessionId": null,
+                  "runId": "438da15e-317d-48ea-91d3-ef2456a22094",
+                  "executionId": "63feb576-9092-4516-9f1e-105a9c535721",
+                  "source": "unknown",
+                  "codex": {
+                    "selectedModelId": null,
+                    "requestedModelId": null,
+                    "serverModelId": null,
+                    "serverProviderId": null,
+                    "serverSource": "thread/start",
+                    "actualModelId": "unknown",
+                    "actualModelEvidence": "unavailable",
+                    "threadId": "f5d00fcf-cc48-4a10-84db-68f2452cc6be",
+                    "nativeSessionId": null,
+                    "turnId": "63feb576-9092-4516-9f1e-105a9c535721",
+                    "status": "completed",
+                    "modelChanged": false,
+                    "observationIncomplete": true,
+                    "resumed": false,
+                    "observations": [
+                      {
+                        "source": "thread/start",
+                        "semantics": "configuration",
+                        "modelId": null,
+                        "providerId": null,
+                        "turnId": null,
+                        "observedAt": 1793325977219
+                      },
+                      {
+                        "source": "turn/start",
+                        "semantics": "request",
+                        "modelId": null,
+                        "providerId": null,
+                        "turnId": null,
+                        "observedAt": 1793325977612
+                      },
+                      {
+                        "source": "turn/completed",
+                        "semantics": "lifecycle",
+                        "modelId": null,
+                        "providerId": null,
+                        "turnId": "63feb576-9092-4516-9f1e-105a9c535721",
+                        "observedAt": 1793325977635
+                      }
+                    ]
+                  },
+                  "evidenceSource": "mock"
+                },
+                "reviewers": [
+                  {
+                    "id": "claude-cross-review",
+                    "providerId": "anthropic",
+                    "modelId": "claude-opus-5-5"
+                  }
+                ],
+                "limits": {
+                  "maxCalls": 1,
+                  "maxRepairs": 0,
+                  "timeoutMs": 120000
+                },
+                "previewDigest": "5d200eb50d32dede833122498c4b150d13357954ec192a8e8db39d8f29a7f5bd",
+                "id": "d90c0b9c-2632-43ed-b222-8b330e7625e3",
+                "requestId": "b3d4aa43-1e0c-4662-a311-da438db7c04e",
+                "createdAt": "2026-10-30T02:06:29.270Z",
+                "updatedAt": "2026-10-30T02:06:29.270Z",
+                "recoveryRequired": false,
+                "result": {
+                  "status": "blocked",
+                  "issue": "QUALITY_PRODUCER_MODEL_UNKNOWN",
+                  "calls": 0,
+                  "repairs": 0,
+                  "rounds": [],
+                  "artifact": {
+                    "id": "1a45749a-01fb-4a45-8e08-157474041551",
+                    "digest": "f326bd2d53d1c994f9e7e1cecc2ef9657daa2aa7d63af25bff19943cb93ffd98"
+                  }
+                },
+                "steps": [],
+                "verification": {
+                  "status": "unknown",
+                  "checkIds": [],
+                  "issue": "QUALITY_VERIFICATION_NOT_RUN"
+                }
+              }
+            ],
+            "capabilityRoutes": [],
+            "capabilityExecutions": [],
+            "quality": {
+              "execution": {
+                "status": "completed",
+                "evidenceIds": [],
+                "blockers": [
+                  "EXECUTION_MOCK"
+                ],
+                "nextAction": null,
+                "evidenceSource": "mock"
+              },
+              "format": {
+                "status": "not_run",
+                "evidenceIds": [],
+                "blockers": [
+                  "QUALITY_EVIDENCE_MISSING"
+                ],
+                "nextAction": "verify_artifacts"
+              },
+              "codeVerification": {
+                "status": "stale",
+                "evidenceIds": [
+                  "c9c7e7e1-01ab-4e99-959c-11f536519c95"
+                ],
+                "blockers": [
+                  "QUALITY_ARTIFACT_CHANGED"
+                ],
+                "nextAction": "verify_code"
+              },
+              "semantic": {
+                "status": "stale",
+                "evidenceIds": [
+                  "d90c0b9c-2632-43ed-b222-8b330e7625e3"
+                ],
+                "blockers": [
+                  "QUALITY_ARTIFACT_CHANGED",
+                  "QUALITY_PRODUCER_MODEL_UNKNOWN",
+                  "QUALITY_PRODUCER_MODEL_UNKNOWN"
+                ],
+                "nextAction": "run_quality_review"
+              },
+              "independentReview": {
+                "status": "stale",
+                "evidenceIds": [
+                  "d90c0b9c-2632-43ed-b222-8b330e7625e3"
+                ],
+                "blockers": [
+                  "QUALITY_ARTIFACT_CHANGED",
+                  "QUALITY_PRODUCER_MODEL_UNKNOWN",
+                  "QUALITY_PRODUCER_MODEL_UNKNOWN"
+                ],
+                "nextAction": "run_independent_review"
+              },
+              "repair": {
+                "status": "not_run",
+                "evidenceIds": [],
+                "blockers": [],
+                "nextAction": null
+              },
+              "revalidation": {
+                "status": "not_run",
+                "evidenceIds": [],
+                "blockers": [],
+                "nextAction": null
+              },
+              "userApproval": {
+                "status": "not_run",
+                "evidenceIds": [],
+                "blockers": [
+                  "QUALITY_APPROVAL_MISSING"
+                ],
+                "nextAction": "request_user_approval"
+              },
+              "evidence": [
+                {
+                  "id": "c9c7e7e1-01ab-4e99-959c-11f536519c95",
+                  "kind": "verification_check",
+                  "evidenceSource": "local",
+                  "freshness": "stale",
+                  "recordedStatus": "passed",
+                  "blockers": [
+                    "QUALITY_ARTIFACT_CHANGED"
+                  ],
+                  "binding": {
+                    "projectId": "21baa29a-bf9a-4268-97df-bc6735997f63",
+                    "taskId": "eaad01ad-d9b4-4961-846c-89f342cc9b64",
+                    "runId": "438da15e-317d-48ea-91d3-ef2456a22094",
+                    "planningVersionId": "84ce0735-17af-47e3-9afd-31809e1ed67d",
+                    "planningContentHash": "a5a0c8085118ebe7e6be62c611874ff0006be2cd4f00707a6e496a289c237fc2",
+                    "acceptanceDigest": "48125f56de30c8932e9b9a5b1143fb3949a103b14e7e20efabf4f86c01b4322d",
+                    "artifactId": "1a45749a-01fb-4a45-8e08-157474041551",
+                    "artifactDigest": "f326bd2d53d1c994f9e7e1cecc2ef9657daa2aa7d63af25bff19943cb93ffd98"
+                  }
+                },
+                {
+                  "id": "d90c0b9c-2632-43ed-b222-8b330e7625e3",
+                  "kind": "quality_loop",
+                  "evidenceSource": "mock",
+                  "freshness": "stale",
+                  "recordedStatus": "blocked",
+                  "blockers": [
+                    "QUALITY_ARTIFACT_CHANGED",
+                    "QUALITY_PRODUCER_MODEL_UNKNOWN",
+                    "QUALITY_PRODUCER_MODEL_UNKNOWN"
+                  ],
+                  "artifactScope": "workspace",
+                  "binding": {
+                    "projectId": "21baa29a-bf9a-4268-97df-bc6735997f63",
+                    "taskId": "eaad01ad-d9b4-4961-846c-89f342cc9b64",
+                    "runId": "438da15e-317d-48ea-91d3-ef2456a22094",
+                    "planningVersionId": "84ce0735-17af-47e3-9afd-31809e1ed67d",
+                    "planningContentHash": "a5a0c8085118ebe7e6be62c611874ff0006be2cd4f00707a6e496a289c237fc2",
+                    "acceptanceDigest": "48125f56de30c8932e9b9a5b1143fb3949a103b14e7e20efabf4f86c01b4322d",
+                    "artifactId": "1a45749a-01fb-4a45-8e08-157474041551",
+                    "artifactDigest": "f326bd2d53d1c994f9e7e1cecc2ef9657daa2aa7d63af25bff19943cb93ffd98"
+                  }
+                }
+              ]
+            },
+            "completion": {
+              "binding": {
+                "projectId": "21baa29a-bf9a-4268-97df-bc6735997f63",
+                "taskId": "eaad01ad-d9b4-4961-846c-89f342cc9b64",
+                "runId": "438da15e-317d-48ea-91d3-ef2456a22094",
+                "planningVersionId": "84ce0735-17af-47e3-9afd-31809e1ed67d",
+                "planningContentHash": "a5a0c8085118ebe7e6be62c611874ff0006be2cd4f00707a6e496a289c237fc2",
+                "acceptanceDigest": "48125f56de30c8932e9b9a5b1143fb3949a103b14e7e20efabf4f86c01b4322d",
+                "artifactId": "1a45749a-01fb-4a45-8e08-157474041551",
+                "artifactDigest": "82c49f0f29da498859678d21e6dfb8cab1cd92c299b3d63840c4ad0eee460c60",
+                "graphRevision": null,
+                "contractDigest": null,
+                "policyDigest": "16defb0768add8ad46c6ee2d0abfe9251f8775e28abbe8d341c445f5f4f293fd",
+                "configDigest": "562c1ed3b510b372f0c5a8041e89a19d4ee23c4119c274c4759d944ee17f4f66",
+                "artifactScope": "workspace",
+                "baseSha": "9e41de6cb8797aa1e9fa3c645b1beed360b0a3c1",
+                "inputSnapshotDigest": null
+              },
+              "policyDigest": "16defb0768add8ad46c6ee2d0abfe9251f8775e28abbe8d341c445f5f4f293fd",
+              "gates": [
+                {
+                  "id": "lint",
+                  "status": "blocked",
+                  "evidenceIds": [],
+                  "source": "unknown",
+                  "freshness": "unavailable",
+                  "blockers": [
+                    "CQG_GATE_COMMAND_MISSING"
+                  ]
+                },
+                {
+                  "id": "type",
+                  "status": "blocked",
+                  "evidenceIds": [],
+                  "source": "unknown",
+                  "freshness": "unavailable",
+                  "blockers": [
+                    "CQG_GATE_COMMAND_MISSING"
+                  ]
+                },
+                {
+                  "id": "build",
+                  "status": "blocked",
+                  "evidenceIds": [],
+                  "source": "unknown",
+                  "freshness": "unavailable",
+                  "blockers": [
+                    "CQG_GATE_COMMAND_MISSING"
+                  ]
+                },
+                {
+                  "id": "unit",
+                  "status": "blocked",
+                  "evidenceIds": [],
+                  "source": "unknown",
+                  "freshness": "unavailable",
+                  "blockers": [
+                    "CQG_GATE_COMMAND_MISSING"
+                  ]
+                },
+                {
+                  "id": "contract",
+                  "status": "blocked",
+                  "evidenceIds": [],
+                  "source": "unknown",
+                  "freshness": "unavailable",
+                  "blockers": [
+                    "CQG_GATE_COMMAND_MISSING"
+                  ]
+                },
+                {
+                  "id": "e2e",
+                  "status": "blocked",
+                  "evidenceIds": [],
+                  "source": "unknown",
+                  "freshness": "unavailable",
+                  "blockers": [
+                    "CQG_GATE_COMMAND_MISSING"
+                  ]
+                }
+              ],
+              "qualityPassed": false,
+              "independentReview": {
+                "status": "recorded",
+                "evidenceIds": [
+                  "d90c0b9c-2632-43ed-b222-8b330e7625e3"
+                ],
+                "source": "mock",
+                "freshness": "stale",
+                "blockers": [
+                  "CQG_AI_NATIVE_REQUIRED",
+                  "CQG_BINDING_CHANGED:artifactDigest",
+                  "CQG_BINDING_MISSING:artifactScope",
+                  "CQG_BINDING_MISSING:baseSha",
+                  "CQG_BINDING_MISSING:configDigest",
+                  "CQG_BINDING_MISSING:contractDigest",
+                  "CQG_BINDING_MISSING:graphRevision",
+                  "CQG_BINDING_MISSING:policyDigest",
+                  "CQG_EVIDENCE_NOT_PASSED",
+                  "CQG_EVIDENCE_STALE",
+                  "CQG_INDEPENDENT_REVIEW_REQUIRED",
+                  "CQG_MODEL_OBSERVATION_REQUIRED",
+                  "CQG_OBSERVED_EVIDENCE_REQUIRED",
+                  "CQG_REVIEW_BINDING_MISMATCH",
+                  "CQG_REVIEW_MISSING",
+                  "CQG_REVIEW_RECOVERY_OR_FAILURE",
+                  "QUALITY_ARTIFACT_CHANGED",
+                  "QUALITY_PRODUCER_MODEL_UNKNOWN"
+                ]
+              },
+              "userApproval": {
+                "status": "blocked",
+                "evidenceIds": [],
+                "source": "unknown",
+                "freshness": "unavailable",
+                "blockers": [
+                  "CQG_USER_APPROVAL_REQUIRED"
+                ]
+              },
+              "verifiedDone": false,
+              "reasonCodes": [
+                "CQG_AI_NATIVE_REQUIRED",
+                "CQG_BINDING_CHANGED:artifactDigest",
+                "CQG_BINDING_MISSING:artifactScope",
+                "CQG_BINDING_MISSING:baseSha",
+                "CQG_BINDING_MISSING:configDigest",
+                "CQG_BINDING_MISSING:contractDigest",
+                "CQG_BINDING_MISSING:graphRevision",
+                "CQG_BINDING_MISSING:policyDigest",
+                "CQG_DEPENDENCY_RELEASE_WAIT",
+                "CQG_EVIDENCE_NOT_PASSED",
+                "CQG_EVIDENCE_STALE",
+                "CQG_EXECUTION_NOT_OBSERVED_COMPLETE",
+                "CQG_GATE_COMMAND_MISSING",
+                "CQG_INDEPENDENT_REVIEW_REQUIRED",
+                "CQG_MODEL_OBSERVATION_REQUIRED",
+                "CQG_OBSERVED_EVIDENCE_REQUIRED",
+                "CQG_REVIEW_BINDING_MISMATCH",
+                "CQG_REVIEW_MISSING",
+                "CQG_REVIEW_RECOVERY_OR_FAILURE",
+                "EXECUTION_MOCK",
+                "QUALITY_ARTIFACT_CHANGED",
+                "QUALITY_PRODUCER_MODEL_UNKNOWN"
+              ]
+            }
+          }
+        ],
+        "untaskedRuns": 0,
+        "lastObservedAt": "2026-10-30T02:06:29.270Z"
+      },
+      "developmentResult": {
+        "projectId": "21baa29a-bf9a-4268-97df-bc6735997f63",
+        "workspaceId": "1a45749a-01fb-4a45-8e08-157474041551",
+        "observedAt": "2026-10-30T02:06:34.799Z",
+        "sourceDigest": "82c49f0f29da498859678d21e6dfb8cab1cd92c299b3d63840c4ad0eee460c60",
+        "sourceIssue": null,
+        "run": {
+          "id": "438da15e-317d-48ea-91d3-ef2456a22094",
+          "execution": "completed",
+          "createdAt": "2026-10-30T02:06:17.612Z",
+          "updatedAt": "2026-10-30T02:06:17.635Z"
+        },
+        "task": {
+          "id": "eaad01ad-d9b4-4961-846c-89f342cc9b64",
+          "title": "R1: src/date-format.mjs에 formatDate(date) export",
+          "requirementLabels": [
+            "R1"
+          ]
+        },
+        "planning": {
+          "id": "84ce0735-17af-47e3-9afd-31809e1ed67d",
+          "title": "날짜 표시 위젯",
+          "revision": 2,
+          "contentHash": "a5a0c8085118ebe7e6be62c611874ff0006be2cd4f00707a6e496a289c237fc2",
+          "state": "approved",
+          "current": true
+        },
+        "linkIssue": null,
+        "verification": {
+          "available": true,
+          "canApprove": false,
+          "approvalCurrent": false,
+          "quarantined": false,
+          "scope": "Git 추적 파일과 무시되지 않은 파일의 실행 전후 일치만 검사합니다. ignored 의존성·외부 도구·중간 변경 후 원복은 증명하지 않습니다. 명령은 Codex sandbox 밖의 로컬 OS 권한으로 실행됩니다.",
+          "commands": [
+            {
+              "id": "orbit-node-tests",
+              "label": "Node 테스트",
+              "configDigest": "70532e99abf1b5b5689f73820bddb37ce31d1618952076c8d42668aa1817cdb3"
+            }
+          ],
+          "checks": [
+            {
+              "id": "c9c7e7e1-01ab-4e99-959c-11f536519c95",
+              "runId": "438da15e-317d-48ea-91d3-ef2456a22094",
+              "projectId": "21baa29a-bf9a-4268-97df-bc6735997f63",
+              "workspaceId": "1a45749a-01fb-4a45-8e08-157474041551",
+              "commandId": "orbit-node-tests",
+              "configDigest": "70532e99abf1b5b5689f73820bddb37ce31d1618952076c8d42668aa1817cdb3",
+              "baseSha": "9e41de6cb8797aa1e9fa3c645b1beed360b0a3c1",
+              "sourceDigest": "f326bd2d53d1c994f9e7e1cecc2ef9657daa2aa7d63af25bff19943cb93ffd98",
+              "finishedDigest": "f326bd2d53d1c994f9e7e1cecc2ef9657daa2aa7d63af25bff19943cb93ffd98",
+              "createdAt": "2026-10-30T02:06:20.777Z",
+              "completedAt": "2026-10-30T02:06:22.351Z",
+              "execution": "completed",
+              "verdict": "passed",
+              "exitCode": 0,
+              "durationMs": 1573,
+              "recoveredAt": null,
+              "acceptanceDigest": "48125f56de30c8932e9b9a5b1143fb3949a103b14e7e20efabf4f86c01b4322d"
+            }
+          ]
+        }
+      },
+      "readOnly": true,
+      "status": "passed",
+      "durationMs": 2429
+    }
+  },
+  "stage": "progress",
+  "costUsd": null,
+  "remainingQuota": null,
+  "success": true,
+  "cumulativeAfter": {
+    "claude": {
+      "planning": 1,
+      "research": 1
+    },
+    "codex": {
+      "execution": 1,
+      "review": 1
+    }
+  },
+  "finalVerdict": "passed",
+  "sourceRepoClean": true,
+  "finalFiles": [
+    {
+      "path": "README.md",
+      "bytes": 64,
+      "sha256": "5f78e962b7ed5843940bc0f9df0ecf6bfef7276cbc999ebc39ee4c8e1f0863fa"
+    },
+    {
+      "path": "date-format.test.mjs",
+      "bytes": 383,
+      "sha256": "fda9558e597a8d46dbaf5580d4ff9b74472f26c5797321c17567128198a31302"
+    },
+    {
+      "path": "index.html",
+      "bytes": 130,
+      "sha256": "59f196561dbff0304a3b47fc211975f3e55d9deb1d5f70c207cd654c72a77785"
+    },
+    {
+      "path": "src/date-format.mjs",
+      "bytes": 142,
+      "sha256": "433e96560f97b0f17ea89a375dc85ddd1992ad0e27aa91ec28151f820c361b8e"
+    },
+    {
+      "path": "vendor/REUSE-EVIDENCE.json",
+      "bytes": 974,
+      "sha256": "b4d50fe0bd97aca26e1e2fde10c7bf90f60d0bf47b75ce5c821aaf0d7ab78c8e"
+    },
+    {
+      "path": "vendor/dayjs-1.11.13/LICENSE",
+      "bytes": 14,
+      "sha256": "af8cd6ccb986b0bea6dd5a64dc1b8140fd690df3d0c908ff161b62ba15ff6957"
+    },
+    {
+      "path": "vendor/dayjs-1.11.13/dayjs.min.js",
+      "bytes": 23,
+      "sha256": "0e9f733c561bbba27f59aafaa7e842ff79d112cac9dcc2981c83c760ab6095af"
+    }
+  ],
+  "durationMs": 20946,
+  "finishedAt": "2026-10-30T02:06:34.832Z",
+  "runs": [
+    {
+      "id": "438da15e-317d-48ea-91d3-ef2456a22094",
+      "execution": "completed",
+      "runtime": "codex",
+      "taskId": "eaad01ad-d9b4-4961-846c-89f342cc9b64"
+    }
+  ],
+  "events": [
+    {
+      "seq": 1,
+      "at": "2026-10-30T02:06:14.037Z",
+      "kind": "project.registered",
+      "runId": null
+    },
+    {
+      "seq": 2,
+      "at": "2026-10-30T02:06:14.157Z",
+      "kind": "workspace.creating",
+      "runId": null
+    },
+    {
+      "seq": 3,
+      "at": "2026-10-30T02:06:14.223Z",
+      "kind": "workspace.ready",
+      "runId": null
+    },
+    {
+      "seq": 4,
+      "at": "2026-10-30T02:06:14.574Z",
+      "kind": "provider.status",
+      "runId": null
+    },
+    {
+      "seq": 5,
+      "at": "2026-10-30T02:06:14.574Z",
+      "kind": "workspace.selected",
+      "runId": null
+    },
+    {
+      "seq": 6,
+      "at": "2026-10-30T02:06:15.734Z",
+      "kind": "verification.setup.configured",
+      "runId": null
+    },
+    {
+      "seq": 7,
+      "at": "2026-10-30T02:06:16.096Z",
+      "kind": "planning_suggestion.updated",
+      "runId": null
+    },
+    {
+      "seq": 8,
+      "at": "2026-10-30T02:06:16.288Z",
+      "kind": "planning_suggestion.reuse_discovery",
+      "runId": null
+    },
+    {
+      "seq": 9,
+      "at": "2026-10-30T02:06:16.288Z",
+      "kind": "planning_suggestion.updated",
+      "runId": null
+    },
+    {
+      "seq": 10,
+      "at": "2026-10-30T02:06:16.798Z",
+      "kind": "planning.created",
+      "runId": null
+    },
+    {
+      "seq": 11,
+      "at": "2026-10-30T02:06:16.798Z",
+      "kind": "planning_suggestion.updated",
+      "runId": null
+    },
+    {
+      "seq": 12,
+      "at": "2026-10-30T02:06:16.800Z",
+      "kind": "planning.revised",
+      "runId": null
+    },
+    {
+      "seq": 13,
+      "at": "2026-10-30T02:06:16.802Z",
+      "kind": "planning.approved",
+      "runId": null
+    },
+    {
+      "seq": 14,
+      "at": "2026-10-30T02:06:16.803Z",
+      "kind": "planning.tasks_created",
+      "runId": null
+    },
+    {
+      "seq": 15,
+      "at": "2026-10-30T02:06:17.049Z",
+      "kind": "provider.status",
+      "runId": null
+    },
+    {
+      "seq": 16,
+      "at": "2026-10-30T02:06:17.218Z",
+      "kind": "native.connection.intent",
+      "runId": null
+    },
+    {
+      "seq": 17,
+      "at": "2026-10-30T02:06:17.219Z",
+      "kind": "native.connection.session",
+      "runId": null
+    },
+    {
+      "seq": 18,
+      "at": "2026-10-30T02:06:17.219Z",
+      "kind": "provider.status",
+      "runId": null
+    },
+    {
+      "seq": 19,
+      "at": "2026-10-30T02:06:17.220Z",
+      "kind": "session.created",
+      "runId": null
+    },
+    {
+      "seq": 20,
+      "at": "2026-10-30T02:06:17.612Z",
+      "kind": "run.created",
+      "runId": "438da15e-317d-48ea-91d3-ef2456a22094"
+    },
+    {
+      "seq": 21,
+      "at": "2026-10-30T02:06:17.613Z",
+      "kind": "run.model_attribution",
+      "runId": "438da15e-317d-48ea-91d3-ef2456a22094"
+    },
+    {
+      "seq": 22,
+      "at": "2026-10-30T02:06:17.613Z",
+      "kind": "harness.applied",
+      "runId": "438da15e-317d-48ea-91d3-ef2456a22094"
+    },
+    {
+      "seq": 23,
+      "at": "2026-10-30T02:06:17.613Z",
+      "kind": "run.runtime_source",
+      "runId": "438da15e-317d-48ea-91d3-ef2456a22094"
+    },
+    {
+      "seq": 24,
+      "at": "2026-10-30T02:06:17.613Z",
+      "kind": "run.model_attribution",
+      "runId": "438da15e-317d-48ea-91d3-ef2456a22094"
+    },
+    {
+      "seq": 25,
+      "at": "2026-10-30T02:06:17.614Z",
+      "kind": "run.accepted",
+      "runId": "438da15e-317d-48ea-91d3-ef2456a22094"
+    },
+    {
+      "seq": 26,
+      "at": "2026-10-30T02:06:17.614Z",
+      "kind": "handoff.delivered",
+      "runId": "438da15e-317d-48ea-91d3-ef2456a22094"
+    },
+    {
+      "seq": 27,
+      "at": "2026-10-30T02:06:17.635Z",
+      "kind": "run.model_attribution",
+      "runId": "438da15e-317d-48ea-91d3-ef2456a22094"
+    },
+    {
+      "seq": 28,
+      "at": "2026-10-30T02:06:17.635Z",
+      "kind": "run.completed",
+      "runId": "438da15e-317d-48ea-91d3-ef2456a22094"
+    },
+    {
+      "seq": 29,
+      "at": "2026-10-30T02:06:17.636Z",
+      "kind": "run.model_attribution",
+      "runId": "438da15e-317d-48ea-91d3-ef2456a22094"
+    },
+    {
+      "seq": 30,
+      "at": "2026-10-30T02:06:20.778Z",
+      "kind": "run.verification_recorded",
+      "runId": "438da15e-317d-48ea-91d3-ef2456a22094"
+    },
+    {
+      "seq": 31,
+      "at": "2026-10-30T02:06:20.778Z",
+      "kind": "verification.started",
+      "runId": "438da15e-317d-48ea-91d3-ef2456a22094"
+    },
+    {
+      "seq": 32,
+      "at": "2026-10-30T02:06:22.352Z",
+      "kind": "verification.completed",
+      "runId": "438da15e-317d-48ea-91d3-ef2456a22094"
+    },
+    {
+      "seq": 33,
+      "at": "2026-10-30T02:06:26.863Z",
+      "kind": "review.updated",
+      "runId": null
+    },
+    {
+      "seq": 34,
+      "at": "2026-10-30T02:06:27.253Z",
+      "kind": "review.updated",
+      "runId": null
+    },
+    {
+      "seq": 35,
+      "at": "2026-10-30T02:06:27.753Z",
+      "kind": "review.updated",
+      "runId": null
+    },
+    {
+      "seq": 36,
+      "at": "2026-10-30T02:06:29.270Z",
+      "kind": "quality.created",
+      "runId": "438da15e-317d-48ea-91d3-ef2456a22094"
+    }
+  ]
+}

@@ -1,0 +1,594 @@
+{
+  "kind": "live_b_e2e",
+  "mode": "live",
+  "startedAt": "2026-10-30T02:03:55.255Z",
+  "directory": "/private/tmp/orbit-live-b-9bZygJ",
+  "budget": {
+    "claude": {
+      "total": 6,
+      "planning": 1,
+      "research": 1,
+      "fix": 1,
+      "review": 1
+    },
+    "codex": {
+      "total": 3,
+      "execution": 1,
+      "fix": 1,
+      "review": 1
+    }
+  },
+  "calls": {
+    "claude": {
+      "planning": 1,
+      "research": 1
+    },
+    "codex": {
+      "execution": 1
+    }
+  },
+  "cumulativeBefore": {
+    "claude": {},
+    "codex": {},
+    "runs": 0
+  },
+  "claudeProcesses": [
+    {
+      "purpose": "planning",
+      "startedAt": "2026-10-30T02:03:58.013Z",
+      "model": "claude-opus-5-5",
+      "auth": "subscription",
+      "status": "completed",
+      "exit": "observed",
+      "durationMs": 35381
+    },
+    {
+      "purpose": "research",
+      "startedAt": "2026-10-30T02:04:33.405Z",
+      "model": "claude-opus-5-5",
+      "auth": "subscription",
+      "status": "completed",
+      "exit": "observed",
+      "durationMs": 15449
+    }
+  ],
+  "codexProcesses": [],
+  "blocks": [
+    {
+      "step": "execution",
+      "code": "EXECUTION_BRIEF_TOO_LARGE"
+    }
+  ],
+  "steps": {
+    "project": {
+      "projectId": "d5a63f99-ef36-418a-b564-f94cf4a8ebdf",
+      "workspaceId": "ecc255db-b72b-44d0-bd6a-61863fa640c6",
+      "baseSha": "ef31543997d6820d2928d3a6eacf3022edb8ad16",
+      "preferences": {
+        "planning": "claude-code",
+        "execution": "codex",
+        "revision": 1,
+        "updatedAt": "2026-10-30T02:03:56.136Z"
+      },
+      "status": "passed",
+      "durationMs": 677
+    },
+    "verification_setup": {
+      "receipt": {
+        "requestId": "cde22235-b9f9-466b-8824-30bebd57648f",
+        "projectId": "d5a63f99-ef36-418a-b564-f94cf4a8ebdf",
+        "workspaceId": "ecc255db-b72b-44d0-bd6a-61863fa640c6",
+        "revision": 1,
+        "profileId": "node-test-v1",
+        "createdAt": "2026-10-30T02:03:57.372Z"
+      },
+      "tests": [
+        "date-format.test.mjs"
+      ],
+      "command": {
+        "executable": "node",
+        "args": [
+          "--test",
+          "--",
+          "date-format.test.mjs"
+        ]
+      },
+      "status": "passed",
+      "durationMs": 1235
+    },
+    "planning": {
+      "runtime": "claude-code",
+      "scope": "미리 본 요청을 별도의 읽기 전용 Claude Code 세션에 전송합니다. Native CLI는 읽기 전용이어도 파일을 읽을 수 있으며 컨텍스트 로딩·세션 보존·제공자 전송은 Model Hub 게이트웨이 통제 범위 밖입니다. 1개 요청·60초 제한 뒤 종료 관찰 시간이 추가될 수 있습니다. 구독 사용량·실제 과금 상한은 보장하지 않습니다. 검증된 제안도 별도 저장 전에는 기획 초안이 아니며 승인·Task·Run을 만들지 않습니다. 제안이 검증되면 재사용 탐색을 위해 제안의 제목·목표·요구사항만 별도 Claude Code 웹 검색 세션(WebSearch·WebFetch, 파일 도구 없음, 빈 임시 폴더)에 1회 더 전송합니다(90초 제한, 공개 웹 사이트에 검색어가 전달됩니다). 결과는 결정 항목으로 표시되며 실패해도 제안은 유지됩니다.",
+      "previewDigest": "cee5dfc1f46f04f537d157e61cb755a6797aac2a0868b3884d1a1e68bee7ccaa",
+      "request": "브라우저에서 바로 여는 작은 정적 날짜 표시 위젯을 만들어 주세요. index.html에서 날짜를 고르면 YYYY-MM-DD 형식으로 보여 주고, 형식화 로직은 src/date-format.mjs에서 formatDate(date) 함수(YYYY-MM-DD 문자열 반환)로 export하며 저장소의 기존 테스트 date-format.test.mjs를 통과해야 합니다. 날짜 처리에 알맞은 작은 공개 npm 라이브러리가 있으면 재사용을 검토해 주세요. 요구사항은 하나로 묶고 열린 질문 없이 기획해 주세요.",
+      "suggestionId": "37eba4c0-64b3-4593-bf4f-c4da42ae36f3",
+      "execution": "completed",
+      "issue": null,
+      "processStopped": true,
+      "durationMs": 51980,
+      "outputDigest": "eb437505a52d0dc682381972df9ddfbe2e2fc6512e2f5498d4eb9bb581224647",
+      "requirements": 1,
+      "openQuestions": [],
+      "decisions": [
+        {
+          "topic": "npm 날짜 라이브러리 재사용 여부",
+          "decision": "date-fns, dayjs 같은 작은 공개 npm 라이브러리를 검토했지만 채택하지 않고, 표준 Date API와 String.prototype.padStart로 직접 구현한다.",
+          "rationale": "정적 미리보기에는 빌드 단계와 네트워크가 없습니다. 그래서 bare specifier import(node_modules 해석)와 CDN 로딩을 모두 쓸 수 없고, 라이브러리를 쓰려면 소스를 저장소에 복사(vendoring)해야 합니다. YYYY-MM-DD 형식화는 몇 줄이면 되므로 의존성, 라이선스, 공급망 관리 비용이 얻는 이점보다 큽니다."
+        },
+        {
+          "topic": "타임존 처리",
+          "decision": "formatDate는 Date의 로컬 구성 요소(getFullYear, getMonth+1, getDate)를 쓴다. UI는 input[type=date] 값을 split해 new Date(y, m-1, d)로 로컬 자정 Date를 만든다.",
+          "rationale": "toISOString()과 new Date('YYYY-MM-DD')는 UTC 기준이라 타임존에 따라 날짜가 하루 어긋날 수 있습니다. 로컬 기준으로 맞추면 사용자가 고른 날짜가 그대로 표시됩니다."
+        },
+        {
+          "topic": "잘못된 입력 처리",
+          "decision": "Invalid Date나 Date가 아닌 값의 처리 방식은 기존 date-format.test.mjs의 기대(예외 발생 또는 특정 반환값)를 따른다. 테스트가 정의하지 않으면 TypeError/RangeError를 던지고, UI는 빈 입력일 때 formatDate를 호출하지 않는다.",
+          "rationale": "사용자가 열린 질문 없이 기획해 달라고 요청했으므로 기존 테스트를 단일 기준으로 삼아 모호함을 해소합니다. 'NaN-NaN-NaN' 같은 조용한 오출력을 막습니다."
+        },
+        {
+          "topic": "요구사항 구성",
+          "decision": "UI와 형식화 모듈을 하나의 요구사항 R1로 묶는다.",
+          "rationale": "사용자가 요구사항을 하나로 묶어 달라고 명시했고, 두 산출물이 하나의 위젯으로 함께 검증되기 때문입니다."
+        },
+        {
+          "topic": "재사용: date-fns",
+          "rationale": "format(date,'yyyy-MM-dd')로 같은 결과를 낼 수 있지만, 빌드 없이 file://로 바로 여는 정적 페이지에서는 vendoring이나 CDN이 필요해 의존성만 늘어납니다. 버전은 레지스트리 ta…",
+          "decision": "재사용 미채택: date-fns 4.4.0"
+        },
+        {
+          "topic": "재사용: dayjs",
+          "rationale": "가볍고 MIT 라이선스지만, formatDate 하나 때문에 외부 모듈을 상대 경로 import 구조에 넣는 건 과합니다. 테스트 계약도 Date를 받는 단일 named export라서 네이티브 구현이 더 단순합니…",
+          "decision": "재사용 미채택: dayjs 1.11.23"
+        },
+        {
+          "topic": "재사용 탐색",
+          "decision": "재사용 탐색 완료: 적합 후보 없음 — 직접 구현 · 확인 2026-10-30T11:04:48+09:00",
+          "rationale": "검토 후보 2개 중 채택 없음."
+        }
+      ],
+      "reuseDiscovery": [
+        {
+          "suggestionId": "37eba4c0-64b3-4593-bf4f-c4da42ae36f3",
+          "projectId": "d5a63f99-ef36-418a-b564-f94cf4a8ebdf",
+          "status": "searched",
+          "issue": null,
+          "checkedAt": "2026-10-30T11:04:48+09:00",
+          "candidateCount": 2,
+          "sources": [
+            "https://www.npmjs.com/package/date-fns",
+            "https://www.npmjs.com/package/dayjs"
+          ],
+          "merged": true
+        }
+      ],
+      "status": "passed"
+    },
+    "plan_approval": {
+      "planningVersionId": "b130bdfc-4f9a-4b40-82b8-9090197f5152",
+      "revision": 1,
+      "contentHash": "ee81335212167e0be22f6bb807543147f2305d9f18d37cdc941a8a7dce62fc71",
+      "title": "정적 날짜 표시 위젯 (index.html + src/date-format.mjs)",
+      "requirements": [
+        {
+          "label": "R1",
+          "description": "날짜 선택 UI(index.html)와 형식화 모듈(src/date-format.mjs)로 이루어진 정적 날짜 표시 위젯을 만든다. index.html은 날짜 입력과 결과 표시 영역을 갖추고 상대 경로 ES module로 src/date-format.mjs를 import한다. 사용자가 날짜를 고르면 formatDate(date)의 결과를 화면에 보여 준다. src/date-format.mjs는 Date를 받아 로컬 날짜 기준 YYYY-MM-DD 문자열을 돌려주는 formatDate를 named export한다. 구현은 기존 date-format.test.mjs의 계약에 맞춘다.",
+          "acceptanceCriteria": [
+            "src/date-format.mjs가 formatDate를 named export하고, formatDate(new Date(2024, 0, 5))가 '2024-01-05'를 반환한다(월·일 2자리 0 채움, 연도 4자리).",
+            "formatDate는 toISOString 같은 UTC 변환을 쓰지 않고 getFullYear/getMonth/getDate 같은 로컬 날짜 구성 요소를 사용한다. 그래서 KST(UTC+9)를 포함한 어떤 타임존에서도 하루가 밀리지 않는다.",
+            "저장소의 기존 date-format.test.mjs를 수정하지 않은 상태로 실행했을 때 모든 테스트가 통과한다.",
+            "index.html을 브라우저에서 직접 열거나 Orbit 정적 미리보기(sandbox=\"allow-scripts\")에서 열었을 때 빌드 단계, 개발 서버, 네트워크 없이 동작한다.",
+            "날짜 입력값을 바꾸면 결과 영역에 YYYY-MM-DD 문자열이 즉시 갱신된다. input의 'YYYY-MM-DD' 값은 new Date(y, m-1, d)처럼 로컬 날짜로 만든 뒤 formatDate에 넘긴다.",
+            "날짜 입력을 비우면 결과 영역이 빈 상태나 안내 문구로 돌아가고 콘솔 오류가 발생하지 않는다.",
+            "form submit에 의존하지 않는다. 사용하는 버튼은 type=\"button\"으로 두고 change/input, click, Enter keydown 핸들러로 로컬 UI 상태만 갱신한다.",
+            "localStorage, sessionStorage, cookie 같은 브라우저 저장소와 네트워크 요청을 쓰지 않는다."
+          ]
+        }
+      ],
+      "decisions": [
+        {
+          "topic": "npm 날짜 라이브러리 재사용 여부",
+          "decision": "date-fns, dayjs 같은 작은 공개 npm 라이브러리를 검토했지만 채택하지 않고, 표준 Date API와 String.prototype.padStart로 직접 구현한다.",
+          "rationale": "정적 미리보기에는 빌드 단계와 네트워크가 없습니다. 그래서 bare specifier import(node_modules 해석)와 CDN 로딩을 모두 쓸 수 없고, 라이브러리를 쓰려면 소스를 저장소에 복사(vendoring)해야 합니다. YYYY-MM-DD 형식화는 몇 줄이면 되므로 의존성, 라이선스, 공급망 관리 비용이 얻는 이점보다 큽니다."
+        },
+        {
+          "topic": "타임존 처리",
+          "decision": "formatDate는 Date의 로컬 구성 요소(getFullYear, getMonth+1, getDate)를 쓴다. UI는 input[type=date] 값을 split해 new Date(y, m-1, d)로 로컬 자정 Date를 만든다.",
+          "rationale": "toISOString()과 new Date('YYYY-MM-DD')는 UTC 기준이라 타임존에 따라 날짜가 하루 어긋날 수 있습니다. 로컬 기준으로 맞추면 사용자가 고른 날짜가 그대로 표시됩니다."
+        },
+        {
+          "topic": "잘못된 입력 처리",
+          "decision": "Invalid Date나 Date가 아닌 값의 처리 방식은 기존 date-format.test.mjs의 기대(예외 발생 또는 특정 반환값)를 따른다. 테스트가 정의하지 않으면 TypeError/RangeError를 던지고, UI는 빈 입력일 때 formatDate를 호출하지 않는다.",
+          "rationale": "사용자가 열린 질문 없이 기획해 달라고 요청했으므로 기존 테스트를 단일 기준으로 삼아 모호함을 해소합니다. 'NaN-NaN-NaN' 같은 조용한 오출력을 막습니다."
+        },
+        {
+          "topic": "요구사항 구성",
+          "decision": "UI와 형식화 모듈을 하나의 요구사항 R1로 묶는다.",
+          "rationale": "사용자가 요구사항을 하나로 묶어 달라고 명시했고, 두 산출물이 하나의 위젯으로 함께 검증되기 때문입니다."
+        },
+        {
+          "topic": "재사용: date-fns",
+          "decision": "재사용 미채택: date-fns 4.4.0",
+          "rationale": "format(date,'yyyy-MM-dd')로 같은 결과를 낼 수 있지만, 빌드 없이 file://로 바로 여는 정적 페이지에서는 vendoring이나 CDN이 필요해 의존성만 늘어납니다. 버전은 레지스트리 ta…"
+        },
+        {
+          "topic": "재사용: dayjs",
+          "decision": "재사용 미채택: dayjs 1.11.23",
+          "rationale": "가볍고 MIT 라이선스지만, formatDate 하나 때문에 외부 모듈을 상대 경로 import 구조에 넣는 건 과합니다. 테스트 계약도 Date를 받는 단일 named export라서 네이티브 구현이 더 단순합니…"
+        },
+        {
+          "topic": "재사용 탐색",
+          "decision": "재사용 탐색 완료: 적합 후보 없음 — 직접 구현 · 확인 2026-10-30T11:04:48+09:00",
+          "rationale": "검토 후보 2개 중 채택 없음."
+        }
+      ],
+      "taskIds": [
+        "0757ddaa-5313-4a80-b793-62436233a7b7"
+      ],
+      "status": "passed",
+      "durationMs": 9
+    },
+    "execution": {
+      "status": "blocked",
+      "code": "EXECUTION_BRIEF_TOO_LARGE",
+      "durationMs": 3
+    },
+    "reuse_vendor": {
+      "approvedDecisions": [],
+      "skipped": "NO_ADOPT_DECISION_WITH_EXACT_SEMVER",
+      "status": "passed",
+      "durationMs": 244
+    },
+    "progress": {
+      "snapshot": {
+        "projectId": "d5a63f99-ef36-418a-b564-f94cf4a8ebdf",
+        "plan": {
+          "id": "b130bdfc-4f9a-4b40-82b8-9090197f5152",
+          "revision": 1,
+          "state": "approved",
+          "contentHash": "ee81335212167e0be22f6bb807543147f2305d9f18d37cdc941a8a7dce62fc71",
+          "title": "정적 날짜 표시 위젯 (index.html + src/date-format.mjs)",
+          "goal": "브라우저에서 index.html을 바로 열어 날짜를 고르면 YYYY-MM-DD 형식으로 보여 주는 작은 정적 위젯을 만든다. 형식화 로직은 src/date-format.mjs의 formatDate(date)로 export하고, 저장소에 있는 date-format.test.mjs를 통과해야 한다."
+        },
+        "totals": {
+          "tasks": 1,
+          "verifiedTasks": 0,
+          "basis": "tasks"
+        },
+        "criteria": {
+          "total": 8,
+          "verified": 0,
+          "basis": "acceptance_criteria"
+        },
+        "blockers": [],
+        "tasks": [
+          {
+            "id": "0757ddaa-5313-4a80-b793-62436233a7b7",
+            "title": "R1: 날짜 선택 UI(index.html)와 형식화 모듈(src/date-format.mjs)로 이루어진 정적 날짜 표시 위젯을 만든다. index.html은 날짜 입력과 결과 표시 영역을 갖추고 상대 경로 ES module로 src/date-format.mjs를 import한다. 사용자가 날짜를 고르면 formatDate(date)의 결과를 화면에 보여 준다. src/date-format.mjs는 Date를 받아 로컬 날짜 기준 YYYY-MM-DD 문자열을 돌려주는 formatDate를 named export한다. 구현은 기존 date-format.test.mjs의 계약에 맞춘다.",
+            "requirementLabels": [
+              "R1"
+            ],
+            "stage": "not_started",
+            "assignee": null,
+            "planCurrent": true,
+            "latestRunId": null,
+            "startedAt": null,
+            "lastObservedAt": null,
+            "verification": "not_run",
+            "criteria": {
+              "total": 8,
+              "verified": 0
+            },
+            "runs": [],
+            "runsTotal": 0,
+            "qualityLoops": [],
+            "capabilityRoutes": [],
+            "capabilityExecutions": [],
+            "quality": {
+              "execution": {
+                "status": "not_run",
+                "evidenceIds": [],
+                "blockers": [],
+                "nextAction": "execute_task"
+              },
+              "format": {
+                "status": "not_run",
+                "evidenceIds": [],
+                "blockers": [
+                  "QUALITY_EVIDENCE_MISSING"
+                ],
+                "nextAction": "verify_artifacts"
+              },
+              "codeVerification": {
+                "status": "not_run",
+                "evidenceIds": [],
+                "blockers": [
+                  "QUALITY_EVIDENCE_MISSING"
+                ],
+                "nextAction": "verify_code"
+              },
+              "semantic": {
+                "status": "not_run",
+                "evidenceIds": [],
+                "blockers": [
+                  "QUALITY_EVIDENCE_MISSING"
+                ],
+                "nextAction": "run_quality_review"
+              },
+              "independentReview": {
+                "status": "not_run",
+                "evidenceIds": [],
+                "blockers": [
+                  "QUALITY_EVIDENCE_MISSING"
+                ],
+                "nextAction": "run_independent_review"
+              },
+              "repair": {
+                "status": "not_run",
+                "evidenceIds": [],
+                "blockers": [],
+                "nextAction": null
+              },
+              "revalidation": {
+                "status": "not_run",
+                "evidenceIds": [],
+                "blockers": [],
+                "nextAction": null
+              },
+              "userApproval": {
+                "status": "not_run",
+                "evidenceIds": [],
+                "blockers": [
+                  "QUALITY_APPROVAL_MISSING"
+                ],
+                "nextAction": "request_user_approval"
+              },
+              "evidence": []
+            },
+            "completion": {
+              "binding": {
+                "projectId": "d5a63f99-ef36-418a-b564-f94cf4a8ebdf",
+                "taskId": "0757ddaa-5313-4a80-b793-62436233a7b7",
+                "runId": null,
+                "planningVersionId": "b130bdfc-4f9a-4b40-82b8-9090197f5152",
+                "planningContentHash": "ee81335212167e0be22f6bb807543147f2305d9f18d37cdc941a8a7dce62fc71",
+                "acceptanceDigest": null,
+                "artifactId": null,
+                "artifactDigest": null,
+                "graphRevision": null,
+                "contractDigest": null,
+                "policyDigest": "16defb0768add8ad46c6ee2d0abfe9251f8775e28abbe8d341c445f5f4f293fd",
+                "configDigest": "6103163f2cbcc67dbc34994d49c3f01af3be4ccc4fc7711dffd373b1ea46957c",
+                "artifactScope": "workspace",
+                "baseSha": null,
+                "inputSnapshotDigest": null
+              },
+              "policyDigest": "16defb0768add8ad46c6ee2d0abfe9251f8775e28abbe8d341c445f5f4f293fd",
+              "gates": [
+                {
+                  "id": "lint",
+                  "status": "blocked",
+                  "evidenceIds": [],
+                  "source": "unknown",
+                  "freshness": "unavailable",
+                  "blockers": [
+                    "CQG_GATE_COMMAND_MISSING"
+                  ]
+                },
+                {
+                  "id": "type",
+                  "status": "blocked",
+                  "evidenceIds": [],
+                  "source": "unknown",
+                  "freshness": "unavailable",
+                  "blockers": [
+                    "CQG_GATE_COMMAND_MISSING"
+                  ]
+                },
+                {
+                  "id": "build",
+                  "status": "blocked",
+                  "evidenceIds": [],
+                  "source": "unknown",
+                  "freshness": "unavailable",
+                  "blockers": [
+                    "CQG_GATE_COMMAND_MISSING"
+                  ]
+                },
+                {
+                  "id": "unit",
+                  "status": "blocked",
+                  "evidenceIds": [],
+                  "source": "unknown",
+                  "freshness": "unavailable",
+                  "blockers": [
+                    "CQG_GATE_COMMAND_MISSING"
+                  ]
+                },
+                {
+                  "id": "contract",
+                  "status": "blocked",
+                  "evidenceIds": [],
+                  "source": "unknown",
+                  "freshness": "unavailable",
+                  "blockers": [
+                    "CQG_GATE_COMMAND_MISSING"
+                  ]
+                },
+                {
+                  "id": "e2e",
+                  "status": "blocked",
+                  "evidenceIds": [],
+                  "source": "unknown",
+                  "freshness": "unavailable",
+                  "blockers": [
+                    "CQG_GATE_COMMAND_MISSING"
+                  ]
+                }
+              ],
+              "qualityPassed": false,
+              "independentReview": {
+                "status": "blocked",
+                "evidenceIds": [],
+                "source": "unknown",
+                "freshness": "unavailable",
+                "blockers": [
+                  "CQG_INDEPENDENT_REVIEW_REQUIRED",
+                  "CQG_REVIEW_MISSING",
+                  "QUALITY_EVIDENCE_MISSING"
+                ]
+              },
+              "userApproval": {
+                "status": "blocked",
+                "evidenceIds": [],
+                "source": "unknown",
+                "freshness": "unavailable",
+                "blockers": [
+                  "CQG_USER_APPROVAL_REQUIRED"
+                ]
+              },
+              "verifiedDone": false,
+              "reasonCodes": [
+                "CQG_AI_NATIVE_REQUIRED",
+                "CQG_BINDING_MISSING:acceptanceDigest",
+                "CQG_BINDING_MISSING:artifactDigest",
+                "CQG_BINDING_MISSING:artifactId",
+                "CQG_BINDING_MISSING:artifactScope",
+                "CQG_BINDING_MISSING:baseSha",
+                "CQG_BINDING_MISSING:configDigest",
+                "CQG_BINDING_MISSING:contractDigest",
+                "CQG_BINDING_MISSING:graphRevision",
+                "CQG_BINDING_MISSING:planningContentHash",
+                "CQG_BINDING_MISSING:planningVersionId",
+                "CQG_BINDING_MISSING:policyDigest",
+                "CQG_BINDING_MISSING:projectId",
+                "CQG_BINDING_MISSING:runId",
+                "CQG_BINDING_MISSING:taskId",
+                "CQG_DEPENDENCY_RELEASE_WAIT",
+                "CQG_EXECUTION_NOT_OBSERVED_COMPLETE",
+                "CQG_GATE_COMMAND_MISSING",
+                "CQG_MODEL_OBSERVATION_REQUIRED",
+                "CQG_PRODUCER_RUN_MISMATCH"
+              ]
+            }
+          }
+        ],
+        "untaskedRuns": 0,
+        "lastObservedAt": null
+      },
+      "developmentResult": null,
+      "readOnly": true,
+      "status": "passed",
+      "durationMs": 6
+    }
+  },
+  "stage": "progress",
+  "costUsd": null,
+  "remainingQuota": null,
+  "success": false,
+  "cumulativeAfter": {
+    "claude": {
+      "planning": 1,
+      "research": 1
+    },
+    "codex": {
+      "execution": 1
+    }
+  },
+  "finalVerdict": null,
+  "sourceRepoClean": true,
+  "finalFiles": [
+    {
+      "path": "README.md",
+      "bytes": 64,
+      "sha256": "5f78e962b7ed5843940bc0f9df0ecf6bfef7276cbc999ebc39ee4c8e1f0863fa"
+    },
+    {
+      "path": "date-format.test.mjs",
+      "bytes": 383,
+      "sha256": "fda9558e597a8d46dbaf5580d4ff9b74472f26c5797321c17567128198a31302"
+    }
+  ],
+  "durationMs": 54227,
+  "finishedAt": "2026-10-30T02:04:49.674Z",
+  "runs": [],
+  "events": [
+    {
+      "seq": 1,
+      "at": "2026-10-30T02:03:55.606Z",
+      "kind": "project.registered",
+      "runId": null
+    },
+    {
+      "seq": 2,
+      "at": "2026-10-30T02:03:55.717Z",
+      "kind": "workspace.creating",
+      "runId": null
+    },
+    {
+      "seq": 3,
+      "at": "2026-10-30T02:03:55.783Z",
+      "kind": "workspace.ready",
+      "runId": null
+    },
+    {
+      "seq": 4,
+      "at": "2026-10-30T02:03:56.132Z",
+      "kind": "provider.status",
+      "runId": null
+    },
+    {
+      "seq": 5,
+      "at": "2026-10-30T02:03:56.132Z",
+      "kind": "workspace.selected",
+      "runId": null
+    },
+    {
+      "seq": 6,
+      "at": "2026-10-30T02:03:57.372Z",
+      "kind": "verification.setup.configured",
+      "runId": null
+    },
+    {
+      "seq": 7,
+      "at": "2026-10-30T02:03:57.796Z",
+      "kind": "planning_suggestion.updated",
+      "runId": null
+    },
+    {
+      "seq": 8,
+      "at": "2026-10-30T02:04:48.859Z",
+      "kind": "planning_suggestion.reuse_discovery",
+      "runId": null
+    },
+    {
+      "seq": 9,
+      "at": "2026-10-30T02:04:48.860Z",
+      "kind": "planning_suggestion.updated",
+      "runId": null
+    },
+    {
+      "seq": 10,
+      "at": "2026-10-30T02:04:49.363Z",
+      "kind": "planning.created",
+      "runId": null
+    },
+    {
+      "seq": 11,
+      "at": "2026-10-30T02:04:49.363Z",
+      "kind": "planning_suggestion.updated",
+      "runId": null
+    },
+    {
+      "seq": 12,
+      "at": "2026-10-30T02:04:49.364Z",
+      "kind": "planning.approved",
+      "runId": null
+    },
+    {
+      "seq": 13,
+      "at": "2026-10-30T02:04:49.365Z",
+      "kind": "planning.tasks_created",
+      "runId": null
+    }
+  ]
+}
