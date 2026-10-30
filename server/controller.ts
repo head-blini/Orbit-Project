@@ -50,6 +50,7 @@ import type { ModelHubConfiguration } from './providers/model-hub-configuration.
 import { MergeService } from './merge-service.ts';
 import { WorkflowService } from './workflow-service.ts';
 import { ReviewService } from './review-service.ts';
+import {planReviewRepair,parseReviewRepairInput,linkRepairSource,reviewRepairBudgets} from './review-repair.ts';
 import { PlanningAgentService } from './planning-agent-service.ts';
 import {ProjectAiPreferencesService} from './project-ai-preferences.ts';
 import type {ClaudePlanningOptions} from './claude-planning.ts';
@@ -637,6 +638,26 @@ export class Controller {
   interruptWorkflow(workspaceId:string,runId:string){if(workspaceId!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);return this.workflows.interrupt(workspaceId,runId);}
   recoverWorkflow(input:Parameters<WorkflowService['recover']>[0]){this.extensionIdle();this.planningSuggestions.ensureAvailable(this.workspaceId);if(this.workflows.record(input.runId).workspaceId!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);return this.workflows.recover(input);}
   startReview(input:Parameters<ReviewService['start']>[0]){this.extensionIdle();assertGitProject(this.store,input.workspaceId);if(input.workspaceId!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);return this.reviews.start(input);}
+  reviewView(workspaceId:string,runId:string|null){const view=this.reviews.view(workspaceId,runId);return {...view,repairBudgets:reviewRepairBudgets(this.store,view.records)};}
+  previewReviewRepair(workspaceId:string,reviewId:string){if(!this.projects)throw new AppError('REVIEW_UNAVAILABLE',404);if(workspaceId!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);return planReviewRepair({store:this.store,projects:this.projects!,reviews:this.reviews},workspaceId,reviewId).preview;}
+  /** User-initiated only: sends one completed review's findings through the normal Codex run launch (same PII/credential gates), within the per-task repair budget. */
+  async startReviewRepair(reviewId:string,body:unknown):Promise<Run>{
+    const input=parseReviewRepairInput(body);if(!this.projects)throw new AppError('REVIEW_UNAVAILABLE',404);this.qualityAvailable();this.extensionIdle();assertGitProject(this.store,input.workspaceId);
+    if(input.workspaceId!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);
+    const plan=planReviewRepair({store:this.store,projects:this.projects!,reviews:this.reviews},input.workspaceId,reviewId);
+    const prior=this.store.findRequest(input.requestId);
+    if(prior){if(prior.digest!==createHash('sha256').update(plan.prompt).digest('hex')||prior.run.taskId!==plan.taskId||prior.run.workspaceId!==input.workspaceId)throw new AppError('IDEMPOTENCY_CONFLICT');return prior.run;}
+    if(!input.confirmed)throw new AppError('REVIEW_REPAIR_CONFIRMATION_REQUIRED',409);
+    if(plan.preview.previewDigest!==input.expectedPreviewDigest)throw new AppError('REVIEW_REPAIR_PREVIEW_STALE',409);
+    if(plan.preview.issue){if(plan.denied)this.store.append('guardrail.denied',null,{providerId:'codex',code:plan.preview.issue});throw new AppError(plan.preview.issue,plan.denied?400:409);}
+    if(this.aiPreferences.read(plan.projectId).execution!=='codex')throw new AppError('RUNTIME_NOT_SUPPORTED',409);
+    const acceptance=this.verification.acceptance.status(input.workspaceId,plan.source.id);
+    if(acceptance.state!=='current'||!acceptance.baseline)throw new AppError('ACCEPTANCE_BASELINE_CHANGED',409);
+    const {source}=plan;
+    try{return await this.start({requestId:input.requestId,prompt:plan.prompt,workspaceId:input.workspaceId},{projectId:plan.projectId,taskId:plan.taskId,runtime:'codex',planningVersionId:source.planningVersionId,planningContentHash:source.planningContentHash,requirementLabels:source.requirementLabels},acceptance.baseline,undefined,undefined,plan.piiText,plan.harness);}
+    // A durable run (even SUBMIT_UNCERTAIN) must count against the repair budget.
+    finally{const created=this.store.findRequest(input.requestId)?.run;if(created)linkRepairSource(this.store,created.id,source.id);}
+  }
   interruptReview(workspaceId:string,reviewId:string){if(workspaceId!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);return this.reviews.interrupt(workspaceId,reviewId);}
   recoverReview(input:Parameters<ReviewService['recover']>[0]){this.extensionIdle();this.planningSuggestions.ensureAvailable(this.workspaceId);if(this.reviews.record(input.reviewId).workspaceId!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);return this.reviews.recover(input);}
   private planningWorkspace(projectId:string,workspaceId?:string|null){

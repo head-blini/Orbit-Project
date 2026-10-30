@@ -422,6 +422,8 @@ export function createHttpServer(controller:Controller,assets:string,options:{wo
           if(typeof data.reviewId!=='string'||!/^[a-f0-9-]{36}$/.test(data.reviewId)||typeof data.confirmedStopped!=='boolean')throw new AppError('INVALID_FIELDS',400);
           json(res,200,controller.recoverReview(data as unknown as Parameters<Controller['recoverReview']>[0]));return;
         }
+        const reviewRepair=url.pathname.match(/^\/api\/reviews\/([a-f0-9-]{36})\/repair$/);
+        if(reviewRepair){if(url.search)throw new AppError('INVALID_FIELDS',400);json(res,200,await controller.startReviewRepair(reviewRepair[1],data));return;}
         const reviewInterrupt=url.pathname.match(/^\/api\/reviews\/([a-f0-9-]{36})\/interrupt$/);
         if(reviewInterrupt){
           if(url.search)throw new AppError('INVALID_FIELDS',400);exact(data,['workspaceId']);
@@ -638,8 +640,10 @@ export function createHttpServer(controller:Controller,assets:string,options:{wo
       if(req.method==='GET'&&reviewView){
         const keys=[...url.searchParams.keys()],runId=url.searchParams.get('runId');
         if(keys.length>1||keys.length===1&&(keys[0]!=='runId'||!runId||!/^[a-f0-9-]{36}$/.test(runId)))throw new AppError('INVALID_FIELDS',400);
-        json(res,200,reviewView[2]?controller.reviews.preview(reviewView[1],runId):controller.reviews.view(reviewView[1],runId));return;
+        json(res,200,reviewView[2]?controller.reviews.preview(reviewView[1],runId):controller.reviewView(reviewView[1],runId));return;
       }
+      const reviewRepairPreview=url.pathname.match(/^\/api\/workspaces\/([a-f0-9-]{36})\/reviews\/([a-f0-9-]{36})\/repair-preview$/);
+      if(req.method==='GET'&&reviewRepairPreview){if(url.search)throw new AppError('INVALID_FIELDS',400);json(res,200,controller.previewReviewRepair(reviewRepairPreview[1],reviewRepairPreview[2]));return;}
       if(req.method==='GET'&&verificationView){
         const keys=[...url.searchParams.keys()];
         const runId=url.searchParams.get('runId');

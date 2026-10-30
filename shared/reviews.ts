@@ -13,6 +13,13 @@ export interface ReviewRecord {
 export interface ReviewView {
   workspaceId:string;runId:string|null;records:ReviewRecord[];sourceDigest:string|null;sourceIssue:string|null;
   busy:boolean;recoveryRequired:boolean;timeoutMs:number;turnLimit:1;scope:string;
+  /** Per completed review: repair runs already used for its task. Absent on older servers. */
+  repairBudgets?:Record<string,{used:number;max:number}>;
 }
 export interface StartReviewInput {requestId:string;workspaceId:string;runId:string|null;expectedPreviewDigest:string;confirmed:boolean}
 export interface RecoverReviewInput {reviewId:string;confirmedStopped:boolean}
+export interface ReviewRepairPreview {
+  reviewId:string;workspaceId:string;runId:string;taskId:string;previewDigest:string;findings:{files:string[];text:string};
+  promptChars:number;maxPromptChars:number;budget:{used:number;max:number};issue:string|null;scope:string;
+}
+export interface StartReviewRepairInput {requestId:string;workspaceId:string;expectedPreviewDigest:string;confirmed:boolean}

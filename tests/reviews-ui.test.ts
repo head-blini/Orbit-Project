@@ -48,3 +48,15 @@ test('review history preserves workspace-wide recovery, escapes output and never
   const recovery=renderToStaticMarkup(createElement(ReviewHistory,{...props,otherBusy:false,recoveryConsent:key}));assert.match(recovery,/<button(?![^>]*disabled)[^>]*>종료 확인 후 리뷰 복구/);
   const stale=renderToStaticMarkup(createElement(ReviewHistory,{...props,records:[completed],sourceDigest:'e'.repeat(64)}));assert.match(stale,/현재 소스와 다름/);
 });
+
+test('review repair control is explicit, labelled in Korean, hidden without a budget entry and disabled when the budget is used',async()=>{
+  const {ReviewHistory}=await components(),completed=record(),base={workspaceId:preview.workspaceId,records:[completed],sourceDigest:preview.sourceDigest,online:true,actionBusy:false,otherBusy:false,fresh:true,uncertain:false,recoveryConsent:null,onInterrupt(){},onRecover(){},onRecoveryConsent(){}};
+  const html=(extra:object)=>renderToStaticMarkup(createElement(ReviewHistory,{...base,...extra} as never));
+  assert.doesNotMatch(html({}),/리뷰 지적으로 수정/);
+  const open=html({repairBudgets:{[completed.id]:{used:0,max:1}},canRepair:true});
+  assert.match(open,/aria-label="리뷰 지적 수정 실행 미리보기 review-a"/);assert.match(open,/<button(?![^>]*disabled)[^>]*>리뷰 지적으로 수정 실행 미리보기/);assert.match(open,/수정 예산 0\/1/);
+  const used=html({repairBudgets:{[completed.id]:{used:1,max:1}},canRepair:true});
+  assert.match(used,/<button[^>]*disabled[^>]*>리뷰 지적으로 수정 실행 미리보기/);assert.match(used,/REVIEW_REPAIR_BUDGET_EXHAUSTED/);
+  const shown=html({repairBudgets:{[completed.id]:{used:0,max:1}},canRepair:true,repair:{reviewId:completed.id,workspaceId:preview.workspaceId,runId:'r',taskId:'t',previewDigest:'f'.repeat(64),findings:{files:['index.html'],text:'x'},promptChars:100,maxPromptChars:4000,budget:{used:0,max:1},issue:null,scope:'범위'},repairConsent:false});
+  assert.match(shown,/<button[^>]*disabled[^>]*>동의한 리뷰 지적 수정 실행/);assert.match(shown,/aria-label="리뷰 지적 수정 전송 동의 review-a"/);
+});
