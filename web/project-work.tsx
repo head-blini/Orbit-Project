@@ -47,7 +47,7 @@ function Header({name,kind,progress,steps,action,onAction}:{name:string;kind:'ge
     <div className="work-title"><span className={'kind kind-'+kind}>{kindLabel[kind]}</span><h2 title={name}>{name}</h2>
       <p>{progress?.plan?progress.plan.goal:'아직 승인된 목표가 없습니다. AI에게 요청해 기획을 받고 승인하세요.'}</p></div>
     {action&&<div className="work-next"><span>다음 할 일</span><button className="primary" onClick={onAction}>{action.text}</button></div>}
-    {!!progress?.blockers.length&&<ul className="work-blockers" role="alert">{progress.blockers.map(item=><li key={item.code}>{blockerLabels[item.code]??item.code}</li>)}</ul>}
+    {!!progress?.blockers.length&&<ul className="work-blockers" role="alert">{progress.blockers.map(item=><li key={item.code+(item.taskId??'')}>{blockerLabels[item.code]??item.code}</li>)}</ul>}
     <ol className="work-steps" aria-label="진행 단계">{steps.map((step,index)=><li key={step.id} className={'step step-'+step.state} aria-current={step.state==='active'?'step':undefined}>
       <span className="step-index" aria-hidden="true">{step.state==='done'?'✓':index+1}</span>
       <span className="step-text"><b>{step.label}</b><small>{stepStateLabel[step.state]} · {step.detail}</small></span></li>)}</ol>

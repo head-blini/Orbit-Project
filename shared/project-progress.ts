@@ -46,7 +46,8 @@ export interface ProgressTask {
   latestRunId:string|null;startedAt:string|null;lastObservedAt:string|null;verification:ProgressVerification;
   criteria:{total:number;verified:number};runs:ProgressRun[];runsTotal:number;
 }
-export interface ProgressBlocker {code:'RECOVERY_REQUIRED'|'LOGIN_REQUIRED'|'RUNTIME_NOT_INSTALLED'|'RUNTIME_ERROR'|'QUOTA_EXHAUSTED';scope:'project';resetsAt?:string|null}
+/** Project-scope blockers stop all runs; a task-scope blocker (EXECUTION_BRIEF_TOO_LARGE) names the one task whose run would be refused. */
+export interface ProgressBlocker {code:'RECOVERY_REQUIRED'|'LOGIN_REQUIRED'|'RUNTIME_NOT_INSTALLED'|'RUNTIME_ERROR'|'QUOTA_EXHAUSTED'|'EXECUTION_BRIEF_TOO_LARGE';scope:'project'|'task';taskId?:string;resetsAt?:string|null}
 export interface ProjectProgress {
   projectId:string;
   plan:{id:string;revision:number;state:PlanningVersion['state'];contentHash:string;title:string;goal:string}|null;

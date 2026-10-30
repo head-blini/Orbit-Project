@@ -25,7 +25,8 @@ const nextActions:Partial<Record<TaskStage,string>>={
   error:'오류 기록을 확인한 뒤 다시 실행하거나 인계하세요.',interrupt_requested:'중단 요청을 보냈지만 종료는 아직 확인되지 않았습니다.',
 };
 export const blockerLabels:Record<string,string>={RECOVERY_REQUIRED:'종료를 확인하지 못한 실행이 있어 새 실행이 차단되었습니다.',LOGIN_REQUIRED:'AI 실행기 로그인이 필요합니다.',
-  RUNTIME_NOT_INSTALLED:'AI 실행기가 설치되지 않았습니다.',RUNTIME_ERROR:'AI 실행기 연결 오류가 있습니다.',QUOTA_EXHAUSTED:'관측된 사용량 한도가 소진되었습니다.'};
+  RUNTIME_NOT_INSTALLED:'AI 실행기가 설치되지 않았습니다.',RUNTIME_ERROR:'AI 실행기 연결 오류가 있습니다.',QUOTA_EXHAUSTED:'관측된 사용량 한도가 소진되었습니다.',
+  EXECUTION_BRIEF_TOO_LARGE:'실행 지침이 한도를 넘어 이 작업은 실행할 수 없습니다. 기획의 결정 사항·근거를 줄여 새 버전을 승인하세요.'};
 const freshnessLabels:Record<ConnectionFreshness,string>={live:'실시간 이벤트 수신 중',quiet:'연결됨 · 최근 이벤트 없음',offline:'서버 연결 끊김 · 오래된 화면일 수 있음'};
 const runtimeLabels:Record<string,string>={codex:'Codex','claude-code':'Claude Code'};
 const time=(value:string|null)=>value?new Date(value).toLocaleString('ko-KR',{hour12:false}):'관측 기록 없음';
@@ -108,7 +109,7 @@ export function ProjectProgressView({progress,freshness,lastEventAt,actions,comp
           <progress max={Math.max(criteria.total,1)} value={criteria.verified} aria-label="완료 조건 기준 확인"/></div>
         <div><strong>{time(progress.lastObservedAt)}</strong><span>마지막 관측 활동</span></div>
       </div>
-      {progress.blockers.length>0&&<ul className="progress-blockers" role="alert">{progress.blockers.map(b=><li key={b.code}>{blockerLabels[b.code]??b.code}{b.code==='QUOTA_EXHAUSTED'&&<QuotaResumeNote resetsAt={b.resetsAt}/>}</li>)}</ul>}
+      {progress.blockers.length>0&&<ul className="progress-blockers" role="alert">{progress.blockers.map(b=><li key={b.code+(b.taskId??'')}>{b.taskId&&progress.tasks.find(t=>t.id===b.taskId)?.title?`${progress.tasks.find(t=>t.id===b.taskId)!.title}: `:''}{blockerLabels[b.code]??b.code}{b.code==='QUOTA_EXHAUSTED'&&<QuotaResumeNote resetsAt={b.resetsAt}/>}</li>)}</ul>}
       {progress.untaskedRuns>0&&<p className="progress-note">작업과 연결되지 않은 직접 실행 {progress.untaskedRuns}개는 작업 진행에 포함하지 않았습니다.</p>}
       <p className="progress-note">AI 응답 완료와 검증 통과는 다른 상태입니다. 시간·노력 비율이나 남은 시간은 추정하지 않습니다.</p>
     </section>}

@@ -15,6 +15,7 @@ import type {PlanningVersion,SavedTask} from '../shared/parallel.ts';
 import type {CheckRecord} from '../shared/verification.ts';
 import {buildProjectProgress,type ProgressSignals,type ProjectProgress} from '../shared/project-progress.ts';
 import {AppError} from './errors.ts';
+import {buildExecutionBrief} from './planning/execution.ts';
 import {isAbsolute} from 'node:path';
 const digest=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 export interface CompletionReaders extends QualityProgressReaders {
@@ -157,6 +158,16 @@ export class ProjectProgressService {
       if(!task.planCurrent||plan?.state!=='approved'||policy.projectKind!==project.kind){
         task.completion.qualityPassed=false;task.completion.verifiedDone=false;
         task.completion.reasonCodes.push('CQG_BASELINE_OR_PROJECT_KIND_CHANGED');
+      }
+    }
+    // Same check the run start makes, so an oversized brief shows here instead of only as a launch error. Read-only.
+    for(const task of progress.tasks){
+      const saved=tasks.find(t=>t.id===task.id)!,plan=plans.find(p=>p.id===saved.planningVersionId);
+      if(!task.planCurrent||plan?.state!=='approved'||task.stage==='verified')continue;
+      try{buildExecutionBrief(saved,plan);}catch(error){
+        if(!(error instanceof AppError)||error.message!=='EXECUTION_BRIEF_TOO_LARGE')continue;
+        progress.blockers.push({code:'EXECUTION_BRIEF_TOO_LARGE',scope:'task',taskId:task.id});
+        if(task.quality)task.quality={...task.quality,execution:{...task.quality.execution,blockers:[...new Set([...task.quality.execution.blockers,'EXECUTION_BRIEF_TOO_LARGE'])],nextAction:null}};
       }
     }
     return progress;

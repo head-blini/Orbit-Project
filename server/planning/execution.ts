@@ -8,11 +8,11 @@ import {outboundDenial} from '../providers/policy.ts';
 import type {HarnessStore} from '../harness-store.ts';
 import { AppError } from '../errors.ts';
 import { approvalIssues, normalizeStoredPlanningDraft } from './parser.ts';
+import { BRIEF_HEADER, MAX_EXECUTION_PROMPT_CHARS, briefPrompt } from './brief.ts';
+export { MAX_EXECUTION_PROMPT_CHARS };
 
 export interface ExecutionBrief {prompt:string;planningVersionId:string;planningContentHash:string;requirementLabels:string[]}
-export const MAX_EXECUTION_PROMPT_CHARS=4000;
 const validId=(value:unknown):value is string=>typeof value==='string'&&/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value);
-const BRIEF_HEADER='Implement the saved task below within the selected isolated workspace. Follow every plan constraint. Report verification honestly; an agent response is not a passed check.\n';
 // Random digit runs in UUIDs/SHA-256 digests match phone/national-id patterns, so PII inspection blanks only the
 // brief's leading identifier values when UUID/digest-shaped. Free text and credential checks still see everything.
 const BRIEF_GUIDANCE='Implement the saved task below within the selected isolated workspace. ';
@@ -54,12 +54,7 @@ export function buildExecutionBrief(task:SavedTask,version:PlanningVersion):Exec
   const requirement=requirements[0];
   if(requirements.length!==1||task.title!==`${requirement.label}: ${requirement.description.split('\n')[0]}`
     ||task.description!==requirement.description||!isDeepStrictEqual(task.acceptanceCriteria,requirement.acceptanceCriteria))throw new AppError('TASK_PLAN_MISMATCH',409);
-  // Rejected reuse candidates and a no-adopt summary are planning audit, not execution guidance; the plan keeps them.
-  const prompt=BRIEF_HEADER+JSON.stringify({
-    taskId:task.id,planningVersionId:version.id,contentHash:version.contentHash,title:version.draft.title,
-    goal:version.draft.goal,requirements,constraints:version.draft.constraints,decisions:(version.draft.decisions??[]).filter(d=>!/^재사용 (?:미채택: |탐색 완료: )/.test(d.decision)),
-    ...(version.draft.nonGoals?.length?{nonGoals:version.draft.nonGoals}:{}),
-  },null,2);
+  const prompt=briefPrompt({taskId:task.id,planningVersionId:version.id,contentHash:version.contentHash},draft,requirements);
   if(prompt.length>MAX_EXECUTION_PROMPT_CHARS)throw new AppError('EXECUTION_BRIEF_TOO_LARGE',422);
   return {prompt,planningVersionId:version.id,planningContentHash:version.contentHash,requirementLabels:[...task.requirementLabels]};
 }
