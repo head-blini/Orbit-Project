@@ -17,7 +17,7 @@ export interface ClaudePlanningOptions {
 /** The shared runtime intentionally sanitizes responses for display. Observe only
  * transformation evidence before that boundary so a partial/masked plan cannot
  * become an authoritative saved draft. No raw lines leave this bounded observer. */
-function outputIntegrity(){
+export function outputIntegrity(){
   let issue:string|null=null;
   const inspect=(line:string|null)=>{
     if(issue)return;

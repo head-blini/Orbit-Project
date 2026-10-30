@@ -15,9 +15,11 @@ import type {ProjectAiRuntime} from '../shared/project-ai-preferences.ts';
 import {buildPlanningPrompt,buildClaudePlanningPrompt,planningOutputSchema} from './planning/agent-input.ts';
 import {normalizeStoredPlanningDraft} from './planning/parser.ts';
 import {serializePlanningExport} from './planning/export.ts';
+import {REUSE_TIMEOUT_MS,reuseDecisions,reuseQuery,runReuseDiscovery,type ReuseDiscoveryOptions} from './reuse-discovery.ts';
 
 const timeoutMs=60000,turnLimit=1 as const;
-const scope=(runtime:ProjectAiRuntime)=>`미리 본 요청을 별도의 읽기 전용 ${runtime==='codex'?'Codex':'Claude Code'} 세션에 전송합니다. Native CLI는 읽기 전용이어도 파일을 읽을 수 있으며 컨텍스트 로딩·세션 보존·제공자 전송은 Model Hub 게이트웨이 통제 범위 밖입니다. 1개 요청·60초 제한 뒤 종료 관찰 시간이 추가될 수 있습니다. 구독 사용량·실제 과금 상한은 보장하지 않습니다. 검증된 제안도 별도 저장 전에는 기획 초안이 아니며 승인·Task·Run을 만들지 않습니다.`;
+const scope=(runtime:ProjectAiRuntime,reuse=false)=>`미리 본 요청을 별도의 읽기 전용 ${runtime==='codex'?'Codex':'Claude Code'} 세션에 전송합니다. Native CLI는 읽기 전용이어도 파일을 읽을 수 있으며 컨텍스트 로딩·세션 보존·제공자 전송은 Model Hub 게이트웨이 통제 범위 밖입니다. 1개 요청·60초 제한 뒤 종료 관찰 시간이 추가될 수 있습니다. 구독 사용량·실제 과금 상한은 보장하지 않습니다. 검증된 제안도 별도 저장 전에는 기획 초안이 아니며 승인·Task·Run을 만들지 않습니다.`
+  +(reuse?` 제안이 검증되면 재사용 탐색을 위해 제안의 제목·목표·요구사항만 별도 Claude Code 웹 검색 세션(WebSearch·WebFetch, 파일 도구 없음, 빈 임시 폴더)에 1회 더 전송합니다(${REUSE_TIMEOUT_MS/1000}초 제한, 공개 웹 사이트에 검색어가 전달됩니다). 결과는 결정 항목으로 표시되며 실패해도 제안은 유지됩니다.`:'');
 const uuid=(value:unknown):value is string=>typeof value==='string'&&/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(value);
 const digest=(value:unknown):value is string=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
 const hash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -38,12 +40,12 @@ function checkedProposal(proposal:PlanningDraft|null,runtime:ProjectAiRuntime):P
 export class PlanningAgentService {
   private store:Store;private projects:Projects|undefined;private factory:(workspace:string,write:boolean)=>RpcPort;
   private externalBusy:(projectId:string)=>boolean;private guard:(workspaceId:string)=>void;private runner:typeof runCodexPlanning;private studio:Studio;
-  private preferences:ProjectAiPreferencesService;private claudeOptions:ClaudePlanningOptions;
+  private preferences:ProjectAiPreferencesService;private claudeOptions:ClaudePlanningOptions;private reuse:ReuseDiscoveryOptions&{enabled:boolean};
   private pending:{id:string;workspaceId:string|null;controller:AbortController;task:Promise<void>}|null=null;
   private unpersisted=new Map<string,PlanningSuggestion>();
-  constructor(store:Store,projects:Projects|undefined,factory:(workspace:string,write:boolean)=>RpcPort,externalBusy:(projectId:string)=>boolean=()=>false,guard:(workspaceId:string)=>void=()=>{},runner:typeof runCodexPlanning=runCodexPlanning,claudeOptions:ClaudePlanningOptions={}){
+  constructor(store:Store,projects:Projects|undefined,factory:(workspace:string,write:boolean)=>RpcPort,externalBusy:(projectId:string)=>boolean=()=>false,guard:(workspaceId:string)=>void=()=>{},runner:typeof runCodexPlanning=runCodexPlanning,claudeOptions:ClaudePlanningOptions={},reuse:ReuseDiscoveryOptions&{enabled:boolean}={enabled:process.env.ORBIT_REUSE_DISCOVERY==='1'}){
     this.store=store;this.projects=projects;this.factory=factory;this.externalBusy=externalBusy;this.guard=guard;this.runner=runner;this.studio=new Studio(store);
-    this.preferences=new ProjectAiPreferencesService(store);this.claudeOptions=claudeOptions;
+    this.preferences=new ProjectAiPreferencesService(store);this.claudeOptions=claudeOptions;this.reuse=reuse;
     store.db.exec('CREATE TABLE IF NOT EXISTS planning_suggestions(id TEXT PRIMARY KEY,request_id TEXT NOT NULL UNIQUE,digest TEXT NOT NULL,project_id TEXT NOT NULL,body TEXT NOT NULL);');
     for(const record of this.records())if(record.execution==='running')this.save({...record,execution:'lost',proposal:null,outputDigest:null,processStopped:false,recoveredAt:null,finishedAt:new Date().toISOString(),durationMs:null,issue:'PLANNING_INTERRUPTED_BY_RESTART'});
   }
@@ -76,11 +78,13 @@ export class PlanningAgentService {
     }
     const workspace=this.projects.validate(context.id);if(workspace.projectId!==projectId)throw new AppError('WORKSPACE_MISMATCH',409);return workspace;
   }
+  private reuses(runtime:ProjectAiRuntime){return this.reuse.enabled&&runtime==='claude-code';}
   private selection(projectId:string){const preferences=this.preferences.read(projectId);return {runtime:this.store.projects().find(project=>project.id===projectId)?.kind==='general'?'claude-code' as const:preferences.planning,preferencesRevision:preferences.revision};}
   private previewHash(projectId:string,workspace:{id:string|null;path:string;baseSha:string|null},inputDigest:string,runtime:ProjectAiRuntime,preferencesRevision:number){
     // Material contents bind the preview: replacing a material makes an approved preview stale.
     const materials=workspace.id===null?listMaterials(workspace.path).map(({path,sha256})=>({path,sha256})):[];
-    return hash({policy:'orbit-native-planning-v2',schema:planningOutputSchema,projectId,workspaceId:workspace.id,path:workspace.path,baseSha:workspace.baseSha,inputDigest,materials,runtime,preferencesRevision,timeoutMs,turnLimit});
+    // Enabling reuse discovery changes the disclosed scope, so it changes the policy; disabled digests stay as before.
+    return hash({policy:'orbit-native-planning-v2',schema:planningOutputSchema,projectId,workspaceId:workspace.id,path:workspace.path,baseSha:workspace.baseSha,inputDigest,materials,runtime,preferencesRevision,timeoutMs,turnLimit,...(this.reuses(runtime)?{reuse:'orbit-reuse-discovery-v1',reuseTimeoutMs:REUSE_TIMEOUT_MS}:{})});
   }
   ensureAvailable(workspaceId?:string){
     if(this.pending)throw new AppError('PLANNING_BUSY',409);
@@ -88,13 +92,13 @@ export class PlanningAgentService {
   }
   view(projectId:string,workspaceId?:string|null):PlanningAgentView {
     this.context(projectId,workspaceId);const records=this.records().filter(record=>record.projectId===projectId&&record.workspaceId===(workspaceId??null)),{runtime}=this.selection(projectId);
-    return {projectId,workspaceId:workspaceId??null,runtime,records:[...records.filter(quarantined),...records.filter(record=>!quarantined(record))],busy:this.active||this.externalBusy(projectId),recoveryRequired:records.some(quarantined),timeoutMs,turnLimit,scope:scope(runtime)};
+    return {projectId,workspaceId:workspaceId??null,runtime,records:[...records.filter(quarantined),...records.filter(record=>!quarantined(record))],busy:this.active||this.externalBusy(projectId),recoveryRequired:records.some(quarantined),timeoutMs,turnLimit,scope:scope(runtime,this.reuses(runtime))};
   }
   preview(projectId:string,input:{workspaceId?:string|null;text:string}):PlanningAgentPreview {
     exact(input,Object.hasOwn(input??{},'workspaceId')?['workspaceId','text']:['text']);this.context(projectId,input.workspaceId);this.ensureAvailable(input.workspaceId??projectId);if(input.workspaceId)this.guard(input.workspaceId);
     if(this.externalBusy(projectId))throw new AppError('PLANNING_BUSY',409);if(!this.projects)throw new AppError('PLANNING_UNAVAILABLE',404);
     const workspace=this.validated(projectId,input.workspaceId),selection=this.selection(projectId),prompt=selection.runtime==='claude-code'?buildClaudePlanningPrompt(input.text,workspace.id===null?listMaterials(workspace.path).map(item=>item.path):[]):buildPlanningPrompt(input.text);
-    return {projectId,workspaceId:workspace.id,...selection,...prompt,previewDigest:this.previewHash(projectId,workspace,prompt.inputDigest,selection.runtime,selection.preferencesRevision),timeoutMs,turnLimit,scope:scope(selection.runtime)};
+    return {projectId,workspaceId:workspace.id,...selection,...prompt,previewDigest:this.previewHash(projectId,workspace,prompt.inputDigest,selection.runtime,selection.preferencesRevision),timeoutMs,turnLimit,scope:scope(selection.runtime,this.reuses(selection.runtime))};
   }
   start(projectId:string,input:StartPlanningSuggestionInput):PlanningSuggestion {
     exact(input,['requestId','text','expectedPreviewDigest','confirmed',...(Object.hasOwn(input??{},'workspaceId')?['workspaceId']:[])]);
@@ -136,8 +140,17 @@ export class PlanningAgentService {
       if(!['completed','failed','interrupted','timed_out','lost'].includes(execution)){execution='failed';issue='PLANNING_FAILED';}
       if(result.processStopped!==true){execution='lost';issue='PLANNING_PROCESS_UNCERTAIN';}
       else if(execution==='completed')try{proposal=checkedProposal(result.proposal,runtime);}catch{execution='failed';issue='PLANNING_PROPOSAL_INVALID';}
+      if(proposal&&this.reuses(runtime))proposal=await this.discoverReuse(record,proposal,signal);
       this.save({...this.record(record.id),execution,issue,proposal,outputDigest:proposal?hash(proposal):null,threadId:result.threadId,turnId:result.turnId,processStopped:result.processStopped===true,finishedAt:new Date().toISOString(),durationMs:Math.round(performance.now()-began)});
     }catch{this.save({...this.record(record.id),execution:attempted?'lost':'failed',proposal:null,outputDigest:null,issue:attempted?'PLANNING_PROCESS_UNCERTAIN':'PLANNING_WORKSPACE_CHANGED',processStopped:!attempted,finishedAt:new Date().toISOString(),durationMs:Math.round(performance.now()-began)});}
+  }
+  /** Never fails the suggestion: every outcome becomes a visible decision or, if unmergeable, leaves the proposal unchanged. */
+  private async discoverReuse(record:PlanningSuggestion,proposal:PlanningDraft,signal:AbortSignal):Promise<PlanningDraft>{
+    let result;try{result=await runReuseDiscovery({query:reuseQuery(proposal),timeoutMs:REUSE_TIMEOUT_MS,signal},this.reuse);}catch{return proposal;}
+    let merged=proposal;try{merged=checkedProposal({...proposal,decisions:[...(proposal.decisions??[]),...reuseDecisions(result)].slice(0,100)},record.runtime??'claude-code');}catch{/* Unmergeable output keeps the validated proposal. */}
+    // Status, count and public source URLs only; no query text or model reasons.
+    this.store.append('planning_suggestion.reuse_discovery',null,{suggestionId:record.id,projectId:record.projectId,status:result.status,issue:result.issue,checkedAt:result.checkedAt,candidateCount:result.candidates.length,sources:result.candidates.map(c=>c.source),merged:merged!==proposal});
+    return merged;
   }
   interrupt(projectId:string,id:string,workspaceId?:string|null){this.owned(projectId,id,workspaceId);if(this.pending?.id===id)this.pending.controller.abort();return this.record(id);}
   recover(projectId:string,input:{workspaceId?:string|null;suggestionId:string;confirmedStopped:boolean}):PlanningSuggestion {
