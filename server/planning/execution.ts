@@ -54,9 +54,10 @@ export function buildExecutionBrief(task:SavedTask,version:PlanningVersion):Exec
   const requirement=requirements[0];
   if(requirements.length!==1||task.title!==`${requirement.label}: ${requirement.description.split('\n')[0]}`
     ||task.description!==requirement.description||!isDeepStrictEqual(task.acceptanceCriteria,requirement.acceptanceCriteria))throw new AppError('TASK_PLAN_MISMATCH',409);
+  // Rejected reuse candidates and a no-adopt summary are planning audit, not execution guidance; the plan keeps them.
   const prompt=BRIEF_HEADER+JSON.stringify({
     taskId:task.id,planningVersionId:version.id,contentHash:version.contentHash,title:version.draft.title,
-    goal:version.draft.goal,requirements,constraints:version.draft.constraints,decisions:version.draft.decisions??[],
+    goal:version.draft.goal,requirements,constraints:version.draft.constraints,decisions:(version.draft.decisions??[]).filter(d=>!/^재사용 (?:미채택: |탐색 완료: )/.test(d.decision)),
     ...(version.draft.nonGoals?.length?{nonGoals:version.draft.nonGoals}:{}),
   },null,2);
   if(prompt.length>MAX_EXECUTION_PROMPT_CHARS)throw new AppError('EXECUTION_BRIEF_TOO_LARGE',422);

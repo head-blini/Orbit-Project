@@ -26,6 +26,13 @@ test('inspection exposes only kinds and UTF-16 ranges, including repeated and ov
   assert.equal(JSON.stringify(findings).includes(email), false);
 });
 
+test('npm version specs in URLs are not e-mail addresses, real addresses still are', () => {
+  for (const text of ['https://cdn.jsdelivr.net/npm/dayjs@1.11.13/dayjs.min.js', 'left-pad@1.3.0', '@scope/pkg@2.0.0-rc.1'])
+    assert.equal(inspectOutbound(text).filter(f => f.kind === 'email').length, 0, text);
+  for (const text of [email, 'ops@mail.example.co.kr', 'a.b+c@sub-1.example.io'])
+    assert.equal(inspectOutbound(text).filter(f => f.kind === 'email').length, 1, text);
+});
+
 test('block, mask and explicit allow policies handle personal data; credentials always deny', () => {
   for (const action of ['block', 'mask', 'allow']) {
     const guard = createOutboundGuardrail([policy(action)]);

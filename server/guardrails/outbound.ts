@@ -39,7 +39,8 @@ export function inspectOutbound(text: string): OutboundFinding[] {
     {kind:'credential', pattern:/\bBearer\s+[^\s"']+/gi},
     {kind:'credential', pattern:/\b(?:sk-[\w-]+|(?:AKIA|ASIA)[A-Z0-9]{16}|gh[pousr]_[\w]+|github_pat_[\w]+|eyJ[\w-]+\.[\w-]+(?:\.[\w-]+)?)/g},
     {kind:'credential', pattern:/-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----/g},
-    {kind:'email', pattern:/[A-Z0-9.!#$%&'*+/=?^_`{|}~-]{1,64}@[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?(?:\.[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?)+/gi},
+    // The top-level label must start with a letter, so npm specs such as pkg@1.11.13 are not addresses.
+    {kind:'email', pattern:/[A-Z0-9.!#$%&'*+/=?^_`{|}~-]{1,64}@[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?(?:\.[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?)*\.[A-Z](?:[A-Z0-9-]{0,61}[A-Z0-9])?(?![A-Z0-9-])/gi},
     {kind:'phone', pattern:/(?<!\d)(?:01[016789][ -]?\d{3,4}[ -]?\d{4}|\+82[ -]?1[016789][ -]?\d{3,4}[ -]?\d{4}|\+1[ -]?(?:\(\d{3}\)|\d{3})[ -]?\d{3}[ -]?\d{4})(?!\d)/g},
     {kind:'national_id', pattern:/(?<!\d)(?:\d{6}[ -]?[1-8]\d{6}|\d{3}-\d{2}-\d{4})(?!\d)/g},
   ];

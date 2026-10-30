@@ -97,6 +97,16 @@ test('the full brief at the Controller character limit is accepted and one extra
   assert.throws(()=>buildExecutionBrief(task,version),/^Error: EXECUTION_BRIEF_TOO_LARGE$/);
 });
 
+test('rejected reuse candidates and the no-adopt summary stay in the plan but not in the execution brief',()=>{
+  const {task,version}=fixture();version.draft.decisions=[{topic:'Storage',decision:'Use SQLite',rationale:'local-first'},
+    {topic:'재사용: dayjs',decision:'재사용 미채택: dayjs 1.11.23',rationale:'r'},{topic:'재사용 탐색',decision:'재사용 탐색 완료: 적합 후보 없음 — 직접 구현 · 확인 2026-10-30T11:04:48+09:00',rationale:'r'},
+    {topic:'재사용 탐색',decision:'재사용 탐색 실패(timed_out REUSE_TIMEOUT) · 확인 2026-10-30T11:04:48+09:00',rationale:'r'}];
+  version.contentHash=createHash('sha256').update(JSON.stringify(version.draft)).digest('hex');
+  const brief=buildExecutionBrief(task,version);
+  assert.match(brief.prompt,/Use SQLite/);assert.match(brief.prompt,/재사용 탐색 실패/);assert.doesNotMatch(brief.prompt,/재사용 미채택|재사용 탐색 완료/);
+  assert.equal(brief.planningContentHash,version.contentHash);
+});
+
 test('incomplete decisions and decision context exceeding the prompt limit cannot execute',()=>{
   for(const decision of ['', 'x'.repeat(4000)]){
     const {task,version}=fixture();version.draft.decisions=[{topic:'Storage',decision,rationale:'Local data'}];
