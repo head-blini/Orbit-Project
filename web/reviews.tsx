@@ -1,5 +1,5 @@
 import {useEffect,useMemo,useRef,useState} from 'react';
-import type {ReviewPreview,ReviewRecord,ReviewView,StartReviewInput} from '../shared/reviews.ts';
+import type {ReviewPreview,ReviewRecord,ReviewRepairPreview,ReviewView,StartReviewInput,StartReviewRepairInput} from '../shared/reviews.ts';
 import {createStudioMutator} from './studio-client.ts';
 
 type Token={generation:number;sequence:number};
@@ -41,7 +41,8 @@ export interface ReviewPanelProps extends Scope {online:boolean;busy:boolean;pos
 export function ReviewPanel(props:ReviewPanelProps){return <ScopedReview key={JSON.stringify([props.workspaceId,props.runId])} {...props}/>;}
 function ScopedReview({workspaceId,runId,online,busy,post}:ReviewPanelProps){
   const [view,setView]=useState<ReviewView|null>(null),[preview,setPreview]=useState<ReviewPreview|null>(null),[loading,setLoading]=useState(false),[fresh,setFresh]=useState(false);
-  const [action,setAction]=useState<'preview'|'start'|'interrupt'|'recover'|null>(null),[uncertain,setUncertain]=useState(false),[error,setError]=useState(''),[message,setMessage]=useState('');
+  const [action,setAction]=useState<'preview'|'start'|'interrupt'|'recover'|'repair-preview'|'repair-start'|null>(null),[uncertain,setUncertain]=useState(false),[error,setError]=useState(''),[message,setMessage]=useState('');
+  const [repair,setRepair]=useState<ReviewRepairPreview|null>(null),[repairConsent,setRepairConsent]=useState(false);
   const [consent,setConsent]=useState<string|null>(null),[recoveryConsent,setRecoveryConsent]=useState<string|null>(null);
   const order=useMemo(()=>createReviewRequestEpoch(),[]),postRef=useRef(post),viewRef=useRef<ReviewView|null>(null),previewRef=useRef<ReviewPreview|null>(null),actionRef=useRef<Token|null>(null);
   const timer=useRef<ReturnType<typeof setTimeout>|undefined>(undefined),reader=useRef<AbortController|null>(null),reload=useRef<(mode:ReadMode)=>Promise<void>>(async()=>{});postRef.current=post;
@@ -49,7 +50,8 @@ function ScopedReview({workspaceId,runId,online,busy,post}:ReviewPanelProps){
   const scope={workspaceId,runId},query=runId?'?runId='+encodeURIComponent(runId):'',path='/api/workspaces/'+encodeURIComponent(workspaceId)+'/reviews';
   const consentKey=preview?JSON.stringify([workspaceId,runId,preview.previewDigest,preview.inputDigest,preview.sourceDigest]):null;
   const confirmed=!!consentKey&&consent===consentKey,available=reviewAvailability(view,preview,scope,{online,busy:busy||!!action,loading,fresh,uncertain,confirmed});
-  function discardPreview(){previewRef.current=null;setPreview(null);setConsent(null);}
+  function discardPreview(){previewRef.current=null;setPreview(null);setConsent(null);setRepair(null);setRepairConsent(false);}
+  const canRepair=online&&!busy&&!action&&fresh&&!loading&&!uncertain&&!!view&&!view.busy&&!view.recoveryRequired;
   useEffect(()=>{
     order.reset();viewRef.current=null;setView(null);setFresh(false);discardPreview();setRecoveryConsent(null);setUncertain(false);setError('');setMessage('');setAction(null);actionRef.current=null;setLoading(false);
     async function load(mode:ReadMode){
@@ -70,7 +72,9 @@ function ScopedReview({workspaceId,runId,online,busy,post}:ReviewPanelProps){
     reload.current=load;if(online&&workspaceId)void load('poll');
     return()=>{order.dispose();reader.current?.abort();if(timer.current)clearTimeout(timer.current);reload.current=async()=>{};};
   },[workspaceId,runId,online,order,path,query]);
-  async function act(kind:'preview'|'start'|'interrupt'|'recover',record?:ReviewRecord){
+  async function act(kind:'preview'|'start'|'interrupt'|'recover'|'repair-preview'|'repair-start',record?:ReviewRecord){
+    if(kind==='repair-preview'&&(!canRepair||!record||record.workspaceId!==workspaceId||record.execution!=='completed'))return;
+    if(kind==='repair-start'&&(!canRepair||!repair||!repairConsent||!!repair.issue))return;
     if(kind==='preview'&&!available.preview||kind==='start'&&!available.start)return;
     if(kind==='interrupt'&&(!online||!record||record.workspaceId!==workspaceId||record.execution!=='running'))return;
     if(kind==='recover'&&(!online||busy||!fresh||loading||uncertain||view?.busy||!view?.recoveryRequired||!record||!reviewRecoveryKey(record,workspaceId)||recoveryConsent!==reviewRecoveryKey(record,workspaceId)))return;
@@ -82,6 +86,12 @@ function ScopedReview({workspaceId,runId,online,busy,post}:ReviewPanelProps){
       }else if(kind==='start'){
         const input:Omit<StartReviewInput,'requestId'>={workspaceId,runId,expectedPreviewDigest:preview!.previewDigest,confirmed:true};const value=await mutate('/api/reviews/start',input) as ReviewRecord;
         if(!order.isCurrent(token))return;if(value.workspaceId!==workspaceId||value.runId!==runId)throw new Error();discardPreview();setMessage('Native Review 시작을 요청했습니다. 최종 결과와 프로세스 종료 여부는 기록에서 확인하세요.');
+      }else if(kind==='repair-preview'){
+        const controller=new AbortController();reader.current=controller;const response=await fetch(path+'/'+encodeURIComponent(record!.id)+'/repair-preview',{signal:controller.signal});if(!response.ok)throw new Error();const value=await response.json() as ReviewRepairPreview;
+        if(!order.isCurrent(token))return;if(value.reviewId!==record!.id||value.workspaceId!==workspaceId||!digest(value.previewDigest))throw new Error();setRepair(value);setRepairConsent(false);setMessage(value.issue?'수정 실행을 시작할 수 없습니다: '+value.issue:'리뷰 지적과 수정 예산을 표시했습니다. 시작하려면 별도로 동의하세요.');
+      }else if(kind==='repair-start'){
+        const input:Omit<StartReviewRepairInput,'requestId'>={workspaceId,expectedPreviewDigest:repair!.previewDigest,confirmed:true};await mutate('/api/reviews/'+encodeURIComponent(repair!.reviewId)+'/repair',input);
+        if(!order.isCurrent(token))return;discardPreview();setMessage('리뷰 지적 수정 Run을 요청했습니다. 결과는 Run 기록과 검증에서 확인하세요. 자동 재시도는 없습니다.');
       }else if(kind==='interrupt'){
         await postRef.current('/api/reviews/'+encodeURIComponent(record!.id)+'/interrupt',{workspaceId});if(!order.isCurrent(token))return;discardPreview();setMessage('리뷰 중단을 요청했습니다. 응답이나 화면 표시만으로 프로세스 종료를 단정하지 않습니다.');
       }else{
@@ -101,7 +111,7 @@ function ScopedReview({workspaceId,runId,online,busy,post}:ReviewPanelProps){
     <p className="subtle">현재 source <code>{view?.sourceDigest??'unknown'}</code> · 조회 당시 값 · 자동 메타데이터 조회는 실행 중 1초, 그 외 15초이며 요청 처리 중 멈춥니다.</p>
     <button disabled={!available.preview} onClick={()=>void act('preview')}>Native Review 입력 미리보기</button>
     {preview&&<ReviewExecutionPreview preview={preview} confirmed={confirmed} canStart={available.start} onConsent={value=>setConsent(value?consentKey:null)} onStart={()=>void act('start')}/>}
-    <ReviewHistory workspaceId={workspaceId} records={view?.records??[]} sourceDigest={view?.sourceDigest??null} online={online} actionBusy={!!action} otherBusy={busy||!!view?.busy} fresh={fresh&&!loading} uncertain={uncertain} recoveryConsent={recoveryConsent}
+    <ReviewHistory workspaceId={workspaceId} records={view?.records??[]} repairBudgets={view?.repairBudgets} repair={repair} repairConsent={repairConsent} canRepair={canRepair} onRepairPreview={record=>void act('repair-preview',record)} onRepairConsent={setRepairConsent} onRepairStart={()=>void act('repair-start')} sourceDigest={view?.sourceDigest??null} online={online} actionBusy={!!action} otherBusy={busy||!!view?.busy} fresh={fresh&&!loading} uncertain={uncertain} recoveryConsent={recoveryConsent}
       onInterrupt={record=>void act('interrupt',record)} onRecover={record=>void act('recover',record)} onRecoveryConsent={(record,value)=>setRecoveryConsent(value?reviewRecoveryKey(record,workspaceId):null)}/>
   </section>;
 }
@@ -113,7 +123,8 @@ export function ReviewExecutionPreview({preview,confirmed,canStart,onConsent,onS
     <button disabled={!canStart} onClick={()=>{if(canStart)onStart();}}>동의한 Native Review 시작</button>
   </section>;
 }
-interface HistoryProps {workspaceId:string;records:ReviewRecord[];sourceDigest:string|null;online:boolean;actionBusy:boolean;otherBusy:boolean;fresh:boolean;uncertain:boolean;recoveryConsent:string|null;
+interface HistoryProps {repairBudgets?:ReviewView['repairBudgets'];repair?:ReviewRepairPreview|null;repairConsent?:boolean;canRepair?:boolean;onRepairPreview?:(record:ReviewRecord)=>void;onRepairConsent?:(value:boolean)=>void;onRepairStart?:()=>void;
+  workspaceId:string;records:ReviewRecord[];sourceDigest:string|null;online:boolean;actionBusy:boolean;otherBusy:boolean;fresh:boolean;uncertain:boolean;recoveryConsent:string|null;
   onInterrupt:(record:ReviewRecord)=>void;onRecover:(record:ReviewRecord)=>void;onRecoveryConsent:(record:ReviewRecord,value:boolean)=>void}
 export function ReviewHistory(props:HistoryProps){
   const rows=props.records.filter(record=>record.workspaceId===props.workspaceId).slice(0,20);
@@ -125,9 +136,21 @@ export function ReviewHistory(props:HistoryProps){
         <p>{!props.sourceDigest?'소스 현재성 미확인':current?'조회 당시 소스와 일치 · 검증 승인 아님':'현재 소스와 다름 · 현재 검증 근거 아님'} · 프로세스 {record.processStopped?'종료 확인됨':'종료 확인 불가'}</p>
         <p>source <code>{record.sourceDigest}</code> · 종료 source <code>{record.finishedDigest??'unknown'}</code> · {record.durationMs??'unknown'} ms · 제한 {record.timeoutMs} ms · {record.turnLimit} turn</p>
         {record.issue&&<p>진단 <code>{record.issue}</code></p>}<pre className="review-response">{record.response.slice(0,64000)||'반환된 리뷰 텍스트 없음'}</pre>{record.response.length>64000&&<p>표시 출력이 제한되었습니다.</p>}
+        {record.execution==='completed'&&props.repairBudgets?.[record.id]&&<ReviewRepair record={record} budget={props.repairBudgets[record.id]} {...props}/>}
         {record.recoveredAt&&<p>사용자 프로세스 종료 확인 {record.recoveredAt} · 이전 결과는 그대로 보존하며 재실행하지 않았습니다.</p>}
         {recoveryKey&&<div className="review-recovery"><p>실행 결과와 별개로 프로세스 종료를 확인할 수 없어 격리 상태입니다. 이전 프로세스가 실제 종료되었는지 직접 확인하세요.</p><label className="review-consent"><input type="checkbox" aria-label={'리뷰 프로세스 종료 확인 '+record.id} checked={props.recoveryConsent===recoveryKey} disabled={!props.online||props.actionBusy||props.otherBusy||!props.fresh||props.uncertain} onChange={event=>props.onRecoveryConsent(record,event.target.checked)}/>이전 Native Review 프로세스가 종료되었음을 확인</label><button disabled={!canRecover} onClick={()=>props.onRecover(record)}>종료 확인 후 리뷰 복구</button></div>}
       </div>{record.execution==='running'&&<button disabled={!props.online||props.actionBusy} onClick={()=>props.onInterrupt(record)}>Native Review 중단</button>}</li>;
     })}</ul>
   </section>;
+}
+
+/** Explicit, user-initiated hand-off of one review's full text to the existing repair run. Never automatic; disabled when the per-task budget is used. */
+function ReviewRepair({record,budget,repair,repairConsent,canRepair,onRepairPreview,onRepairConsent,onRepairStart}:HistoryProps&{record:ReviewRecord;budget:{used:number;max:number}}){
+  const exhausted=budget.used>=budget.max,shown=repair?.reviewId===record.id?repair:null;
+  return <div className="review-repair"><p>수정 예산 {budget.used}/{budget.max}{exhausted&&' · 소진됨 (REVIEW_REPAIR_BUDGET_EXHAUSTED)'}</p>
+    <button aria-label={'리뷰 지적 수정 실행 미리보기 '+record.id} disabled={!canRepair||exhausted||!record.runId} onClick={()=>onRepairPreview?.(record)}>리뷰 지적으로 수정 실행 미리보기</button>
+    {shown&&<div aria-label="리뷰 지적 수정 전송 미리보기"><p>{shown.scope}</p><p>리뷰 지적 {shown.promptChars}/{shown.maxPromptChars}자 · 파일 {shown.findings.files.join(', ')||'없음'}</p>{shown.issue&&<p role="alert">진단 <code>{shown.issue}</code></p>}
+      <label className="review-consent"><input type="checkbox" aria-label={'리뷰 지적 수정 전송 동의 '+record.id} checked={!!repairConsent} disabled={!!shown.issue} onChange={event=>onRepairConsent?.(event.target.checked)}/>리뷰 텍스트 전체가 수정 Run 지시문으로 Codex에 전송됨을 확인했고 수정 1회 사용에 동의합니다.</label>
+      <button aria-label={'리뷰 지적 수정 실행 시작 '+record.id} disabled={!canRepair||!repairConsent||!!shown.issue} onClick={()=>onRepairStart?.()}>동의한 리뷰 지적 수정 실행</button></div>}
+  </div>;
 }
