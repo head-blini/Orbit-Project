@@ -1,7 +1,8 @@
 import {planningDepth,planningDepthReason} from '../../shared/planning-agent.ts';
 import { useEffect, useRef, useState } from 'react';
 import type { PlanningDraft, PlanningVersion, TaskDraft } from '../../shared/parallel.ts';
-import { approvalIssues, MAX_PLANNING_BYTES, parsePlanningDraft, serializePlanningDraft } from '../../server/planning/parser.ts';
+import { MAX_PLANNING_BYTES, parsePlanningDraft, serializePlanningDraft } from '../../server/planning/parser.ts';
+import { MAX_EXECUTION_PROMPT_CHARS, planningApprovalIssues } from '../../server/planning/brief.ts';
 import type { PlanningInput } from '../../server/planning/parser.ts';
 import type { PlanningExportFormat } from '../../shared/planning-handoff.ts';
 import type { PlanningComparisonProps } from '../../shared/planning-revisions.ts';
@@ -171,7 +172,7 @@ function PlanningProject(props: PlanningStudioProps) {
       }):undefined}/>
     <div className="planning-toolbar">
       <button disabled={busy || !parsed.ok || (!!selected && !dirty)} onClick={() => void save()}>{selected ? '새 버전 저장' : '편집 내용을 초안으로 저장'}</button>
-      <button disabled={busy || !selected || dirty || selected.state !== 'draft' || !parsed.ok || (parsed.ok && approvalIssues(parsed.draft).length > 0)} onClick={() => void approve()}>저장된 버전 승인</button>
+      <button disabled={busy || !selected || dirty || selected.state !== 'draft' || !parsed.ok || (parsed.ok && planningApprovalIssues(parsed.draft).length > 0)} onClick={() => void approve()}>저장된 버전 승인</button>
       <button disabled={busy || !selected || dirty || selected.state !== 'approved'} onClick={() => {
         if (!selected || dirty) return;
         void operation(async () => {
@@ -199,7 +200,7 @@ export function PlanningExportActions({projectId,version,dirty,busy,onExport}:{p
 }
 
 export function PlanningPreview({ draft,disabled=false,onDepthChange }: { draft: PlanningDraft;disabled?:boolean;onDepthChange?:(depth:'simple'|'detailed')=>void }) {
-  const issues = approvalIssues(draft);
+  const issues = planningApprovalIssues(draft), tooLarge = issues.some(issue => issue.code === 'EXECUTION_BRIEF_TOO_LARGE'), missing = issues.filter(issue => issue.code !== 'EXECUTION_BRIEF_TOO_LARGE');
   return <div className="planning-preview">
     <p>명세 깊이: {planningDepth(draft.depth)==='simple'?'간단히 정리':'자세히 정리'}</p>
     <p>{planningDepthReason(draft)}</p>
@@ -229,6 +230,7 @@ export function PlanningPreview({ draft,disabled=false,onDepthChange }: { draft:
         <p>{reference.title}</p><p>{reference.url}</p>
       </li>)}</ul></>}
     </section>}
-    {issues.length > 0 && <p>초안에 필요한 항목: {issues.map(issue => issue.field).join(', ')}. 저장할 수 있지만 승인하려면 해당 항목을 채워야 합니다.</p>}
+    {missing.length > 0 && <p>초안에 필요한 항목: {missing.map(issue => issue.field).join(', ')}. 저장할 수 있지만 승인하려면 해당 항목을 채워야 합니다.</p>}
+    {tooLarge && <p role="alert">EXECUTION_BRIEF_TOO_LARGE: 실행 지침이 {MAX_EXECUTION_PROMPT_CHARS}자 한도를 넘어 승인할 수 없습니다. 결정 사항·근거·제약을 줄여 새 버전으로 저장하세요.</p>}
   </div>;
 }

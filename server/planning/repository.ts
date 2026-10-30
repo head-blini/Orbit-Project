@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import type { PlanningVersion, TaskDraft } from '../../shared/parallel.ts';
-import { approvalIssues, parsePlanningDraft } from './parser.ts';
+import { parsePlanningDraft } from './parser.ts';
+import { planningApprovalIssues } from './brief.ts';
 import type { PlanningInput } from './parser.ts';
 import type { DatabaseSync } from 'node:sqlite';
 
@@ -47,7 +48,7 @@ export class SqlitePlanningRepository implements PlanningRepository {
     return next;
   }
   approve(projectId:string,id:string,revision:number,actor='local-user'):PlanningVersion {
-    const version=this.current(projectId,id,revision);const issues=approvalIssues(version.draft);
+    const version=this.current(projectId,id,revision);const issues=planningApprovalIssues(version.draft);
     if(issues.length)throw new PlanningError('INCOMPLETE_DRAFT',issues);
     version.state='approved';version.approvedAt??=new Date().toISOString();version.approvedBy??=actor;
     this.db.prepare('UPDATE planning_versions SET body=? WHERE id=?').run(JSON.stringify(version),id);
@@ -123,7 +124,7 @@ export class InMemoryPlanningRepository implements PlanningRepository {
 
   approve(projectId: string, versionId: string, expectedRevision: number): PlanningVersion {
     const record = this.#current(projectId, versionId, expectedRevision);
-    const issues = approvalIssues(record.version.draft);
+    const issues = planningApprovalIssues(record.version.draft);
     if (issues.length) throw new PlanningError('INCOMPLETE_DRAFT', issues);
     record.version.state = 'approved';
     record.approvedAt ??= new Date().toISOString();
