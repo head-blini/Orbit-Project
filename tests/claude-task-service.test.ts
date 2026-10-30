@@ -12,6 +12,7 @@ import {ClaudeTaskService} from '../server/claude-task-service.ts';
 import {claudeFixture,planningInput,outcome,session,tick} from './claude-task-fixture.ts';
 
 const error=(message:string,status=409)=>(e:unknown)=>e instanceof AppError&&e.message===message&&e.status===status;
+const marker='CLAUDE_PROVIDER_TEXT_MARKER',leaks=(f:{store:Store},id:string)=>JSON.stringify([f.store.getRun(id),f.store.eventsAfter(0)]).includes(marker);
 test('unchanged approved task passes the service beforeDispatch guard',async()=>{
  const f=claudeFixture();let guarded=0;
  const service=new ClaudeTaskService(f.store,f.projects,{findExecutable:()=>'/fake/claude',runnerFactory:config=>({
@@ -108,8 +109,10 @@ test('Claude events project session, tool and quota only; the last sanitized mes
     const quota:Extract<ClaudeEvent,{kind:'quota'}>={kind:'quota',status:'rejected',windows:[{id:'five_hour',utilization:1,resetsAt:null,status:'rejected'}]};
     runner.emit(quota);assert.deepEqual(f.controller.claudeQuota(),quota);
     const copy=f.controller.claudeQuota()!;copy.windows.length=0;assert.equal(f.controller.claudeQuota()!.windows.length,1);
+    assert.equal(f.store.getRun(run.id)!.response,'last '+ 'x'.repeat(63995));
     runner.finish(outcome('quota_exhausted',{response:'outcome response is not the last message'}));await tick();
-    const saved=f.store.getRun(run.id)!;assert.equal(saved.execution,'failed');assert.equal(saved.response,'last '+ 'x'.repeat(63995));assert.doesNotMatch(saved.prompt,new RegExp(secret));
+    // A failed run keeps only its reason code; the streamed text leaves the row.
+    const saved=f.store.getRun(run.id)!;assert.equal(saved.execution,'failed');assert.equal(saved.response,'QUOTA_EXHAUSTED');assert.equal(JSON.stringify([saved,f.store.eventsAfter(0)]).includes('x'.repeat(100)),false);assert.doesNotMatch(saved.prompt,new RegExp(secret));
     const events=f.store.eventsAfter(0).filter(e=>e.runId===run.id),raw=JSON.stringify(events);
     for(const text of [secret,'Write a report','Compare local evidence','"prompt"','"response"','"input"'])assert.equal(raw.includes(text),false,text);
     assert.deepEqual(events.find(e=>e.kind==='run.started')!.data,{sessionId:session.sessionId});
@@ -135,11 +138,13 @@ test('interrupt is recorded immediately, remains interrupting through late sessi
 
 for(const [status,extra,execution,reason] of [
   ['unknown',{},'lost','RESULT_NOT_OBSERVED'],['completed',{exit:'not_observed'},'lost','EXIT_NOT_OBSERVED'],
-  ['spawn_failed',{exit:'not_observed'},'failed','RUNTIME_NOT_STARTED'],['auth_required',{},'failed','LOGIN_REQUIRED'],['error',{},'failed','RUNTIME_ERROR'],
+  ['spawn_failed',{exit:'not_observed'},'failed','RUNTIME_NOT_STARTED'],['auth_required',{},'failed','LOGIN_REQUIRED'],['error',{},'failed','RUNTIME_ERROR'],['completed',{},'completed',null],
 ] as const)test(`Claude outcome ${status}/${extra.exit??'observed'} preserves ${execution} and ${reason}`,async()=>{
   const f=claudeFixture();try{
     const {task}=f.plan(),requestId=randomUUID(),run=await f.controller.submitTask(f.project.id,task.id,{requestId});
+    f.runners[0].emit({kind:'message',text:marker});
     f.runners[0].finish(outcome(status,extra));await tick();assert.equal(f.store.getRun(run.id)!.execution,execution);
+    assert.equal(f.store.getRun(run.id)!.response,reason??marker);assert.equal(leaks(f,run.id),!reason);
     assert.equal(f.store.eventsAfter(0).find(e=>e.runId===run.id&&e.kind==='run.'+execution)!.data.reason,reason);
     if(execution==='lost'){
       assert.equal((await f.controller.submitTask(f.project.id,task.id,{requestId})).id,run.id);
@@ -152,12 +157,14 @@ for(const [status,extra,execution,reason] of [
 for(const state of ['starting','running'] as const)test(`restart quarantines a ${state} Claude run and blocks a new owner for that task`,async()=>{
   const f=claudeFixture(),{task}=f.plan(),requestId=randomUUID();
   const run=await f.controller.submitTask(f.project.id,task.id,{requestId});if(state==='running')f.runners[0].emit(session);
+  f.runners[0].emit({kind:'message',text:marker});
   assert.equal(f.store.getRun(run.id)!.execution,state);
   // Simulate process loss: no graceful Controller.close and no runner exit.
   f.store.close();const store=new Store(f.db),projects=new Projects(store,f.managed,[],f.root);
   const controller=new Controller(store,f.dir,()=>{throw new Error('CODEX_FORBIDDEN');},projects,[],[],{findExecutable:()=>{throw new Error('NO_RETRY');},runnerFactory:()=>{throw new Error('NO_RETRY');}});
   try{
     assert.equal(store.getRun(run.id)!.execution,'lost');assert.equal(store.getRun(run.id)!.runtime,'claude-code');
+    assert.equal(store.getRun(run.id)!.response,'SERVER_RESTART');assert.equal(leaks({store},run.id),false);
     assert.equal((await controller.submitTask(f.project.id,task.id,{requestId})).id,run.id);
     await assert.rejects(controller.submitTask(f.project.id,task.id,{requestId:randomUUID()}),error('SOLO_RECOVERY_REQUIRED'));
     assert.equal(store.runs().length,1);assert.equal(JSON.stringify(store.eventsAfter(0).filter(e=>e.runId===run.id)).includes('"prompt"'),false);
@@ -195,21 +202,27 @@ test('a rejected runner start is uncertain and cannot authorize a retry or leak 
   const f=claudeFixture({runnerFactory:()=>({start:()=>Promise.reject(new Error('PRIVATE_DIAGNOSTIC')),interrupt:()=> 'not_running'})});
   try{
     const {task}=f.plan(),run=await f.controller.submitTask(f.project.id,task.id,{requestId:randomUUID()});await tick();
-    assert.equal(f.store.getRun(run.id)!.execution,'lost');
+    assert.equal(f.store.getRun(run.id)!.execution,'lost');assert.equal(f.store.getRun(run.id)!.response,'EXIT_NOT_OBSERVED');
     await assert.rejects(f.controller.submitTask(f.project.id,task.id,{requestId:randomUUID()}),error('SOLO_RECOVERY_REQUIRED'));
     assert.equal(JSON.stringify(f.store.eventsAfter(0)).includes('PRIVATE_DIAGNOSTIC'),false);
   }finally{await f.close();}
+  const g=claudeFixture({runnerFactory:()=>{throw new Error('PRIVATE_DIAGNOSTIC');}});
+  try{
+    const {task}=g.plan(),run=await g.controller.submitTask(g.project.id,task.id,{requestId:randomUUID()});
+    assert.equal(run.execution,'failed');assert.equal(run.response,'RUNTIME_NOT_STARTED');assert.equal(JSON.stringify(g.store.eventsAfter(0)).includes('PRIVATE_DIAGNOSTIC'),false);
+  }finally{await g.close();}
 });
 
 test('failed terminal persistence keeps the durable intent blocking another owner',async()=>{
   const f=claudeFixture();try{
     const {task}=f.plan(),run=await f.controller.submitTask(f.project.id,task.id,{requestId:randomUUID()});
-    f.runners[0].emit(session);
+    f.runners[0].emit(session);f.runners[0].emit({kind:'message',text:marker});
     f.store.db.exec("CREATE TRIGGER fail_terminal BEFORE INSERT ON events WHEN NEW.kind='run.completed' BEGIN SELECT RAISE(ABORT, 'fixture'); END");
     f.runners[0].finish();await tick();assert.equal(f.store.getRun(run.id)!.execution,'running');
     await assert.rejects(f.controller.submitTask(f.project.id,task.id,{requestId:randomUUID()}),error('RUN_ACTIVE'));
     assert.equal(f.runners.length,1);assert.equal(f.store.eventsAfter(0).some(e=>e.kind==='run.completed'),false);
     await f.controller.interrupt(run.id);assert.equal(f.store.getRun(run.id)!.execution,'lost');
+    assert.equal(f.store.getRun(run.id)!.response,'EXIT_NOT_OBSERVED');assert.equal(leaks(f,run.id),false);
   }finally{await f.close();}
 });
 

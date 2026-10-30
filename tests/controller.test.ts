@@ -301,3 +301,41 @@ test('a failed Codex run redacts its streamed message events in place; completed
     assert.equal(store.getRun(ok.id)!.response,'KEEP-MARKER ');
   }finally{await c.close();store.close();}
 });
+const delta=(rpc:FakeRpc,itemId:string,text:string)=>rpc.emit('notification',{method:'item/agentMessage/delta',params:{threadId:'thread-fixture',turnId:'turn-fixture',itemId,delta:text}});
+const finish=(rpc:FakeRpc,status:string)=>rpc.emit('notification',{method:'turn/completed',params:{threadId:'thread-fixture',turn:{id:'turn-fixture',status}}});
+for(const [cause,reason] of [['timeout','RUN_TIMEOUT'],['transport','TRANSPORT_CLOSED']])test(`a Codex run lost by ${cause} redacts its streamed text to ${reason}; completed and interrupted runs keep theirs`,async()=>{
+  const {c,rpc,store}=setup();try{
+    await c.connect();
+    const ok=await c.submit({requestId:`lost-${cause}-completed`,prompt:'A'});delta(rpc,'m1','KEEP-COMPLETED ');finish(rpc,'completed');
+    const stop=await c.submit({requestId:`lost-${cause}-interrupt`,prompt:'B'});delta(rpc,'m2','KEEP-INTERRUPTED ');finish(rpc,'interrupted');
+    const lost=await c.submit({requestId:`lost-${cause}-marker1`,prompt:'C'});const marker='LOST-MARKER-9c1e';
+    delta(rpc,'m3',marker+' partial ');
+    await c.interrupt(lost.id);
+    const before=store.eventsAfter(0).map(e=>[e.seq,e.kind,e.runId]);
+    assert.ok(store.eventsAfter(0).some(e=>e.runId===lost.id&&e.kind==='interrupt.requested'&&JSON.stringify(e.data).includes(marker)),'live streaming stays visible while running');
+    // The deadline timer calls failTransport('RUN_TIMEOUT'); call it directly to stay deterministic.
+    if(cause==='timeout')await (c as unknown as {failTransport(issue:string):Promise<void>}).failTransport(reason);else rpc.emit('closed');
+    const after=store.eventsAfter(0);
+    assert.equal(store.getRun(lost.id)!.execution,'lost');assert.equal(store.getRun(lost.id)!.response,reason);
+    assert.deepEqual(after.slice(0,before.length).map(e=>[e.seq,e.kind,e.runId]),before);assert.deepEqual(after.slice(before.length).filter(e=>e.runId===lost.id&&e.kind.startsWith('run.')&&e.kind!=='run.model_attribution').map(e=>e.kind),['run.lost']);
+    assert.ok(after.slice(before.length).every(e=>e.kind!=='message.updated'));assert.ok(!JSON.stringify(after).includes(marker));assert.ok(!JSON.stringify(store.getRun(lost.id)).includes(marker));
+    for(const e of after.filter(e=>e.runId===lost.id&&['message.updated','interrupt.requested','run.lost'].includes(e.kind)))assert.equal((e.data.run as {response:string}).response,reason);
+    assert.equal((after.find(e=>e.runId===lost.id&&e.kind==='run.created')!.data.run as {response:string}).response,'');
+    assert.equal(store.getRun(ok.id)!.response,'KEEP-COMPLETED ');assert.equal(store.getRun(stop.id)!.response,'KEEP-INTERRUPTED ');
+    assert.ok(after.some(e=>e.runId===ok.id&&e.kind==='message.updated'&&(e.data.run as {response:string}).response.includes('KEEP-COMPLETED')));
+    assert.ok(after.some(e=>e.runId===stop.id&&e.kind==='message.updated'&&(e.data.run as {response:string}).response.includes('KEEP-INTERRUPTED')));
+  }finally{await c.close();store.close();}
+});
+test('a Codex run quarantined at restart redacts its streamed text to SERVER_RESTART; other rows keep theirs',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'orbit-lost-restart-')),path=join(dir,'state.sqlite');let store=new Store(path);const marker='RESTART-MARKER-4b2d';
+  try{
+    const done=store.createRun('restart-completed','digest','A');store.updateRun(done.id,{response:'KEEP-DONE'},'message.updated');store.updateRun(done.id,{execution:'completed',response:'KEEP-DONE'},'run.completed');
+    const run=store.createRun('restart-uncertain','digest','B');store.updateRun(run.id,{execution:'running',turnId:'turn-fixture'},'run.started');store.updateRun(run.id,{response:marker},'message.updated');
+    const before=store.eventsAfter(0).map(e=>[e.seq,e.kind,e.runId]);store.close();store=new Store(path);
+    const after=store.eventsAfter(0);
+    assert.equal(store.getRun(run.id)!.execution,'lost');assert.equal(store.getRun(run.id)!.response,'SERVER_RESTART');
+    assert.deepEqual(after.slice(0,before.length).map(e=>[e.seq,e.kind,e.runId]),before);assert.deepEqual(after.slice(before.length).map(e=>e.kind),['run.lost']);
+    assert.ok(!JSON.stringify(after).includes(marker));assert.ok(!JSON.stringify(store.runs()).includes(marker));
+    assert.equal(store.getRun(done.id)!.response,'KEEP-DONE');assert.ok(after.filter(e=>e.runId===done.id&&e.kind!=='run.created').every(e=>(e.data.run as {response:string}).response==='KEEP-DONE'));
+  }finally{store.close();rmSync(dir,{recursive:true,force:true});}
+});

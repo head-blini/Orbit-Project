@@ -1108,17 +1108,17 @@ export class Controller {
     return safeTextItems([...this.output.values()],final);
   }
   private clearDeadline(){if(this.deadline)clearTimeout(this.deadline);this.deadline=null;}
-  private loseActive(rpc:RpcPort|null=this.rpc){
+  private loseActive(rpc:RpcPort|null=this.rpc,reason='TRANSPORT_CLOSED'){
     this.clearDeadline();const r=this.active();if(!r)return;
     this.soloLost=true;
-    try{this.store.updateRun(r.id,{execution:'lost'},'run.lost');}
+    try{this.store.updateRun(r.id,{execution:'lost',response:reason},'run.lost');}
     catch{/* Keep the volatile denial; the durable nonterminal Run is quarantined on restart. */}
     try{this.telemetry.finish(r.id,true);this.modelTracker.finish(r.id,'lost');}
     finally{this.retireToolSession(r.id,rpc);}
   }
   private async failTransport(issue:string){
     const rpc=this.rpc;this.rpc=null;++this.generation;
-    try{this.loseActive(rpc);}catch{this.soloLost=true;}
+    try{this.loseActive(rpc,issue);}catch{this.soloLost=true;}
     this.telemetry.disconnect();this.modelTracker.disconnect();
     try{this.status('error',issue);}catch{this.launchValidated=false;this.usage=unknownUsage();}
     // Closing the connection is best effort, never evidence permitting a new dispatch.
