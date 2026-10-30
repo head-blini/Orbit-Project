@@ -1,6 +1,6 @@
 # 릴리스 게이트 증거 정합 (2026-10-30 · Claude worker RELEASE-GATE-DOCS)
 
-- 기준: 개발 브랜치 `codex/orbit-mac-handoff-2026-10-26` HEAD `1716a1a`(배치 23). `8255815`까지 사용자가 origin에 push했고 `1716a1a`는 로컬 fast-forward만 했다. main 병합·배포 없음. 이 갱신은 문서만 바꿨고 코드·테스트는 바꾸지 않았다.
+- 기준: 개발 브랜치 `codex/orbit-mac-handoff-2026-10-26` 배치 24(FE-5-REDACT `7d767aa` + 이 문서 정합 `933878a`). 배치 24 전체 verify: 2138 tests, 2136 pass, 0 fail, 0 cancelled, 2 skip(exit 0). 배치 23 `1716a1a` verify는 2135/0/2. `8255815`까지 origin에 push됨, 이후는 사용자 push 대기. main 병합·배포 없음.
 - 마지막 전체 검증(오케스트레이터 기록, `.local/orchestrator/int-batch-23-verify.log`): Node24 `npm run verify` exit 0 **2137 tests / 2135 pass / 0 fail / 0 cancelled / 2 skip**(mock/fake).
 - 항목별 상태·증거·증명 HEAD·차단 코드 표: [ORBIT-RELEASE-GATE-2026-10-30.md](ORBIT-RELEASE-GATE-2026-10-30.md). PRODUCT-ACCEPTANCE에도 같은 근거를 반영했다.
 - 배치 20~23(2026-10-30, 모두 mock/fake 테스트): 20 HE-SUITE `243e2c2`·문서 / 21 T7-FOLLOWUP-CTL `14fa8f7` / 22 REUSE-DISCOVERY `e431413`·REUSE-VENDOR `d553e37`·FE-5/CQG-6B-CTL `8f92059`, 리뷰 수정 `3700c8e` / LIVE-B 수정 `81c214d` / 23 BRIEF-SIZE-GATE `6841667`·FLAKE-P8-RESTART `1267fdb`.
