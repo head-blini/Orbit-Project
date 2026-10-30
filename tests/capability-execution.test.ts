@@ -6,6 +6,9 @@ import {CapabilityExecutionService} from '../server/capability-execution.ts';
 import {CapabilityRuntimeAdapters} from '../server/capability-runtime-adapters.ts';
 import type {Controller} from '../server/controller.ts';
 import {generalAcceptance} from '../server/acceptance.ts';
+import {AppError} from '../server/errors.ts';
+import {createNativeProbeService} from '../server/capability-probe.ts';
+import {discoverCapabilities} from '../server/capability-adapters.ts';
 
 function setup(){
  const f=fixture(); f.registry.providers[1].version='2.1.312'; let calls=0;
@@ -154,4 +157,31 @@ test('restart finds a completed receipt after dispatch journal loss and preserve
   const seq=f.store.lastSeq();new CapabilityExecutionService(f.store,f.controller,()=>f.registry,f.adapters);
   assert.equal(f.store.lastSeq(),seq);assert.equal(f.calls,1);
  }finally{f.store.close();}
+});
+test('PROBE-DISPATCH: start after the 60 s probe TTL refreshes the local version probe once and keeps the approval valid',async()=>{
+ const f=setup();try{let clock=0,probes=0;
+  const probe=createNativeProbeService(async()=>{probes++;return {checkedAt:new Date(clock).toISOString(),codex:{status:'found',version:'0.165.0'},claude:{status:'found',version:'2.1.312'}};},()=>clock);
+  await probe.refresh();const registry=()=>discoverCapabilities({codexReady:true,probe:probe.get()});
+  const service=new CapabilityExecutionService(f.store,f.controller,registry,f.adapters,()=>probe.refresh());
+  const p=service.plan('p',{requestId:randomUUID(),routeId:f.routing.recommend('p',{requestId:randomUUID(),taskId:f.task.id,text:'문서 작성'},registry()).id});
+  clock=61000;assert.equal(probe.get(),null);
+  const started=await service.start('p',p.id,{confirmed:true,expectedPlanDigest:p.planDigest});
+  assert.equal(probes,2);assert.equal(started.status,'running');assert.equal(f.calls,1);
+ }finally{f.store.close();}
+});
+test('PROBE-DISPATCH: a typed refusal before any Run is a retryable clean failure; a recorded Run stays recovery_required',async()=>{
+ const f=setup();try{const original=f.controller.submitTask;
+  f.controller.submitTask=async()=>{throw new AppError('RUNTIME_VERSION_UNKNOWN',409);};
+  const p=f.plan(),refused=await f.service.start('p',p.id,{confirmed:true,expectedPlanDigest:p.planDigest});
+  assert.equal(refused.status,'failed');assert.equal(refused.issue,'EXECUTION_PREFLIGHT_CHANGED');assert.equal(refused.recoveryRequired,false);assert.equal(refused.runId,null);
+  f.controller.submitTask=original;const q=f.plan(),retried=await f.service.start('p',q.id,{confirmed:true,expectedPlanDigest:q.planDigest});
+  assert.equal(retried.status,'running');assert.equal(f.calls,1);
+ }finally{f.store.close();}
+ const g=setup();try{const original=g.controller.submitTask;
+  // A Run exists, so a launch cannot be ruled out even though the error is a typed refusal.
+  g.controller.submitTask=async(...args:Parameters<Controller['submitTask']>)=>{await original(...args);throw new AppError('RUNTIME_VERSION_UNKNOWN',409);};
+  const p=g.plan(),uncertain=await g.service.start('p',p.id,{confirmed:true,expectedPlanDigest:p.planDigest});
+  assert.equal(uncertain.recoveryRequired,true);assert.equal(uncertain.issue,'EXECUTION_DISPATCH_UNCONFIRMED');assert.ok(uncertain.runId);assert.equal(g.calls,1);
+  assert.throws(()=>g.plan(),/EXECUTION_RECOVERY_REQUIRED/);
+ }finally{g.store.close();}
 });

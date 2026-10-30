@@ -76,7 +76,7 @@ export function createHttpServer(controller:Controller,assets:string,options:{wo
     return {...enrichCapabilityValidation(registry,controller.store),runtimeAdapters:registry.providers.map(provider=>runtimeAdapters.snapshot(provider.runtimeId,provider.version))};
   };
   const capabilityInvocation=new CapabilityInvocationService(controller.store,runtimeAdapters);
-  const capabilityExecution=new CapabilityExecutionService(controller.store,controller,capabilityRegistry,runtimeAdapters);
+  const capabilityExecution=new CapabilityExecutionService(controller.store,controller,capabilityRegistry,runtimeAdapters,()=>nativeProbe.refresh());
   // Hosts that pass worker configuration (server/main.ts) bind and reconcile at startup; others bind on the first worker route,
   // so constructing the server stays inert for partial controllers.
   let workersBound=false;

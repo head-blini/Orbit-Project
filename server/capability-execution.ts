@@ -34,8 +34,10 @@ function terminalDispatch(store:Store,record:CapabilityExecutionRecord){
 export class CapabilityExecutionService {
  private store:Store;private controller:Controller;private registry:()=>OrchestrationRegistry;private adapters:CapabilityRuntimeAdapters;
  private routing:CapabilityRoutingService;private studio:Studio;private prefs:ProjectAiPreferencesService;
- constructor(store:Store,controller:Controller,registry:()=>OrchestrationRegistry,adapters=new CapabilityRuntimeAdapters(controller)){
-  this.store=store;this.controller=controller;this.registry=registry;this.adapters=adapters;
+ /** Native probe refresh (capability-probe.ts): local `--version` only, never a prompt, model turn, auth or quota. A fresh cache is a no-op. */
+ readonly refreshProbe:()=>Promise<unknown>;
+ constructor(store:Store,controller:Controller,registry:()=>OrchestrationRegistry,adapters=new CapabilityRuntimeAdapters(controller),refreshProbe:()=>Promise<unknown>=async()=>{}){
+  this.store=store;this.controller=controller;this.registry=registry;this.adapters=adapters;this.refreshProbe=refreshProbe;
   this.routing=new CapabilityRoutingService(store);this.studio=new Studio(store);this.prefs=new ProjectAiPreferencesService(store);
   store.db.exec('CREATE TABLE IF NOT EXISTS capability_executions(id TEXT PRIMARY KEY,project_id TEXT NOT NULL,request_id TEXT NOT NULL UNIQUE,input_digest TEXT NOT NULL,body TEXT NOT NULL)');
   for(const row of store.db.prepare('SELECT body FROM capability_executions').all()){
@@ -87,7 +89,8 @@ export class CapabilityExecutionService {
    if(input.expectedAcceptanceDigest===undefined)fail('PLAN_CHANGED');
    if(generalAcceptance(this.store,projectId,route.taskId).digest!==input.expectedAcceptanceDigest)fail('ACCEPTANCE_PREVIEW_STALE');
   }
-  return {route,adapter,bindingDigest:hash({brief,prefs,registry,adapter,workspaceId:input.workspaceId??null,acceptance:input.expectedAcceptanceDigest??null})};
+  // Probe time is not plan content: a re-probe with unchanged versions/capabilities keeps the approval valid.
+  return {route,adapter,bindingDigest:hash({brief,prefs,registry:{...registry,observedAt:null},adapter,workspaceId:input.workspaceId??null,acceptance:input.expectedAcceptanceDigest??null})};
  }
  plan(projectId:string,input:CapabilityPlanInput):CapabilityExecutionRecord {
   if(!input||typeof input!=='object'||Array.isArray(input))throw new AppError('INVALID_FIELDS',400);
@@ -128,6 +131,7 @@ export class CapabilityExecutionService {
   if(!input||typeof input!=='object'||Array.isArray(input))throw new AppError('INVALID_FIELDS',400);
   exact(input as unknown as Record<string,unknown>,['confirmed','expectedPlanDigest']);
   if(input.confirmed!==true)fail('EXECUTION_CONFIRMATION_REQUIRED');
+  await this.refreshProbe();
   const r=this.raw(projectId,id) as CapabilityExecutionRecord&{workerReservationId?:string};if(input.expectedPlanDigest!==r.planDigest)fail('PLAN_CHANGED');
   if(r.status!=='awaiting_approval')return this.record(projectId,id);
   assertWorkerOwnership(this.store,projectId,r.taskId,worker);
@@ -142,24 +146,30 @@ export class CapabilityExecutionService {
    // Store observers can change policy synchronously; recheck immediately before dispatch.
    if(this.binding(projectId,{requestId:r.requestId,routeId:r.routeId,...(r.workspaceId?{workspaceId:r.workspaceId}:{}),...(r.expectedAcceptanceDigest?{expectedAcceptanceDigest:r.expectedAcceptanceDigest}:{})},!!worker).bindingDigest!==r.bindingDigest)fail('PLAN_CHANGED');
   }catch{r.status='failed';r.issue='EXECUTION_PREFLIGHT_CHANGED';this.save(r);return this.record(projectId,id);}
+  let returned=false;
   try{
    if(worker){
     worker.beforeDispatch();
     if(worker.space.kind==='code'){
      await this.controller.prepareWorkerWorkspace(worker);
-     worker.beforeDispatch();
+     await this.refreshProbe();worker.beforeDispatch();
      r.workspaceId=worker.space.workspaceId;
      r.expectedAcceptanceDigest=this.controller.taskVerificationPreview(projectId,r.taskId,r.workspaceId!)?.digest??null;
      submit={requestId:r.dispatchRequestId,workspaceId:r.workspaceId!,...(r.expectedAcceptanceDigest?{expectedAcceptanceDigest:r.expectedAcceptanceDigest}:{})};
      this.save(r);
     }
    }
-   const run=await this.adapters.dispatch(r.runtimeId,projectId,r.taskId,submit,worker);
+   const run=await this.adapters.dispatch(r.runtimeId,projectId,r.taskId,submit,worker);returned=true;
    const receipt=this.store.findRequest(r.dispatchRequestId)?.run;
    if(!receipt||receipt.id!==run.id||receipt.taskId!==r.taskId||receipt.planningVersionId!==r.baseline.planningVersionId||receipt.planningContentHash!==r.baseline.planningContentHash
     ||(receipt.acceptanceDigest??null)!==r.expectedAcceptanceDigest)fail('EXECUTION_RECEIPT_MISMATCH');
    r.runId=receipt.id;r.status='running';this.save(r);
-  }catch{r.runId=this.store.findRequest(r.dispatchRequestId)?.run.id??null;r.status='recovery_required';r.issue='EXECUTION_DISPATCH_UNCONFIRMED';r.recoveryRequired=true;this.save(r);}
+  }catch(error){
+   // Adapters record the Run before any process starts (Controller.start, ClaudeTaskService.submit). A typed refusal raised
+   // before dispatch returned, with no request recorded, launched nothing: a clean, retryable failure. Anything else stays unconfirmed.
+   if(!returned&&error instanceof AppError&&error.status<500&&!this.store.findRequest(r.dispatchRequestId)){r.status='failed';r.issue='EXECUTION_PREFLIGHT_CHANGED';this.save(r);return this.record(projectId,id);}
+   r.runId=this.store.findRequest(r.dispatchRequestId)?.run.id??null;r.status='recovery_required';r.issue='EXECUTION_DISPATCH_UNCONFIRMED';r.recoveryRequired=true;this.save(r);
+  }
   return this.record(projectId,id);
  }
  async interrupt(projectId:string,id:string){

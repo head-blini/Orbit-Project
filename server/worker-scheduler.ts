@@ -129,6 +129,8 @@ export class WorkerScheduler {
  }
  async submit(raw:WorkerSubmission):Promise<WorkerReservation>{
   const input=structuredClone(raw),b=input.batch;
+  // An expired probe cache (60 s TTL) refreshes locally before any binding check; see CapabilityExecutionService.refreshProbe.
+  await this.execution.refreshProbe();
   const plan=this.execution.record(b.projectId,input.executionId);
   if(input.approval.confirmed!==true||input.approval.expectedPlanDigest!==plan.planDigest)fail('APPROVAL_REQUIRED');
   const prior=this.list().find(r=>r.requestId===plan.requestId);
