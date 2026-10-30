@@ -141,19 +141,19 @@ export class WorkerScheduler {
   const base=approvedWorkerBase(this.store,this.projects,b,plan,handoff);
   const r=this.workers.reserve({requestId:plan.requestId,ownerIncarnation:this.owner,batch:b,attempt:{id:plan.id,taskId:plan.taskId,runtimeId:plan.runtimeId,dispatchRequestId:plan.dispatchRequestId},claims:input.claims});
   let space:WorkerSpace|undefined;
-  const check=()=>{
+  const fenced=()=>{
    const latest=this.read(r.reservationId);
    if(latest.ownerIncarnation!==r.ownerIncarnation||latest.fencingGeneration!==r.fencingGeneration||!['reserved','dispatched','running'].includes(latest.state))fail('FENCE_STALE');
+  };
+  const check=()=>{
+   fenced();
    const currentHandoff=this.baseline(input,plan,space);
    if(JSON.stringify(currentHandoff)!==JSON.stringify(handoff))fail('DEPENDENCY_OUTPUT_CHANGED');
    this.execution.assertWorkerPlan(b.projectId,plan.id,input.approval,plan);
    if(JSON.stringify(approvedWorkerBase(this.store,this.projects,b,plan,currentHandoff))!==JSON.stringify(base))fail('BASELINE_CHANGED');
   };
-  try{
-  check();space=this.spaces.create(r,base,handoff);check();
-  const readySpace=space;
-  const context:WorkerDispatchContext={fence:r,space:readySpace,dispatchRequestId:plan.dispatchRequestId,beforeDispatch:()=>{
-   check();const stat=lstatSync(readySpace.path,{bigint:true});
+  const verifySpace=(readySpace:WorkerSpace)=>{
+   const stat=lstatSync(readySpace.path,{bigint:true});
    if(realpathSync(readySpace.path)!==readySpace.path||`${stat.dev}:${stat.ino}:${stat.birthtimeNs}`!==readySpace.identity)fail('SPACE_IDENTITY_CHANGED');
    if(readySpace.workspaceId){
     const resource=this.projects.repositoryResource(readySpace.workspaceId);
@@ -165,14 +165,20 @@ export class WorkerScheduler {
      if(JSON.stringify(path)!==JSON.stringify(claim.path))fail('SPACE_IDENTITY_CHANGED');
     }
    }
-  }};
+  };
+  // Nothing was dispatched (no request recorded): only a fence or space that no longer verifies is quarantined.
+  // A plan/runtime refusal (e.g. the 60 s native probe cache expiring mid-dispatch) frees an intact space.
+  const spaceIntact=()=>{try{fenced();if(!space)return false;verifySpace(space);return true;}catch{return false;}};
+  try{
+  check();space=this.spaces.create(r,base,handoff);check();
+  const readySpace=space;
+  const context:WorkerDispatchContext={fence:r,space:readySpace,dispatchRequestId:plan.dispatchRequestId,beforeDispatch:()=>{check();verifySpace(readySpace);}};
   context.beforeDispatch();
   await this.execution.start(b.projectId,plan.id,input.approval,context);
   if(this.store.findRequest(plan.dispatchRequestId))this.workers.transition(r,'dispatched');
   const current=this.read(r.reservationId);
   if(current.state==='reserved'){
-   let safe=true;try{context.beforeDispatch();}catch(error){safe=error instanceof AppError&&/^WORKER_(?:BASELINE_CHANGED|DEPENDENCIES_WAITING|DEPENDENCY_)/.test(error.message);}
-   if(safe)this.workers.release(current,{kind:'not_dispatched',dispatchRequestId:plan.dispatchRequestId,evidenceId:plan.id});
+   if(spaceIntact())this.workers.release(current,{kind:'not_dispatched',dispatchRequestId:plan.dispatchRequestId,evidenceId:plan.id});
    else this.workers.transition(current,'lost_unknown');
   }
   if(current.ownerIncarnation===this.owner&&current.state==='dispatched'){
@@ -186,7 +192,7 @@ export class WorkerScheduler {
   this.reconcile();return this.read(r.reservationId);
   }catch(error){
    const current=this.read(r.reservationId);
-   if(current.state==='reserved'&&!this.store.findRequest(plan.dispatchRequestId)&&error instanceof AppError&&/^WORKER_(?:BASELINE_CHANGED|DEPENDENCIES_WAITING|DEPENDENCY_)/.test(error.message))this.workers.release(current,{kind:'not_dispatched',dispatchRequestId:plan.dispatchRequestId,evidenceId:plan.id});
+   if(current.state==='reserved'&&!this.store.findRequest(plan.dispatchRequestId)&&(spaceIntact()||error instanceof AppError&&/^WORKER_(?:BASELINE_CHANGED|DEPENDENCIES_WAITING|DEPENDENCY_)/.test(error.message)))this.workers.release(current,{kind:'not_dispatched',dispatchRequestId:plan.dispatchRequestId,evidenceId:plan.id});
    throw error;
   }
  }

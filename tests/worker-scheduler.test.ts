@@ -225,6 +225,20 @@ test('late output path substitution is refused immediately before runtime dispat
   const result=await f.submit(0);assert.equal(result.state,'lost_unknown');assert.equal(f.runners.length,0);
  }finally{await f.close();}
 });
+// FLAKE-P8-RESTART: the 60 s native probe cache can expire between approval and spawn (P8 under load).
+// A runtime refusal before any request is recorded must not quarantine an intact space as lost_unknown.
+for(const stage of ['after space creation','preflight','dispatch'] as const)test(`runtime version expiring ${stage} refuses without quarantining an intact space`,async()=>{
+ const f=setup();let expired=false;try{
+  const provider=f.registry.providers.find(p=>p.runtimeId==='claude-code')!,version=provider.version;
+  Object.defineProperty(provider,'version',{enumerable:true,get:()=>expired||stage==='after space creation'&&!!f.store.db.prepare("SELECT 1 FROM worker_spaces WHERE json_extract(body,'$.state')='ready'").get()?null:version});
+  f.store.on('event',event=>{if(stage==='preflight'&&event.kind==='capability.execution'&&event.data.status==='dispatching')expired=true;});
+  const submitTask=f.controller.submitTask.bind(f.controller);f.controller.submitTask=async(...args)=>{if(stage==='dispatch')expired=true;return submitTask(...args);};
+  if(stage==='after space creation')await assert.rejects(f.submit(0),/RUNTIME_VERSION_UNKNOWN/);else await f.submit(0);
+  const r=f.scheduler.list()[0];
+  assert.equal(f.runners.length,0);assert.equal(f.store.findRequest(r.attempt.dispatchRequestId),null);
+  assert.equal(r.state,'released');assert.equal(r.evidence?.kind,'not_dispatched');
+ }finally{await f.close();}
+});
 
 for(const scenario of [{staleAt:0,fault:''},{staleAt:2,fault:''},{staleAt:4,fault:''},{staleAt:0,fault:'not-integrated'},{staleAt:0,fault:'hash-changed'},{staleAt:0,fault:'input-missing'},{staleAt:0,fault:'unreleased'},{staleAt:0,fault:'refused'}])test(`fresh completion reader: stale at ${scenario.staleAt}, output ${scenario.fault||'valid'}`,async()=>{
  const {staleAt,fault}=scenario;
