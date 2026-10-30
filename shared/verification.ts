@@ -13,6 +13,8 @@ export interface CheckRecord {
   acceptanceDigest?:string;
 }
 export interface VerificationApproval {
+  /** Server-captured CQG binding at approval time; legacy approvals have none. */
+  completionBinding?:CompletionBinding;
   id:string;requestId:string;runId:string;workspaceId:string;sourceDigest:string;checkSetDigest:string;createdAt:string;
 }
 export interface VerificationView {
