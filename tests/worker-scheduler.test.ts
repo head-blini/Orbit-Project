@@ -10,11 +10,12 @@ import {CapabilityRoutingService} from '../server/capability-routing.ts';
 import {discoverCapabilities} from '../server/capability-adapters.ts';
 import {TaskGraphService} from '../server/task-graph.ts';
 import {WorkerScheduler} from '../server/worker-scheduler.ts';
+import {createNativeProbeService} from '../server/capability-probe.ts';
 import {generalAttemptPath,resolveWorkerPath} from '../server/worker-spaces.ts';
 import type {ApprovedExecutionBatch,WorkerResourceClaim} from '../shared/parallel-workers.ts';
 import type {SavedTask} from '../shared/parallel.ts';
 
-function setup(barrier?:Promise<void>){
+function setup(barrier?:Promise<void>,probe?:ReturnType<typeof createNativeProbeService>){
  const runners:FakeClaudeRun[]=[],paths:string[]=[],guards:(()=>void)[]=[];
  const f=claudeFixture({runnerFactory:config=>{config.beforeDispatch();guards.push(config.beforeDispatch);paths.push(config.cwd);const runner=new FakeClaudeRun();const start=runner.start.bind(runner);runner.start=(...args)=>{const result=start(...args);return barrier?Promise.all([result,barrier]).then(([outcome])=>outcome):result;};runners.push(runner);return runner;}});
  const input=JSON.parse(planningInput.text);input.requirements=[1,2,3].map(i=>({id:'R'+i,description:'Report '+i,acceptance_criteria:['Cite evidence']}));
@@ -22,8 +23,9 @@ function setup(barrier?:Promise<void>){
  const tasks=f.studio.read(f.project.id,'tasks') as SavedTask[];
  const graph=new TaskGraphService(f.store);graph.save(f.project.id,{planningVersionId:version.id,contentHash:version.contentHash,expectedRevision:0,nodes:tasks.map(t=>({taskId:t.id})),edges:[{taskId:tasks[2].id,dependsOn:tasks[0].id}]});
  const registry=discoverCapabilities({codexReady:true,probe:{checkedAt:new Date().toISOString(),codex:{status:'found',version:'0.165.0'},claude:{status:'found',version:'2.1.312'}}});
- const execution=new CapabilityExecutionService(f.store,f.controller,()=>registry),routing=new CapabilityRoutingService(f.store);
- const plans=tasks.map(t=>execution.plan(f.project.id,{requestId:randomUUID(),routeId:routing.recommend(f.project.id,{requestId:randomUUID(),taskId:t.id,text:'문서 작성'},registry).id}));
+ const current=()=>probe?discoverCapabilities({codexReady:true,probe:probe.get()}):registry;
+ const execution=new CapabilityExecutionService(f.store,f.controller,current,undefined,probe&&(()=>probe.refresh())),routing=new CapabilityRoutingService(f.store);
+ const plans=tasks.map(t=>execution.plan(f.project.id,{requestId:randomUUID(),routeId:routing.recommend(f.project.id,{requestId:randomUUID(),taskId:t.id,text:'문서 작성'},current()).id}));
  const batch:ApprovedExecutionBatch={id:randomUUID(),projectId:f.project.id,planningVersionId:version.id,planningHash:version.contentHash,graphRevision:1,taskIds:tasks.map(t=>t.id),contractDigests:[],inputArtifactHashes:[],runtimeChoices:tasks.map(t=>({taskId:t.id,runtimeId:'claude-code'})),parallelLimit:2};
  const scheduler=new WorkerScheduler(f.store,f.projects,execution);
  const claims=(i:number):WorkerResourceClaim[]=>[{kind:'isolated_folder',host:'local',path:resolveWorkerPath(f.project.path,join(generalAttemptPath(f.project.path,plans[i].id),'output'),true)}];
@@ -228,15 +230,32 @@ test('late output path substitution is refused immediately before runtime dispat
 // FLAKE-P8-RESTART: the 60 s native probe cache can expire between approval and spawn (P8 under load).
 // A runtime refusal before any request is recorded must not quarantine an intact space as lost_unknown.
 for(const stage of ['after space creation','preflight','dispatch'] as const)test(`runtime version expiring ${stage} refuses without quarantining an intact space`,async()=>{
- const f=setup();let expired=false;try{
+ const f=setup();let expired=false,inject=true;try{
   const provider=f.registry.providers.find(p=>p.runtimeId==='claude-code')!,version=provider.version;
   Object.defineProperty(provider,'version',{enumerable:true,get:()=>expired||stage==='after space creation'&&!!f.store.db.prepare("SELECT 1 FROM worker_spaces WHERE json_extract(body,'$.state')='ready'").get()?null:version});
-  f.store.on('event',event=>{if(stage==='preflight'&&event.kind==='capability.execution'&&event.data.status==='dispatching')expired=true;});
-  const submitTask=f.controller.submitTask.bind(f.controller);f.controller.submitTask=async(...args)=>{if(stage==='dispatch')expired=true;return submitTask(...args);};
+  f.store.on('event',event=>{if(stage==='preflight'&&inject&&event.kind==='capability.execution'&&event.data.status==='dispatching')expired=true;});
+  const submitTask=f.controller.submitTask.bind(f.controller);f.controller.submitTask=async(...args)=>{if(stage==='dispatch'&&inject)expired=true;return submitTask(...args);};
   if(stage==='after space creation')await assert.rejects(f.submit(0),/RUNTIME_VERSION_UNKNOWN/);else await f.submit(0);
   const r=f.scheduler.list()[0];
   assert.equal(f.runners.length,0);assert.equal(f.store.findRequest(r.attempt.dispatchRequestId),null);
   assert.equal(r.state,'released');assert.equal(r.evidence?.kind,'not_dispatched');
+  if(stage==='after space creation')return;
+  // PROBE-DISPATCH: proven pre-launch (typed refusal, no request recorded) is a clean failure, not recovery_required; a new plan dispatches once.
+  const refused=f.execution.record(f.project.id,f.plans[0].id);
+  assert.equal(refused.status,'failed');assert.equal(refused.issue,'EXECUTION_PREFLIGHT_CHANGED');assert.equal(refused.recoveryRequired,false);assert.equal(refused.runId,null);
+  expired=false;inject=false;const retry=f.execution.plan(f.project.id,{requestId:randomUUID(),routeId:f.plans[0].routeId});
+  const again=await f.scheduler.submit({batch:f.batch,executionId:retry.id,approval:{confirmed:true,expectedPlanDigest:retry.planDigest},claims:[{kind:'isolated_folder',host:'local',path:resolveWorkerPath(f.project.path,join(generalAttemptPath(f.project.path,retry.id),'output'),true)}]});
+  assert.equal(f.runners.length,1);assert.ok(f.store.findRequest(again.attempt.dispatchRequestId));assert.equal(f.execution.record(f.project.id,retry.id).status,'running');
+ }finally{await f.close();}
+});
+test('PROBE-DISPATCH: worker submit after the 60 s probe TTL refreshes the local version probe and dispatches once',async()=>{
+ let clock=0,probes=0;
+ const probe=createNativeProbeService(async()=>{probes++;return {checkedAt:new Date(clock).toISOString(),codex:{status:'found',version:'0.165.0'},claude:{status:'found',version:'2.1.312'}};},()=>clock);
+ await probe.refresh();const f=setup(undefined,probe);try{
+  clock=61000;assert.equal(probe.get(),null);
+  const r=await f.submit(0);
+  assert.equal(probes,2);assert.equal(f.runners.length,1);assert.ok(f.store.findRequest(r.attempt.dispatchRequestId));
+  assert.equal(f.execution.record(f.project.id,f.plans[0].id).status,'running');
  }finally{await f.close();}
 });
 
@@ -355,7 +374,9 @@ for(const mutation of ['none','handoff bytes','extra file','user material','proj
    {path:'output/report.txt',sha256:createHash('sha256').update('bound output').digest('hex')},
   ],'handoff stays in the authoritative input manifest even when caller metadata changes');
   assert.equal(readFileSync(join(storedSpace.path,'inputs/output/report.txt'),'utf8'),mutation==='handoff bytes'?'tampered':'bound output');
-  if(mutation!=='none')assert.equal(f.execution.record(f.project.id,f.plans[2].id).status,'recovery_required');
+  // PROBE-DISPATCH: WORKER_INPUTS_CHANGED is raised by Controller.submitTask's input guard before any Run (asserted above),
+  // so the attempt is a clean pre-launch failure rather than an unconfirmed dispatch.
+  if(mutation!=='none'){const e=f.execution.record(f.project.id,f.plans[2].id);assert.equal(e.status,'failed');assert.equal(e.issue,'EXECUTION_PREFLIGHT_CHANGED');assert.equal(e.recoveryRequired,false);}
   await f.submit(2,scheduler);assert.equal(f.runners.length,mutation==='none'?1:0);
  }finally{await f.controller.stopWorkers();await f.close();}
 });
