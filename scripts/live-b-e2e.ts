@@ -23,8 +23,9 @@ if(mode!=='--approved-live'&&mode!=='--dry-run')throw Error('EXPLICIT_LIVE_APPRO
 const live=mode==='--approved-live';
 // --resume <dir>: reopen a saved LIVE-B data dir and continue from Codex execution on its approved plan (no planning/research).
 // --stop-after-approval (dry-run only): leave a saved state for rehearsing --resume without touching a live data dir.
-const resume=options[0]==='--resume'?options[1]:null,stopAfterApproval=options[0]==='--stop-after-approval';
-if(options.length&&!(resume&&options.length===2&&/^\/private\/tmp\/orbit-live-b-[A-Za-z0-9]+$/.test(resume)&&existsSync(join(resume,'orbit.sqlite')))&&!(stopAfterApproval&&!live&&options.length===1))throw Error('INVALID_OPTIONS');
+// --approve-result (with --resume): only the user's result approval on the saved run; every provider launch is refused.
+const resume=options[0]==='--resume'?options[1]:null,stopAfterApproval=options[0]==='--stop-after-approval',approveResult=!!resume&&options[2]==='--approve-result';
+if(options.length&&!(resume&&options.length===(approveResult?3:2)&&/^\/private\/tmp\/orbit-live-b-[A-Za-z0-9]+$/.test(resume)&&existsSync(join(resume,'orbit.sqlite')))&&!(stopAfterApproval&&!live&&options.length===1))throw Error('INVALID_OPTIONS');
 
 // Approved budget (approvals #1, #5). Claude execution is not used: the code project executes on Codex.
 const BUDGET={claude:{total:6,planning:1,research:1,fix:1,review:1},codex:{total:3,execution:1,fix:1,review:1}} as const;
@@ -48,7 +49,7 @@ const dir=resume??mkdtempSync('/private/tmp/orbit-live-b-'),root=join(dir,'demo-
 // The first live run charged codex.execution before launch although no process started. Correct the ledger to the observed
 // process count of that run (once, recorded), so the resume gets exactly the approved Codex budget.
 const ledgerCorrections:object[]=[];
-if(live&&resume&&!ledger.corrections?.some((c:any)=>c.run===resume)){
+if(live&&resume&&!approveResult&&!ledger.corrections?.some((c:any)=>c.run===resume)){
   const first=JSON.parse(readFileSync(join(resume,'evidence.json'),'utf8')),observed:Record<string,number>={};
   for(const launch of first.codexProcesses)observed[launch.purpose]=(observed[launch.purpose]??0)+1;
   for(const [purpose,charged] of Object.entries(first.calls.codex as Record<string,number>)){
@@ -59,11 +60,11 @@ if(live&&resume&&!ledger.corrections?.some((c:any)=>c.run===resume)){
   ledger.corrections=[...(ledger.corrections??[]),...ledgerCorrections];writeFileSync(LEDGER,JSON.stringify(ledger,null,2));
 }
 const evidence:any={kind:'live_b_e2e',mode:live?'live':'dry_run',startedAt:new Date().toISOString(),directory:dir,budget:BUDGET,
-  resumeOf:resume,ledgerCorrections,calls:{claude:{},codex:{}},cumulativeBefore:structuredClone({claude:ledger.claude,codex:ledger.codex,runs:ledger.runs.length}),
+  resumeOf:resume,approveResult,ledgerCorrections,ledgerSha256Before:existsSync(LEDGER)?createHash('sha256').update(readFileSync(LEDGER)).digest('hex'):null,calls:{claude:{},codex:{}},cumulativeBefore:structuredClone({claude:ledger.claude,codex:ledger.codex,runs:ledger.runs.length}),
   claudeProcesses:[],codexProcesses:[],blocks:[],steps:{},stage:'setup',costUsd:null,remainingQuota:null,success:false};
-const save=()=>{evidence.cumulativeAfter={claude:ledger.claude,codex:ledger.codex};writeFileSync(join(dir,resume?'evidence-resume.json':'evidence.json'),JSON.stringify(evidence,null,2)+'\n');};
+const save=()=>{evidence.cumulativeAfter={claude:ledger.claude,codex:ledger.codex};writeFileSync(join(dir,approveResult?'evidence-approval.json':resume?'evidence-resume.json':'evidence.json'),JSON.stringify(evidence,null,2)+'\n');};
 save();console.log(JSON.stringify({evidenceDirectory:dir,mode:evidence.mode}));
-if(live){ledger.runs.push(resume?dir+'#resume':dir);writeFileSync(LEDGER,JSON.stringify(ledger,null,2));}
+if(live&&!approveResult){ledger.runs.push(resume?dir+'#resume':dir);writeFileSync(LEDGER,JSON.stringify(ledger,null,2));}
 
 /** The only gate for a provider call: refuses before launch when the cumulative per-purpose or total budget would be exceeded. */
 function take(provider:Provider,purpose:string){
@@ -133,6 +134,7 @@ const claudeRunner=(purpose:'planning'|'research')=>(config:ConstructorParameter
 };
 let armed:'execution'|'fix'|'review'|null=null;
 const codex=(workspace:string,write:boolean):RpcPort=>{
+  if(approveResult){evidence.blocks.push({step:'codex_launch',code:'CODEX_FORBIDDEN_ON_APPROVAL'});save();throw Error('CODEX_FORBIDDEN_ON_APPROVAL');}
   if(!armed){evidence.blocks.push({step:'codex_launch',code:'CODEX_LAUNCH_NOT_ARMED'});save();throw Error('CODEX_LAUNCH_NOT_ARMED');}
   evidence.codexProcesses.push({purpose:armed,write,at:new Date().toISOString()});save();armed=null;
   return live?codexFactory(workspace,write)():new DryCodex() as unknown as RpcPort;
@@ -226,7 +228,36 @@ try{
   });
 
   // 4. User saves, (if needed) edits, and approves the plan; tasks are drafted from it.
-  const approved=resume?resumed:suggestion&&await step('plan_approval',async()=>{
+  // User result approval: same digests the development result view shows; no provider process may start.
+  if(approveResult){
+    const task=resumed!.task,runs=store.runs().filter(r=>r.taskId===task.id&&r.execution==='completed'&&r.runtime==='codex');
+    if(runs.length!==1){evidence.blocks.push({step:'approval_before',code:'RESUME_RUN_INVALID'});throw Error('RESUME_RUN_INVALID');}
+    const runId=runs[0].id,events=()=>store.lastSeq();
+    const snapshot=async(name:string)=>{
+      const before=events(),progress=await api(base+'/progress'),view=await api(ws+'/verification?runId='+runId),result=await api(ws+'/result?runId='+runId);
+      const item=progress.tasks.find((t:any)=>t.id===task.id);
+      note(name,{runId,eventSeq:before,readOnly:events()===before,progress:{stage:item.stage,verification:item.verification,projectBlockers:progress.blockers,
+        quality:Object.fromEntries(Object.entries(item.quality).filter(([k])=>k!=='evidence').map(([k,v]:[string,any])=>[k,{status:v.status,blockers:v.blockers,nextAction:v.nextAction}])),
+        completion:item.completion??null,totals:progress.totals},
+        verification:{canApprove:view.canApprove,approval:view.approval,approvalCurrent:view.approvalCurrent,sourceDigest:view.sourceDigest,checkSetDigest:view.checkSetDigest,checks:view.checks.map((c:any)=>({id:c.id,verdict:c.verdict}))},
+        developmentResult:{canApprove:result.verification?.canApprove??null,approvalCurrent:result.verification?.approvalCurrent??null}});
+      if(events()!==before)throw Error('GET_WROTE_EVENTS');
+      return view;
+    };
+    const view=await step('approval_before',()=>snapshot('approval_before'));
+    if(view)await step('user_result_approval',async()=>{
+      const body={requestId:randomUUID(),runId,expectedSourceDigest:view.sourceDigest,expectedCheckSetDigest:view.checkSetDigest};
+      note('user_result_approval',{request:{runId,expectedSourceDigest:body.expectedSourceDigest,expectedCheckSetDigest:body.expectedCheckSetDigest},canApproveBefore:view.canApprove});
+      if(!view.checkSetDigest)throw Error('VERIFICATION_REQUIRED_NO_CHECK_SET');
+      const response=await fetch(origin+ws+'/review-approval',{method:'POST',headers,body:JSON.stringify(body)}),record=await response.json() as any;
+      note('user_result_approval',{httpStatus:response.status,response:record});
+      if(!response.ok)throw Error(String(record.error??'APPROVAL_FAILED'));
+      const again=await fetch(origin+ws+'/review-approval',{method:'POST',headers,body:JSON.stringify(body)}),same=await again.json() as any;
+      note('user_result_approval',{idempotentReplay:{httpStatus:again.status,sameApprovalId:same.id===record.id}});
+    });
+    await step('approval_after',()=>snapshot('approval_after'));
+  }
+  const approved=approveResult?null:resume?resumed:suggestion&&await step('plan_approval',async()=>{
     let version:PlanningVersion=await api(base+'/planning-suggestions/'+suggestion.id+'/save',{workspaceId:workspace.id,expectedOutputDigest:suggestion.outputDigest});
     const draft=version.draft;
     if(draft.requirements.length>1||draft.openQuestions.length){
@@ -345,7 +376,8 @@ finally{
   evidence.runs=store.runs().map(r=>({id:r.id,execution:r.execution,runtime:r.runtime,taskId:r.taskId}));
   evidence.events=store.eventsAfter(0).map(({seq,at,kind,runId})=>({seq,at,kind,runId}));
   const stepStatus=Object.values(evidence.steps).map((s:any)=>s.status);
-  evidence.success=!evidence.error&&evidence.finalVerdict==='passed'&&stepStatus.length>0&&stepStatus.every(s=>s==='passed');
+  evidence.success=!evidence.error&&(approveResult||evidence.finalVerdict==='passed')&&stepStatus.length>0&&stepStatus.every(s=>s==='passed');
+  evidence.ledgerSha256After=existsSync(LEDGER)?createHash('sha256').update(readFileSync(LEDGER)).digest('hex'):null;
   save();
   try{server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));await controller.close();store.close();}
   catch(error){evidence.postprocessingError=code(error);process.exitCode=1;}
