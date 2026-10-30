@@ -18,15 +18,19 @@ import {serializePlanningDraft} from '../server/planning/parser.ts';
 import type {RpcPort} from '../server/rpc.ts';
 import type {PlanningVersion,SavedTask} from '../shared/parallel.ts';
 
-const mode=process.argv[2];
+const [mode,...options]=process.argv.slice(2);
 if(mode!=='--approved-live'&&mode!=='--dry-run')throw Error('EXPLICIT_LIVE_APPROVAL_REQUIRED');
 const live=mode==='--approved-live';
+// --resume <dir>: reopen a saved LIVE-B data dir and continue from Codex execution on its approved plan (no planning/research).
+// --stop-after-approval (dry-run only): leave a saved state for rehearsing --resume without touching a live data dir.
+const resume=options[0]==='--resume'?options[1]:null,stopAfterApproval=options[0]==='--stop-after-approval';
+if(options.length&&!(resume&&options.length===2&&/^\/private\/tmp\/orbit-live-b-[A-Za-z0-9]+$/.test(resume)&&existsSync(join(resume,'orbit.sqlite')))&&!(stopAfterApproval&&!live&&options.length===1))throw Error('INVALID_OPTIONS');
 
 // Approved budget (approvals #1, #5). Claude execution is not used: the code project executes on Codex.
 const BUDGET={claude:{total:6,planning:1,research:1,fix:1,review:1},codex:{total:3,execution:1,fix:1,review:1}} as const;
 type Provider=keyof typeof BUDGET;
 const LEDGER='/private/tmp/orbit-live-b-ledger.json';
-const ledger:{claude:Record<string,number>;codex:Record<string,number>;runs:string[]}=live&&existsSync(LEDGER)?JSON.parse(readFileSync(LEDGER,'utf8')):{claude:{},codex:{},runs:[]};
+const ledger:{claude:Record<string,number>;codex:Record<string,number>;runs:string[];corrections?:object[]}=live&&existsSync(LEDGER)?JSON.parse(readFileSync(LEDGER,'utf8')):{claude:{},codex:{},runs:[]};
 
 const DEMO_REQUEST='브라우저에서 바로 여는 작은 정적 날짜 표시 위젯을 만들어 주세요. index.html에서 날짜를 고르면 YYYY-MM-DD 형식으로 보여 주고, 형식화 로직은 src/date-format.mjs에서 formatDate(date) 함수(YYYY-MM-DD 문자열 반환)로 export하며 저장소의 기존 테스트 date-format.test.mjs를 통과해야 합니다. 날짜 처리에 알맞은 작은 공개 npm 라이브러리가 있으면 재사용을 검토해 주세요. 요구사항은 하나로 묶고 열린 질문 없이 기획해 주세요.';
 const TEST_FILE=`import test from 'node:test';
@@ -40,13 +44,26 @@ test('formatDate returns YYYY-MM-DD for local dates', () => {
 });
 `;
 
-const dir=mkdtempSync('/private/tmp/orbit-live-b-'),root=join(dir,'demo-repo'),db=join(dir,'orbit.sqlite');mkdirSync(root);
+const dir=resume??mkdtempSync('/private/tmp/orbit-live-b-'),root=join(dir,'demo-repo'),db=join(dir,'orbit.sqlite');if(!resume)mkdirSync(root);
+// The first live run charged codex.execution before launch although no process started. Correct the ledger to the observed
+// process count of that run (once, recorded), so the resume gets exactly the approved Codex budget.
+const ledgerCorrections:object[]=[];
+if(live&&resume&&!ledger.corrections?.some((c:any)=>c.run===resume)){
+  const first=JSON.parse(readFileSync(join(resume,'evidence.json'),'utf8')),observed:Record<string,number>={};
+  for(const launch of first.codexProcesses)observed[launch.purpose]=(observed[launch.purpose]??0)+1;
+  for(const [purpose,charged] of Object.entries(first.calls.codex as Record<string,number>)){
+    const actual=observed[purpose]??0;if(actual>=charged)continue;
+    ledger.codex[purpose]-=charged-actual;
+    ledgerCorrections.push({run:resume,provider:'codex',purpose,from:charged,to:actual,at:new Date().toISOString(),reason:'pre-charged before launch; first-run evidence codexProcesses shows no launched process (EXECUTION_BRIEF_TOO_LARGE before connect)'});
+  }
+  ledger.corrections=[...(ledger.corrections??[]),...ledgerCorrections];writeFileSync(LEDGER,JSON.stringify(ledger,null,2));
+}
 const evidence:any={kind:'live_b_e2e',mode:live?'live':'dry_run',startedAt:new Date().toISOString(),directory:dir,budget:BUDGET,
-  calls:{claude:{},codex:{}},cumulativeBefore:structuredClone({claude:ledger.claude,codex:ledger.codex,runs:ledger.runs.length}),
+  resumeOf:resume,ledgerCorrections,calls:{claude:{},codex:{}},cumulativeBefore:structuredClone({claude:ledger.claude,codex:ledger.codex,runs:ledger.runs.length}),
   claudeProcesses:[],codexProcesses:[],blocks:[],steps:{},stage:'setup',costUsd:null,remainingQuota:null,success:false};
-const save=()=>{evidence.cumulativeAfter={claude:ledger.claude,codex:ledger.codex};writeFileSync(join(dir,'evidence.json'),JSON.stringify(evidence,null,2)+'\n');};
+const save=()=>{evidence.cumulativeAfter={claude:ledger.claude,codex:ledger.codex};writeFileSync(join(dir,resume?'evidence-resume.json':'evidence.json'),JSON.stringify(evidence,null,2)+'\n');};
 save();console.log(JSON.stringify({evidenceDirectory:dir,mode:evidence.mode}));
-if(live){ledger.runs.push(dir);writeFileSync(LEDGER,JSON.stringify(ledger,null,2));}
+if(live){ledger.runs.push(resume?dir+'#resume':dir);writeFileSync(LEDGER,JSON.stringify(ledger,null,2));}
 
 /** The only gate for a provider call: refuses before launch when the cumulative per-purpose or total budget would be exceeded. */
 function take(provider:Provider,purpose:string){
@@ -122,21 +139,23 @@ const codex=(workspace:string,write:boolean):RpcPort=>{
 };
 
 const git=(cwd:string,...args:string[])=>execFileSync('git',args,{cwd,encoding:'utf8',stdio:'pipe'}).trim();
-git(root,'init','-q','-b','main');
-writeFileSync(join(root,'README.md'),'Disposable Orbit LIVE-B demo repository. Contains no user data.\n');writeFileSync(join(root,'date-format.test.mjs'),TEST_FILE);
-git(root,'add','.');git(root,'-c','user.name=Orbit Validation','-c','user.email=orbit@example.invalid','commit','-qm','LIVE-B demo baseline');
+if(!resume){
+  git(root,'init','-q','-b','main');
+  writeFileSync(join(root,'README.md'),'Disposable Orbit LIVE-B demo repository. Contains no user data.\n');writeFileSync(join(root,'date-format.test.mjs'),TEST_FILE);
+  git(root,'add','.');git(root,'-c','user.name=Orbit Validation','-c','user.email=orbit@example.invalid','commit','-qm','LIVE-B demo baseline');
+}
 
 process.env.ORBIT_REUSE_DISCOVERY='1';
 const store=new Store(db),projects=new Projects(store,join(dir,'managed'),[root]);
 const forbidden=(name:string)=>()=>{evidence.blocks.push({step:'claude_launch',code:name});save();throw Error(name);};
 const controller=new Controller(store,createWorkspace(dir),codex,projects,[],[],
   {findExecutable:()=>'/forbidden/claude',runnerFactory:forbidden('CLAUDE_TASK_FORBIDDEN')},
-  {runnerFactory:claudeRunner('planning')},
+  {runnerFactory:resume?forbidden('CLAUDE_PLANNING_FORBIDDEN_ON_RESUME'):claudeRunner('planning')},
   {findExecutable:()=>'/forbidden/claude',claudeFactory:forbidden('CLAUDE_CROSS_REVIEW_FORBIDDEN') as never});
 // Instrument the research boundary only; the enable flag itself comes from ORBIT_REUSE_DISCOVERY as in production.
 const planning=controller.planningSuggestions as unknown as {reuse:{enabled:boolean}};
 if(planning.reuse?.enabled!==true)throw Error('REUSE_DISCOVERY_NOT_ENABLED');
-planning.reuse={...planning.reuse,runnerFactory:claudeRunner('research')} as never;
+planning.reuse={...planning.reuse,runnerFactory:resume?forbidden('CLAUDE_RESEARCH_FORBIDDEN_ON_RESUME'):claudeRunner('research')} as never;
 const server=createHttpServer(controller,resolve('dist'));
 
 const files=(base:string)=>readdirSync(base,{recursive:true}).map(String).filter(p=>!p.split('/').includes('.git')&&p!=='.git'&&statSync(join(base,p)).isFile()).sort()
@@ -161,7 +180,20 @@ try{
   const api=async(path:string,data?:object)=>{const response=await fetch(origin+path,{headers,method:data?'POST':'GET',...(data?{body:JSON.stringify(data)}:{})});const body:any=await response.json();if(!response.ok)throw Error('HTTP_'+response.status+'_'+String(body.error??body.code??'FAILED'));return body;};
 
   // 1. Code project + isolated worktree, planning on Claude Code, execution on Codex.
-  const ctx=await step('project',async()=>{
+  let resumed:{version:PlanningVersion;task:SavedTask}|null=null;
+  const ctx=resume?await step('resume_load',async()=>{
+    // Same saved project, worktree, approved plan and task; nothing is re-planned or re-approved.
+    const project=store.projects().find(p=>p.kind==='code')!,workspace=projects.workspaces().find(w=>w.projectId===project?.id);
+    if(!project||!workspace||store.projects().length!==1)throw Error('RESUME_STATE_INVALID');
+    await api('/api/workspaces/select',{workspaceId:workspace.id});
+    const base='/api/projects/'+project.id,plans:PlanningVersion[]=await api(base+'/plans'),version=plans.find(v=>v.state==='approved');
+    const tasks:SavedTask[]=(await api(base+'/tasks')).filter((t:SavedTask)=>t.planningVersionId===version?.id);
+    if(!version||tasks.length!==1)throw Error('RESUME_PLAN_INVALID');
+    resumed={version,task:tasks[0]};
+    note('resume_load',{projectId:project.id,workspaceId:workspace.id,baseSha:workspace.baseSha,planningVersionId:version.id,revision:version.revision,contentHash:version.contentHash,
+      taskId:tasks[0].id,priorRuns:store.runs().length,preferences:await api(base+'/ai-preferences'),verificationSetup:(await api('/api/workspaces/'+workspace.id+'/verification-setup')).revision});
+    return {project,workspace,base,ws:'/api/workspaces/'+workspace.id};
+  }):await step('project',async()=>{
     const project=await api('/api/projects',{path:root}),workspace=await api('/api/workspaces',{projectId:project.id});
     await api('/api/workspaces/select',{workspaceId:workspace.id});
     const preferences=await api('/api/projects/'+project.id+'/ai-preferences',{expectedRevision:0,planning:'claude-code',execution:'codex'});
@@ -172,14 +204,14 @@ try{
   const {project,workspace,base,ws}=ctx;
 
   // 2. Orbit verification command from the repository's existing Node test (protected from edits).
-  await step('verification_setup',async()=>{
+  if(!resume)await step('verification_setup',async()=>{
     const view=await api(ws+'/verification-setup');if(!view.candidate)throw Error(view.issue??'NO_CANDIDATE');
     const receipt=await api(ws+'/verification-setup',{requestId:randomUUID(),profileId:'node-test-v1',expectedPreviewDigest:view.candidate.previewDigest,confirmed:true});
     note('verification_setup',{receipt,tests:view.candidate.tests,command:{executable:'node',args:view.candidate.command.args}});
   });
 
   // 3. Natural-language request -> Claude planning proposal, then opt-in public reuse research (Claude research mode).
-  const suggestion=await step('planning',async()=>{
+  const suggestion=resume?null:await step('planning',async()=>{
     if(remaining('claude','planning')<1)throw Error('BUDGET_EXCEEDED_claude_planning');
     const preview=await api(base+'/planning-suggestions/preview',{workspaceId:workspace.id,text:DEMO_REQUEST});
     note('planning',{runtime:preview.runtime,scope:preview.scope,previewDigest:preview.previewDigest,request:DEMO_REQUEST});
@@ -194,7 +226,7 @@ try{
   });
 
   // 4. User saves, (if needed) edits, and approves the plan; tasks are drafted from it.
-  const approved=suggestion&&await step('plan_approval',async()=>{
+  const approved=resume?resumed:suggestion&&await step('plan_approval',async()=>{
     let version:PlanningVersion=await api(base+'/planning-suggestions/'+suggestion.id+'/save',{workspaceId:workspace.id,expectedOutputDigest:suggestion.outputDigest});
     const draft=version.draft;
     if(draft.requirements.length>1||draft.openQuestions.length){
@@ -212,6 +244,7 @@ try{
     if(tasks.length!==1)throw Error('TASK_COUNT_'+tasks.length);
     return {version:approvedVersion,task:tasks[0]};
   });
+  if(stopAfterApproval)throw Error('STOPPED_AFTER_APPROVAL');
 
   // 5. Codex execution of the approved task in the disposable worktree.
   let runId:string|null=null;
@@ -263,7 +296,17 @@ try{
     });
   }
 
-  // 8. Codex review of the frozen diff (read-only, text-only).
+  // 8. Reuse vendor (jsDelivr pinned) only for an approved adopt decision with an exact semver; after preview, before review.
+  if(approved)await step('reuse_vendor',async()=>{
+    const {decisions}=await api(ws+'/reuse-vendor');
+    const adopt=decisions.find((d:any)=>/^재사용 채택: \S+ \d+\.\d+\.\d+(-[0-9A-Za-z.-]+)? /.test(d.decision));
+    note('reuse_vendor',{approvedDecisions:decisions});
+    if(!adopt){note('reuse_vendor',{skipped:'NO_ADOPT_DECISION_WITH_EXACT_SEMVER'});return;}
+    const result=await api(ws+'/reuse-vendor',{planningVersionId:adopt.planningVersionId,topic:adopt.topic});
+    note('reuse_vendor',{result,evidence:(await api(ws+'/reuse-vendor')).evidence,files:files(workspace.path).filter(f=>f.path.startsWith('vendor/'))});
+  });
+
+  // 9. Codex review of the frozen diff (read-only, text-only).
   if(runId)await step('codex_review',async()=>{
     if(remaining('codex','review')<1)throw Error('BUDGET_EXCEEDED_codex_review');
     const preview=await api(ws+'/reviews/preview?runId='+runId);
@@ -278,7 +321,7 @@ try{
     if(done.execution!=='completed')throw Error(done.issue??'REVIEW_NOT_COMPLETED');
   });
 
-  // 9. Claude cross-review of Codex output: must stop at QUALITY_PRODUCER_MODEL_UNKNOWN before any reviewer launch.
+  // 10. Claude cross-review of Codex output: must stop at QUALITY_PRODUCER_MODEL_UNKNOWN before any reviewer launch.
   if(runId)await step('claude_cross_review',async()=>{
     const input={sourceRunId:runId,reviewers:[{id:'claude-cross-review',providerId:'anthropic',modelId:'claude-opus-5-5'}],limits:{maxCalls:1,maxRepairs:0,timeoutMs:120000}};
     const preview=await api(base+'/quality-loops/preview',input);
@@ -286,28 +329,6 @@ try{
     note('claude_cross_review',{producer:preview.producer,status:record.result.status,issue:record.result.issue,calls:record.result.calls,steps:record.steps.length});
     if(record.result.issue!=='QUALITY_PRODUCER_MODEL_UNKNOWN'||record.steps.length)throw Error('UNEXPECTED_QUALITY_RESULT');
     evidence.blocks.push({step:'claude_cross_review',code:'QUALITY_PRODUCER_MODEL_UNKNOWN',expected:true});
-  });
-
-  // 10. Reuse vendor (jsDelivr pinned) only for an approved adopt decision with an exact semver. Runs after review: the
-  //      dry-run showed vendor/REUSE-EVIDENCE.json ('name@version' URLs) trips the outbound e-mail detector, which would
-  //      block the review before any call. The post-vendor probe below records that block without a provider call.
-  const vendored=approved&&await step('reuse_vendor',async()=>{
-    const {decisions}=await api(ws+'/reuse-vendor');
-    const adopt=decisions.find((d:any)=>/^재사용 채택: \S+ \d+\.\d+\.\d+(-[0-9A-Za-z.-]+)? /.test(d.decision));
-    note('reuse_vendor',{approvedDecisions:decisions});
-    if(!adopt){note('reuse_vendor',{skipped:'NO_ADOPT_DECISION_WITH_EXACT_SEMVER'});return false;}
-    const result=await api(ws+'/reuse-vendor',{planningVersionId:adopt.planningVersionId,topic:adopt.topic});
-    note('reuse_vendor',{result,evidence:(await api(ws+'/reuse-vendor')).evidence});return true;
-  });
-
-  // Post-vendor probe: previews only (no provider launch) to record whether review/quality inputs still pass the outbound guard.
-  if(vendored&&runId)await step('post_vendor_probe',async()=>{
-    const outcome=(p:Promise<unknown>)=>p.then(()=>'ALLOWED',error=>code(error));
-    const review=await outcome(api(ws+'/reviews/preview?runId='+runId));
-    const quality=await outcome(api(base+'/quality-loops/preview',{sourceRunId:runId,reviewers:[{id:'claude-cross-review',providerId:'anthropic',modelId:'claude-opus-5-5'}],limits:{maxCalls:1,maxRepairs:0,timeoutMs:120000}}));
-    const verification=await api(ws+'/verification?runId='+runId);
-    note('post_vendor_probe',{reviewPreview:review,qualityPreview:quality,verificationCanApproveAfterVendor:verification.canApprove,files:files(workspace.path).filter(f=>f.path.startsWith('vendor/'))});
-    for(const [name,value] of [['codex_review_after_vendor',review],['claude_cross_review_after_vendor',quality]])if(value!=='ALLOWED')evidence.blocks.push({step:name,code:value,cause:'vendor/REUSE-EVIDENCE.json jsDelivr URL name@version flagged as email'});
   });
 
   // 11. One place: project progress + development result (read-only GETs must not write).
