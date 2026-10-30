@@ -142,7 +142,7 @@ export class ClaudeTaskService {
         if(this.closing||new ProjectAiPreferencesService(this.store).read(projectId).execution!=='claude-code'||JSON.stringify(studio.execution(projectId,taskId))!==JSON.stringify(brief)||!acceptanceSame()||!harnessSame())throw new AppError('LAUNCH_CONTEXT_CHANGED',409);
       }});
     }catch{
-      return this.store.updateRun(run.id,{execution:'failed'},'run.failed',{reason:'RUNTIME_NOT_STARTED'});
+      return this.store.updateRun(run.id,{execution:'failed',response:'RUNTIME_NOT_STARTED'},'run.failed',{reason:'RUNTIME_NOT_STARTED'});
     }
     recordHandoffDelivery(this.store,run,'claude-code',handoff);
     const active:Active={runner,done:Promise.resolve()};this.active.set(run.id,active);
@@ -175,7 +175,8 @@ export class ClaudeTaskService {
       if(outcome.identity)this.store.append('run.identity',id,{...outcome.identity,runId:id});
       result=executionForClaudeOutcome(outcome);
     }catch{result={execution:'lost',reason:'EXIT_NOT_OBSERVED'};}
-    try{this.store.updateRun(id,{execution:result.execution},'run.'+result.execution,{reason:result.reason});}
+    // A failed or lost run keeps only its reason code (non-null exactly then); completed and interrupted keep the streamed text.
+    try{this.store.updateRun(id,{execution:result.execution,...(result.reason?{response:result.reason}:{})},'run.'+result.execution,{reason:result.reason});}
     catch{/* The durable nonterminal intent still blocks this task and becomes lost on restart. */}
   }
   /** A lost run blocks new owners until the user explicitly records that it stopped. History is never rewritten. */
@@ -230,7 +231,7 @@ export class ClaudeTaskService {
     if(terminal(run.execution)||run.execution==='interrupting')return;
     this.store.updateRun(id,{execution:'interrupting'},'run.interrupting',{});
     const active=this.active.get(id);
-    if(!active){this.store.updateRun(id,{execution:'lost'},'run.lost',{reason:'EXIT_NOT_OBSERVED'});return;}
+    if(!active){this.store.updateRun(id,{execution:'lost',response:'EXIT_NOT_OBSERVED'},'run.lost',{reason:'EXIT_NOT_OBSERVED'});return;}
     try{active.runner.interrupt();}
     catch{throw new AppError('INTERRUPT_UNCERTAIN',503);}
   }
