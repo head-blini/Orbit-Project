@@ -111,6 +111,20 @@ test('credential-like review text is refused before any run is created',async()=
   }finally{await f.close();}
 });
 
+test('review findings have their own size cap, independent of the plan brief bound',async()=>{
+  const f=await fixture();
+  try{
+    const record=await f.review(),set=(response:string)=>f.store.db.prepare('UPDATE native_reviews SET body=? WHERE id=?').run(JSON.stringify({...record,response}),record.id);
+    // 4,500 chars alone would have pushed brief+findings past 4,000; the verification repair path never counted its suffix either.
+    set('리뷰 지적: '+'x'.repeat(4500));
+    const fits=await f.get(f.repairPath(record.id));assert.equal(fits.status,200);const preview=await fits.json() as ReviewRepairPreview;
+    assert.equal(preview.issue,null);assert.ok(preview.promptChars>4000&&preview.promptChars<=preview.maxPromptChars);
+    set('x'.repeat(6001));
+    const over=await f.get(f.repairPath(record.id));assert.equal(over.status,422);assert.equal((await over.json() as {error:string}).error,'REVIEW_REPAIR_TOO_LARGE');
+    assert.equal(f.store.runs().length,1);
+  }finally{await f.close();}
+});
+
 test('changed source or a non-completed review is not eligible',async()=>{
   const f=await fixture();
   try{

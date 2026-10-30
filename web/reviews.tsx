@@ -149,7 +149,7 @@ function ReviewRepair({record,budget,repair,repairConsent,canRepair,onRepairPrev
   const exhausted=budget.used>=budget.max,shown=repair?.reviewId===record.id?repair:null;
   return <div className="review-repair"><p>수정 예산 {budget.used}/{budget.max}{exhausted&&' · 소진됨 (REVIEW_REPAIR_BUDGET_EXHAUSTED)'}</p>
     <button aria-label={'리뷰 지적 수정 실행 미리보기 '+record.id} disabled={!canRepair||exhausted||!record.runId} onClick={()=>onRepairPreview?.(record)}>리뷰 지적으로 수정 실행 미리보기</button>
-    {shown&&<div aria-label="리뷰 지적 수정 전송 미리보기"><p>{shown.scope}</p><p>지시문 {shown.promptChars}/{shown.maxPromptChars}자 · 파일 {shown.findings.files.join(', ')||'없음'}</p>{shown.issue&&<p role="alert">진단 <code>{shown.issue}</code></p>}
+    {shown&&<div aria-label="리뷰 지적 수정 전송 미리보기"><p>{shown.scope}</p><p>리뷰 지적 {shown.promptChars}/{shown.maxPromptChars}자 · 파일 {shown.findings.files.join(', ')||'없음'}</p>{shown.issue&&<p role="alert">진단 <code>{shown.issue}</code></p>}
       <label className="review-consent"><input type="checkbox" aria-label={'리뷰 지적 수정 전송 동의 '+record.id} checked={!!repairConsent} disabled={!!shown.issue} onChange={event=>onRepairConsent?.(event.target.checked)}/>리뷰 텍스트 전체가 수정 Run 지시문으로 Codex에 전송됨을 확인했고 수정 1회 사용에 동의합니다.</label>
       <button aria-label={'리뷰 지적 수정 실행 시작 '+record.id} disabled={!canRepair||!repairConsent||!!shown.issue} onClick={()=>onRepairStart?.()}>동의한 리뷰 지적 수정 실행</button></div>}
   </div>;
