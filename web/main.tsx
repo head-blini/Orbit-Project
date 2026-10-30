@@ -83,7 +83,7 @@ export function App(){
           // then replay from its cursor so later provider events cannot hide it.
           if(e.kind==='workspace.selected'){if(source){source.onmessage=null;source.onerror=null;source.close();}setOnline(false);void bootstrap();return;}
           setEvents(old=>[...old,e]);
-          if(e.kind==='run.lost'||e.kind==='provider.status'||e.kind.startsWith('workspace.')||e.kind.startsWith('verification.')||e.kind.startsWith('model.')||e.kind.startsWith('merge.')||e.kind.startsWith('workflow.')||e.kind.startsWith('review.')||e.kind.startsWith('planning_suggestion.')||e.kind.startsWith('extensions.')||e.kind==='project.registered')void refreshState().catch(()=>{});
+          if(e.kind==='run.lost'||e.kind==='run.failed'||e.kind==='provider.status'||e.kind.startsWith('workspace.')||e.kind.startsWith('verification.')||e.kind.startsWith('model.')||e.kind.startsWith('merge.')||e.kind.startsWith('workflow.')||e.kind.startsWith('review.')||e.kind.startsWith('planning_suggestion.')||e.kind.startsWith('extensions.')||e.kind==='project.registered')void refreshState().catch(()=>{});
           setState(old=>{
             if(!old||e.seq<=old.lastSeq)return old;const next={...old,lastSeq:e.seq};
             if(e.kind==='provider.status'){next.provider=e.data.status as Snapshot['provider'];next.issue=e.data.issue as string|null;}
