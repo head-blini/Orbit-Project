@@ -568,7 +568,8 @@ export class Controller {
     const projectId=this.store.workspaces().find(w=>w.id===input.workspaceId)?.projectId;
     const completion=projectId&&this.progress.read(projectId,{}).tasks.find(t=>t.latestRunId===input.runId)?.completion;
     const check=this.verification.start(input);
-    if(run&&completion&&this.completionPolicy?.(check.projectId)){
+    // Unconfigured hosts bind to the default policy the read model evaluates; configuring one later stales it.
+    if(run&&completion){
       // Capture before the async command starts; its final save retains this object.
       check.completionBinding=structuredClone(completion.binding);
       Object.assign(check,{completionProducer:{binding:structuredClone(completion.binding),model:qualityRunEvidence(this.store,run)}});
@@ -582,7 +583,12 @@ export class Controller {
     this.workflows.ensureAvailable(input.workspaceId);
     this.merges.ensureAvailable(input.workspaceId);
     if(input.workspaceId!==this.workspaceId)throw new AppError('WORKSPACE_MISMATCH',409);
-    return this.verification.approve(input);
+    // Bind the approval to the read model's current CQG binding (default policy included, so a later
+    // policy change stales it). An idempotent replay never rebinds an old approval.
+    if(this.store.db.prepare('SELECT id FROM verification_approvals WHERE request_id=?').get(input.requestId))return this.verification.approve(input);
+    const projectId=this.store.workspaces().find(w=>w.id===input.workspaceId)?.projectId;
+    const completion=projectId?this.progress.read(projectId,{}).tasks.find(t=>t.latestRunId===input.runId)?.completion:undefined;
+    return this.verification.approve(input,completion?.binding);
   }
   prepareMerge(input:Parameters<MergeService['prepare']>[0]){this.extensionIdle();
     assertGitProject(this.store,input.workspaceId);

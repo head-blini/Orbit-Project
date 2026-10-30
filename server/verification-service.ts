@@ -1,6 +1,7 @@
 import {capturedCompletionBinding,workerEvidenceRecords} from './quality-progress.ts';
 import { createHash,randomUUID } from 'node:crypto';
 import type { CheckRecord,VerificationApproval,VerificationView,VerificationCommandPreview } from '../shared/verification.ts';
+import type {CompletionBinding} from '../shared/task-completion.ts';
 import { terminal } from '../shared/types.ts';
 import { Store } from './store.ts';
 import type { Projects } from './projects.ts';
@@ -122,14 +123,16 @@ export class VerificationService {
     if(check.execution!=='lost')throw new AppError('CHECK_NOT_LOST',409);
     if(!check.recoveredAt)this.save({...check,recoveredAt:new Date().toISOString()},'verification.recovery_confirmed');
   }
-  approve(input:ApprovalInput):VerificationApproval{
+  /** `completionBinding` is computed by the server read model, never taken from the request body. */
+  approve(input:ApprovalInput,completionBinding?:CompletionBinding):VerificationApproval{
     exact(input,['requestId','runId','workspaceId','expectedSourceDigest','expectedCheckSetDigest']);
     if(![input.requestId,input.runId,input.workspaceId].every(id)||!digest(input.expectedSourceDigest)||!digest(input.expectedCheckSetDigest))throw new AppError('INVALID_FIELDS',400);
     const prior=this.approvals().find(item=>item.requestId===input.requestId);
     if(prior){if(prior.runId!==input.runId||prior.workspaceId!==input.workspaceId||prior.sourceDigest!==input.expectedSourceDigest||prior.checkSetDigest!==input.expectedCheckSetDigest)throw new AppError('IDEMPOTENCY_CONFLICT',409);return prior;}
     const view=this.view(input.workspaceId,input.runId);
     if(!view.canApprove||view.sourceDigest!==input.expectedSourceDigest||view.checkSetDigest!==input.expectedCheckSetDigest)throw new AppError('VERIFICATION_REQUIRED',409);
-    const approval:VerificationApproval={id:randomUUID(),requestId:input.requestId,runId:input.runId,workspaceId:input.workspaceId,sourceDigest:input.expectedSourceDigest,checkSetDigest:input.expectedCheckSetDigest,createdAt:new Date().toISOString()};
+    const bound=completionBinding?.runId===input.runId&&completionBinding.artifactId===input.workspaceId&&completionBinding.artifactDigest===input.expectedSourceDigest;
+    const approval:VerificationApproval={...(bound?{completionBinding:structuredClone(completionBinding)}:{}),id:randomUUID(),requestId:input.requestId,runId:input.runId,workspaceId:input.workspaceId,sourceDigest:input.expectedSourceDigest,checkSetDigest:input.expectedCheckSetDigest,createdAt:new Date().toISOString()};
     this.store.transaction(()=>{this.store.db.prepare('INSERT INTO verification_approvals VALUES(?,?,?)').run(approval.id,approval.requestId,JSON.stringify(approval));this.store.append('verification.approved',input.runId,{approvalId:approval.id,workspaceId:input.workspaceId});});return approval;
   }
   /** Host-owned candidate context; never accepts commands from the queue caller. */

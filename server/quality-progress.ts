@@ -211,7 +211,8 @@ export class QualityProgressCollector {
    const artifact=this.artifacts.find(c=>c.id===e.id);
    const check=this.checks.find(c=>c.id===e.id);
    const receipt=records<{loopId:string;artifactDigest:string;completionBinding?:CompletionBinding}>(this.store,'quality_native_receipts').find(r=>r.loopId===e.id&&r.artifactDigest===e.binding.artifactDigest);
-   bindings[e.id]=artifact?.completionBinding??check?.completionBinding??receipt?.completionBinding??capturedCompletionBinding(e.binding,{configDigest:check?.configDigest??e.checkerDigest??null,baseSha:check?.baseSha??null,artifactScope:check?'workspace':null});
+   const approval=view?.approval?.id===e.id?view.approval:undefined;
+   bindings[e.id]=artifact?.completionBinding??check?.completionBinding??approval?.completionBinding??receipt?.completionBinding??capturedCompletionBinding(e.binding,{configDigest:check?.configDigest??e.checkerDigest??null,baseSha:check?.baseSha??null,artifactScope:check?'workspace':null});
    if(artifact){
     gateResults.push({gate:'artifact_format',evidenceId:e.id,status:artifact.formatStatus??'unknown'});
     const numeric=artifact.numericSource;
