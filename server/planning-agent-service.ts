@@ -140,17 +140,22 @@ export class PlanningAgentService {
       if(!['completed','failed','interrupted','timed_out','lost'].includes(execution)){execution='failed';issue='PLANNING_FAILED';}
       if(result.processStopped!==true){execution='lost';issue='PLANNING_PROCESS_UNCERTAIN';}
       else if(execution==='completed')try{proposal=checkedProposal(result.proposal,runtime);}catch{execution='failed';issue='PLANNING_PROPOSAL_INVALID';}
-      if(proposal&&this.reuses(runtime))proposal=await this.discoverReuse(record,proposal,signal);
-      this.save({...this.record(record.id),execution,issue,proposal,outputDigest:proposal?hash(proposal):null,threadId:result.threadId,turnId:result.turnId,processStopped:result.processStopped===true,finishedAt:new Date().toISOString(),durationMs:Math.round(performance.now()-began)});
+      let researchStopped=true;
+      if(proposal&&this.reuses(runtime)){
+        const reused=await this.discoverReuse(record,proposal,signal);
+        // An unobserved research exit quarantines the suggestion exactly like an unobserved planner exit.
+        if(reused)proposal=reused;else{execution='lost';issue='PLANNING_PROCESS_UNCERTAIN';proposal=null;researchStopped=false;}
+      }
+      this.save({...this.record(record.id),execution,issue,proposal,outputDigest:proposal?hash(proposal):null,threadId:result.threadId,turnId:result.turnId,processStopped:result.processStopped===true&&researchStopped,finishedAt:new Date().toISOString(),durationMs:Math.round(performance.now()-began)});
     }catch{this.save({...this.record(record.id),execution:attempted?'lost':'failed',proposal:null,outputDigest:null,issue:attempted?'PLANNING_PROCESS_UNCERTAIN':'PLANNING_WORKSPACE_CHANGED',processStopped:!attempted,finishedAt:new Date().toISOString(),durationMs:Math.round(performance.now()-began)});}
   }
-  /** Never fails the suggestion: every outcome becomes a visible decision or, if unmergeable, leaves the proposal unchanged. */
-  private async discoverReuse(record:PlanningSuggestion,proposal:PlanningDraft,signal:AbortSignal):Promise<PlanningDraft>{
+  /** Every stopped outcome becomes a visible decision or, if unmergeable, leaves the proposal unchanged; null means the research exit was not observed. */
+  private async discoverReuse(record:PlanningSuggestion,proposal:PlanningDraft,signal:AbortSignal):Promise<PlanningDraft|null>{
     let result;try{result=await runReuseDiscovery({query:reuseQuery(proposal),timeoutMs:REUSE_TIMEOUT_MS,signal},this.reuse);}catch{return proposal;}
     let merged=proposal;try{merged=checkedProposal({...proposal,decisions:[...(proposal.decisions??[]),...reuseDecisions(result)].slice(0,100)},record.runtime??'claude-code');}catch{/* Unmergeable output keeps the validated proposal. */}
     // Status, count and public source URLs only; no query text or model reasons.
     this.store.append('planning_suggestion.reuse_discovery',null,{suggestionId:record.id,projectId:record.projectId,status:result.status,issue:result.issue,checkedAt:result.checkedAt,candidateCount:result.candidates.length,sources:result.candidates.map(c=>c.source),merged:merged!==proposal});
-    return merged;
+    return result.status==='lost'?null:merged;
   }
   interrupt(projectId:string,id:string,workspaceId?:string|null){this.owned(projectId,id,workspaceId);if(this.pending?.id===id)this.pending.controller.abort();return this.record(id);}
   recover(projectId:string,input:{workspaceId?:string|null;suggestionId:string;confirmedStopped:boolean}):PlanningSuggestion {

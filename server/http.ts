@@ -272,7 +272,7 @@ export function createHttpServer(controller:Controller,assets:string,options:{wo
           if(url.search)throw new AppError('INVALID_FIELDS',400);exact(data,['planningVersionId','topic']);
           if(typeof data.planningVersionId!=='string'||typeof data.topic!=='string')throw new AppError('INVALID_FIELDS',400);
           const id=reuseVendorRoute[1],guard=()=>{reuseWorkspace(id);controller.assertAppPreviewAvailable();};guard();const workspace=reuseWorkspace(id);
-          json(res,200,await vendorReuse({workspacePath:workspace.path,approved:approvedReuse(workspace.projectId),planningVersionId:data.planningVersionId,topic:data.topic,beforeWrite:guard}));return;
+          json(res,200,await vendorReuse({workspacePath:workspace.path,approved:approvedReuse(workspace.projectId),planningVersionId:data.planningVersionId,topic:data.topic,beforeWrite:()=>{guard();return approvedReuse(workspace.projectId);}}));return;
         }
         if(appPreviewRoute){
           if(url.search)throw new AppError('INVALID_FIELDS',400);exact(data,['entryPath','expectedSourceDigest']);controller.assertAppPreviewAvailable();

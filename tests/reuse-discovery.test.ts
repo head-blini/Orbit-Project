@@ -148,6 +148,18 @@ test('enabled: reuse candidates merge into decisions, audit keeps only status, c
   }finally{await off.close();await on.close();}
 });
 
+test('enabled: an unobserved research exit quarantines the suggestion as lost until recovered',async()=>{
+  const on=service(true);
+  try{
+    const started=on.start();await tick();on.planners[0].finish(outcome('completed',{response:planningInput.text}));
+    await until(()=>on.researchers.length);
+    on.researchers[0].finish(outcome('completed',{response:response([candidate()]),exit:'not_observed'}));await on.svc.settle();
+    const record=on.svc.record(started.id);
+    assert.equal(record.execution,'lost');assert.equal(record.issue,'PLANNING_PROCESS_UNCERTAIN');assert.equal(record.processStopped,false);assert.equal(record.proposal,null);
+    assert.ok(on.svc.recover(on.project.id,{suggestionId:started.id,confirmedStopped:true}).recoveredAt);
+  }finally{await on.close();}
+});
+
 test('enabled: a discovery failure is a visible decision and the suggestion still completes',async()=>{
   const on=service(true);
   try{

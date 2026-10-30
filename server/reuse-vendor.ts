@@ -41,9 +41,10 @@ async function capped(response:Response,max:number):Promise<Buffer>{
 
 /**
  * Copies one approved adopt decision's npm entry file (+LICENSE) from jsDelivr into <workspace>/vendor.
- * The caller guards workspace identity/idle; beforeWrite re-runs those guards right before the synchronous writes.
+ * The caller guards workspace identity/idle; beforeWrite re-runs those guards right before the synchronous writes
+ * and may return the then-current approved decisions, so a plan replaced during the download cannot still write.
  */
-export async function vendorReuse(input:{workspacePath:string;approved:readonly ReuseVendorDecision[];planningVersionId:string;topic:string;fetch?:typeof fetch;now?:()=>Date;beforeWrite?:()=>void}):Promise<ReuseVendorResult>{
+export async function vendorReuse(input:{workspacePath:string;approved:readonly ReuseVendorDecision[];planningVersionId:string;topic:string;fetch?:typeof fetch;now?:()=>Date;beforeWrite?:()=>readonly ReuseVendorDecision[]|void}):Promise<ReuseVendorResult>{
   const decision=input.approved.find(d=>d.planningVersionId===input.planningVersionId&&d.topic===input.topic);
   if(!decision)return fail('REUSE_VENDOR_DECISION_NOT_APPROVED',404);
   const match=ADOPT.exec(decision.decision);
@@ -73,7 +74,8 @@ export async function vendorReuse(input:{workspacePath:string;approved:readonly 
   for(const file of ['LICENSE','LICENSE.md','LICENSE.txt']){const found=await download(file,TYPES.license,true,true);if(found){licenseFile={file,...found};break;}}
   const files=[{file:entry[1].split('/').at(-1)!,...main},...(licenseFile?[licenseFile]:[])];
 
-  input.beforeWrite?.();
+  const current=input.beforeWrite?.();
+  if(current&&!current.some(d=>d.planningVersionId===decision.planningVersionId&&d.topic===decision.topic&&d.decision===decision.decision))fail('REUSE_VENDOR_DECISION_NOT_APPROVED',409);
   const root=realpathSync(input.workspacePath),vendor=join(root,'vendor'),folder=dirName(name,version),dir=join(vendor,folder);
   const inside=(path:string)=>{const rel=relative(root,path);if(!rel||rel.startsWith('..')||isAbsolute(rel))fail('REUSE_VENDOR_PATH_REJECTED',409);return path;};
   for(const path of [vendor,dir]){const stat=lstat(inside(path));if(stat&&(stat.isSymbolicLink()||!stat.isDirectory()))fail('REUSE_VENDOR_PATH_REJECTED',409);}

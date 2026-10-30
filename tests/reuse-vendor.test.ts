@@ -127,6 +127,11 @@ test('symlinked or non-directory vendor paths are refused and outside files stay
     assert.throws(()=>readReuseEvidence(w.root),/REUSE_VENDOR_EVIDENCE_INVALID/);
     assert.equal(readFileSync(join(outside,'keep.txt'),'utf8'),'keep');
     const guarded=workspace();try{await rejects(run(guarded.root,fakeFetch(routes()).fetch,adopt(),{beforeWrite:()=>{throw new Error('WORKSPACE_MISMATCH');}}),'WORKSPACE_MISMATCH');assert.equal(existsSync(join(guarded.root,'vendor')),false);}finally{guarded.close();}
+    // A plan replaced while downloading: beforeWrite reports the then-current approvals and the stale decision writes nothing.
+    const superseded=workspace();try{
+      await rejects(run(superseded.root,fakeFetch(routes()).fetch,adopt(),{beforeWrite:()=>[]}),'REUSE_VENDOR_DECISION_NOT_APPROVED');assert.equal(existsSync(join(superseded.root,'vendor')),false);
+      assert.equal((await run(superseded.root,fakeFetch(routes()).fetch,adopt(),{beforeWrite:()=>[adopt()]})).status,'vendored');
+    }finally{superseded.close();}
   }finally{w.close();}
 });
 
