@@ -50,7 +50,10 @@ export async function productFixture(kind:'general'|'code',nativeFixture=false,s
     args:['-e',kind==='code'?`const a=require('node:assert/strict'),f=require('node:fs');a.equal(f.readFileSync('result.txt','utf8'),'Evidence: 42\\n');`:`const a=require('node:assert/strict'),f=require('node:fs');const paths=f.readdirSync('output');a.ok(paths.length);for(const p of paths)a.equal(f.readFileSync('output/'+p,'utf8'),'Evidence: 42\\n');`],timeoutMs:5000,...(kind==='code'?{categories:[...CODE_GATES],protectedFiles:['README.md']}:{})}]));
   const planners:FakeClaudeRun[]=[],runners:FakeClaudeRun[]=[],codex:FakeCodex[]=[];
   const nativeEvidence=new Map<string,CompletionEvidence>();
-  const nativeProbe=createNativeProbeService(async()=>({checkedAt:new Date().toISOString(),codex:{status:'found',version:'0.165.0'},claude:{status:'found',version:'2.1.312'}}));
+  // Fixed clock: a P8 journey can outlast the 60 s probe TTL under load, which refuses dispatch with
+  // RUNTIME_VERSION_UNKNOWN (FLAKE-P8-RESTART). TTL expiry is covered by tests/capability-probe.test.ts
+  // and tests/worker-scheduler.test.ts; these journeys must not depend on wall-clock speed.
+  const nativeProbe=createNativeProbeService(async()=>({checkedAt:new Date().toISOString(),codex:{status:'found',version:'0.165.0'},claude:{status:'found',version:'2.1.312'}}),()=>0);
   const claudeAuthentication=createClaudeAuthenticationService(async()=>({checkedAt:new Date().toISOString(),authentication:'subscription',source:'claude.auth.status',issue:null}));
   await nativeProbe.refresh();
   const controller=new Controller(store,dir,()=>{const rpc=new FakeCodex();codex.push(rpc);return rpc;},projects,config,[],
